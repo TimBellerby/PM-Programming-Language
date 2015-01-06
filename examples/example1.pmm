@@ -1,0 +1,11 @@
+include egmodule
+proc f(x)=x+(1+0)
+a:=1
+while 5>a do
+  dump(a)
+  a=f(a)
+endwhile
+b:=0
+b=(1+2)+(2+2)+g(b)
+dump(b)
+

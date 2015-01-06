@@ -1,3 +1,7 @@
-This is a place holder at the moment. Code coming real soon...
 
 Project description at www.pm-lang.org
+
+This code is pre-release with many bugs and omissions remaining.
+
+Expect significant updates over next couple of months
+
