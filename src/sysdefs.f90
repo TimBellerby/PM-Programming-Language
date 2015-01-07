@@ -174,10 +174,8 @@ module pm_sysdefs
   integer(pm_i16),parameter:: op_ne_i_vect=op_start_i+20
   integer(pm_i16),parameter:: op_gt_i=op_start_i+21
   integer(pm_i16),parameter:: op_gt_i_vect=op_start_i+22
-  integer(pm_i16),parameter:: op_lt_i=op_start_i+23
-  integer(pm_i16),parameter:: op_lt_i_vect=op_start_i+24
   integer(pm_i16),parameter:: op_ge_i=op_start_i+25
-  integer(pm_i16),parameter:: op_le_i_vect=op_start_i+26
+  integer(pm_i16),parameter:: op_ge_i_vect=op_start_i+26
   integer(pm_i16),parameter:: op_get_elt_i=op_start_i+29
   integer(pm_i16),parameter:: op_get_elt_i_vect=op_start_i+30
   integer(pm_i16),parameter:: op_set_elt_i=op_start_i+31
@@ -189,24 +187,23 @@ module pm_sysdefs
   integer,parameter:: num_op=op_set_elt
 
   integer,parameter:: sym_pm_system = num_sym+1
-  integer,parameter:: sym_dom = num_sym+2
-  integer,parameter:: sym_arb = num_sym+3
-  integer,parameter:: sym_get_element = num_sym+4
+  integer,parameter:: sym_get_element = num_sym+3
   integer,parameter:: sym_set_element = num_sym+5
   integer,parameter:: sym_check_conform = num_sym+6
-  integer,parameter:: sym_sub_ref = num_sym+7
-  integer,parameter:: sym_sub_ref_lcl = num_sym +8
-  integer,parameter:: sym_open_sub_ref = num_sym+9
-  integer,parameter:: sym_open_sub_ref_lcl = num_sym+10
+  integer,parameter:: sym_sub_ref = num_sym+8
+  integer,parameter:: sym_indices=num_sym+9
+  integer,parameter:: sym_num_elements=num_sym+10
   integer,parameter:: num_syshook = 10
 
 
   character(len=20),dimension(0:num_op):: op_names
 
   character(len=14),dimension(num_syshook),parameter:: syshook = (/ &
-       'PM system     ','dom           ','arb           ','get_element   ',&
-       'set_element   ','check_conform ','sub_ref       ','_sub_ref      ',&
-       'open_sub_ref  ','_open_sub_ref ' /)
+       'PM system     ','get_element   ','_get_element  ',&
+       'set_element   ','_set_element  ','check_conform ',&
+       'sub_ref       ','_sub_ref      ','indices       ',&
+       'num_elements  '&
+       /)
 
 contains
 
@@ -251,9 +248,9 @@ contains
     call dcl_proc(parser,'-(int)->int',op_uminus_i,0_pm_i16,pm_null_obj,0)
     call dcl_proc(parser,'=(&int,int)',op_assign_int,0_pm_i16,pm_null_obj,0)
     call dcl_proc(parser,'=(==&)',op_assign,0_pm_i16,pm_null_obj,0)
-    call dcl_proc(parser,'get_element(a:int(/any/),long)->int',op_get_elt_i,&
+    call dcl_proc(parser,'_get_element(a:int(/any/),long)->int',op_get_elt_i,&
          0_pm_i16,pm_null_obj,0)
-    call dcl_proc(parser,'set_element(a:int(/any/),int,long)',op_set_elt_i,&
+    call dcl_proc(parser,'_set_element(a:int(/any/),int,long)',op_set_elt_i,&
          0_pm_i16,pm_null_obj,0)
 
     call dcl_proc(parser,'check_conform(any...)->long',op_set_elt_i,&
@@ -371,7 +368,6 @@ contains
     op_names(op_alloc_ext)='op_alloc_ext'
     op_names(op_nullify)='op_nullify'
     
-    op_names(op_start_i)='op_start_i'
     op_names(op_add_i)='op_add_i'
     op_names(op_add_i_vect)='op_add_i_vect'
     op_names(op_sub_i)='op_sub_i'
@@ -394,17 +390,81 @@ contains
     op_names(op_ne_i_vect)='op_ne_i_vect'
     op_names(op_gt_i)='op_gt_i'
     op_names(op_gt_i_vect)='op_gt_i_vect'
-    op_names(op_lt_i)='op_lt_i'
-    op_names(op_lt_i_vect)='op_lt_i_vect'
     op_names(op_ge_i)='op_ge_i'
-    op_names(op_le_i_vect)='op_le_i_vect'
+    op_names(op_ge_i_vect)='op_ge_i_vect'
     op_names(op_get_elt_i)='op_get_elt_i'
     op_names(op_get_elt_i_vect)='op_get_elt_i_vect'
     op_names(op_set_elt_i)='op_set_elt_i'
     op_names(op_set_elt_i_vect)='op_set_elt_i_vect'
     
+
+
+    
     op_names(op_check_conform)='op_check_conform'
     op_names(op_get_elt)='op_get_elt'
     op_names(op_set_elt)='op_set_elt'
   end subroutine set_op_names
+
+  subroutine proc_line_module(prc,offset,line,modl)
+    type(pm_ptr):: prc
+    integer:: offset
+    integer(pm_p),intent(out):: line,modl
+    integer:: j
+    integer(pm_i16):: k
+    type(pm_ptr):: p
+    p=prc%data%ptr(prc%offset+1)
+    j=p%offset+pm_fast_esize(p)
+    do
+       k=p%data%i16(j)
+       if(k==0) then
+          j=j-p%data%i16(j-1)*2-4
+       else
+          if(p%data%i16(j-1)>offset) return
+          if(k>0) then
+             modl=k
+          else 
+             line=-k
+          endif
+          j=j-2
+       endif
+       if(j<p%offset) exit
+    enddo
+  contains
+    include 'fesize.inc'
+  end subroutine  proc_line_module
+
+  function proc_slot_name(prc,offset,slot) result(name)
+    type(pm_ptr):: prc
+    integer:: offset,slot
+    integer(pm_p):: name
+    integer:: i,j,start,finish,n
+    type(pm_ptr):: p
+    integer(pm_i16):: k
+    name=0
+    p=prc%data%ptr(prc%offset+1)
+    j=p%offset+pm_fast_esize(p)
+    do
+       k=p%data%i16(j)
+       if(k/=0) then
+          j=j-2
+       else
+          n=p%data%i16(j-1)
+          start=p%data%i16(j-2)
+          finish=p%data%i16(j-3)
+          j=j-n*2-4
+          if(offset>=start.and.offset<=finish) then
+             do i=1,n
+                if(p%data%i16(j+i*2-1)==slot) then
+                   name=p%data%i16(j+i*2)
+                   exit
+                endif
+             enddo
+          endif
+       endif
+       if(j<p%offset) exit
+    enddo
+  contains
+      include 'fesize.inc'
+  end function proc_slot_name
+  
 end module pm_sysdefs

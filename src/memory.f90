@@ -560,7 +560,8 @@ contains
           endif
           j=loc+i
           i=i+1_pm_ln
-          vect%data%ptr(vect%offset+j)=pm_new_small(context,vkind,int(esize,pm_p))
+          ptr=pm_new_small(context,vkind,int(esize,pm_p))
+          vect%data%ptr(vect%offset+j)=ptr
           if(is_marked) call mark(ptr)
        enddo
     else

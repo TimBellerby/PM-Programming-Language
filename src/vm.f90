@@ -22,6 +22,9 @@
 ! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 ! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ! THE SOFTWARE.
+
+! Virtual Machine for PM interpreter
+
 module pm_vm
   use pm_kinds
   use pm_memory
@@ -50,7 +53,7 @@ contains
     integer:: i,n
     integer(pm_ln):: esize,j,jj,k
     logical:: convert_out,flip,ok
-    integer(pm_p):: stacksize
+    integer(pm_p):: stacksize,line,modl
     type(pm_reg),pointer:: reg
     character(len=200):: emess
     nargs=1
@@ -245,6 +248,11 @@ contains
        call pm_new_multi(context,pm_int,1_pm_ln,&
             int(opcode2/(pm_max_stack+1),pm_ln),&
             int(iand(opcode2,pm_max_stack),pm_ln),stack)
+    case(op_alloc_double)
+       stack%data%ptr(stack%offset)%offset=opcode3/128
+       call pm_new_multi(context,pm_double,1_pm_ln,&
+            int(opcode2/(pm_max_stack+1),pm_ln),&
+            int(iand(opcode2,pm_max_stack),pm_ln),stack)
     case(op_alloc_logical)
        stack%data%ptr(stack%offset)%offset=opcode3/128
        call pm_new_multi(context,pm_logical,1_pm_ln,&
@@ -276,9 +284,8 @@ contains
                   +arg(3)%offset)
           end forall
        endif
-    case(op_gt_i)
-       arg(1)%data%l(arg(1)%offset)=&
-            arg(2)%data%i(arg(2)%offset)>arg(3)%data%i(arg(3)%offset)
+    case(op_uminus_i)
+       arg(1)%data%i(arg(1)%offset)=-arg(2)%data%i(arg(2)%offset)
     case(op_add_i)
        arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)+ &
             arg(3)%data%i(arg(3)%offset)
@@ -311,13 +318,48 @@ contains
                   arg(4)%offset)
           end forall
        endif
+    case(op_sub_i)
+       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)- &
+            arg(3)%data%i(arg(3)%offset)
+    case(op_mult_i)
+       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)* &
+            arg(3)%data%i(arg(3)%offset)
+    case(op_div_i)
+       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)/ &
+            arg(3)%data%i(arg(3)%offset)
+    case(op_mod_i)
+       arg(1)%data%i(arg(1)%offset)=mod(arg(2)%data%i(arg(2)%offset), &
+            arg(3)%data%i(arg(3)%offset))
+    case(op_pow_i)
+       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)** &
+            arg(3)%data%i(arg(3)%offset)
+    case(op_divide_i)
+       if(arg(3)%data%i(arg(3)%offset)==0) then
+          call runtime_error(context,'Division by zero')
+          goto 999
+       endif
+       arg(1)%data%d(arg(1)%offset)=real(arg(2)%data%i(arg(2)%offset),pm_d)/ &
+            arg(3)%data%i(arg(3)%offset)
+    case(op_eq_i)
+       arg(1)%data%l(arg(1)%offset)=&
+            arg(2)%data%i(arg(2)%offset)==arg(3)%data%i(arg(3)%offset)
+    case(op_ne_i)
+       arg(1)%data%l(arg(1)%offset)=&
+            arg(2)%data%i(arg(2)%offset)/=arg(3)%data%i(arg(3)%offset)
+    case(op_gt_i)
+       arg(1)%data%l(arg(1)%offset)=&
+            arg(2)%data%i(arg(2)%offset)>arg(3)%data%i(arg(3)%offset)
+    case(op_ge_i)
+       arg(1)%data%l(arg(1)%offset)=&
+            arg(2)%data%i(arg(2)%offset)>=arg(3)%data%i(arg(3)%offset)
     case default
 !!$       if(pm_lib_proc(context,opcode,&
 !!$            int(func%data%ptr(func%offset+1)%offset,pm_i16),&
 !!$            func%data%ptr(func%offset+2),&
 !!$            func%data%ptr(func%offset+3),&
 !!$            arg,nargs)) goto 888
-       write(*,*) 'OPCODE=',opcode
+       write(*,*) 'Unknown opcode=',opcode
+       write(*,*) op_names(opcode)
        call pm_panic('unknown opcode')
     end select
 
@@ -348,15 +390,19 @@ contains
       
     goto 10
 
+999 continue
+
+    ! Error return
+    call proc_line_module(func,&
+         int(pc%offset-func%data%ptr(func%offset)%offset)+1,line,modl)
+    call pm_name_string(context,modl,emess)
+    write(*,*) trim(emess),'  line:',line
+
 888 continue
 
     call pm_delete_register(context,reg)
     
     return
-    
-999 continue
-
-    call pm_panic(emess)
     
   contains
 

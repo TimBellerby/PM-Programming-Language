@@ -22,6 +22,9 @@
 ! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 ! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ! THE SOFTWARE.
+
+! Parser
+! Builds a parse tree from input text
 module pm_parser
   use pm_kinds
   use pm_memory
@@ -235,7 +238,7 @@ module pm_parser
   integer,parameter:: sym_endfind = last_decl + 9
   integer,parameter:: sym_endif = last_decl + 10
   integer,parameter:: sym_endlet = last_decl + 11
-  integer,parameter:: sym_endloop = last_decl + 12
+  integer,parameter:: sym_endfor = last_decl + 12
   integer,parameter:: sym_endproc = last_decl + 13
   integer,parameter:: sym_endselect = last_decl + 14
   integer,parameter:: sym_endtype = last_decl + 15
@@ -329,7 +332,7 @@ module pm_parser
        'proc        ','param       ','type        ','case        ',&
        'check       ','const       ','debug       ','else        ',&
        'elseif      ','enddebug    ','enddo       ','endfind     ',&
-       'endif       ','endlet      ','endloop     ','endproc     ',&
+       'endif       ','endlet      ','endfor      ','endproc     ',&
        'endselect   ','endtype     ','endwhile    ',&
        'for         ','found       ','if          ','let         ',&
        'repeat      ','result      ','select      ','until       ',&
@@ -2000,8 +2003,15 @@ contains
     if(parser%sym==sym_seq) then
        call scan(parser)
        par=0
+       call push_null_val(parser)
     else
        par=1
+       if(parser%sym==sym_using) then
+          call scan(parser)
+          if(assn_list(parser,sym_using)) return
+       else
+          call push_null_val(parser)
+       endif
     endif
     if(parser%sym==sym_find) then
        call scan(parser)
@@ -2012,13 +2022,13 @@ contains
        else
           call push_null_val(parser)
        endif
-       call make_node(parser,sym_find+par,3)
-       if(expect(parser,sym_endfind)) return
+       call make_node(parser,sym_find+par,4)
+       if(expect(parser,sym_endfor)) return
     else
-       if(expect(parser,sym_loop)) return
+       if(expect(parser,sym_do)) return
        call statement_list(parser)
-       call make_node(parser,sym_loop+par,2)
-       if(expect(parser,sym_endloop)) return
+       call make_node(parser,sym_loop+par,3)
+       if(expect(parser,sym_endfor)) return
     endif
     iserr=.false.
   end function for_loop
