@@ -36,7 +36,7 @@ program pm
   type(parse_state),target:: parser
   type(code_state),target:: coder
   type(finaliser),target:: fs
-  type(pm_ptr):: root,sptr,svec,args(1)
+  type(pm_ptr):: root,prog,sptr,svec,args(1)
   integer:: name,err
   character*100 str
   logical:: out_debug_files,ok
@@ -59,6 +59,7 @@ program pm
   call init_parser(parser,context)
   call sysdefs(parser)
 
+  if(pm_debug_level>0) write(*,*) 'PARSING'
   name=name_entry(parser,trim(str))
   call new_modl(parser,name)
   root=parser%modls
@@ -84,31 +85,35 @@ program pm
      endif
   enddo
   if(parser%error_count>0) stop 'Parse errors'
+  if(pm_debug_level>0) write(*,*) 'LINKING'
   call link_includes(context,parser%modl_dict)
   if(out_debug_files) then
-     open(unit=8,file='test_linked.dmp')
+     open(unit=8,file='linker.out')
      call dump_module(context,8,root)
      close(8)
   endif
-
+  if(pm_debug_level>0) write(*,*) 'CODE GENERATION'
+  prog=root%data%ptr(root%offset+modl_stmts)
+  if(pm_fast_isnull(prog)) stop 'No program defined to run'
   call init_coder(context,coder)
-  call trav_prog(coder,root%data%ptr(root%offset+modl_stmts))
-  if(coder%num_errors>0) stop 'Code generation errors'
+  call trav_prog(coder,prog)
   if(out_debug_files) then
      open(unit=8,file='coder.out')
      call dump_sigs(coder,8)
      call dump_code_tree(coder,pm_null_obj,8,coder%vstack(1),1)
      close(8)
   endif
-
+  if(coder%num_errors>0) stop 'Code generation errors'
+  if(pm_debug_level>0) write(*,*) 'INFER'
   call prc_prog(coder)
-  if(coder%num_errors>0) stop 'Type inference errors'
   if(out_debug_files) then
      open(unit=8,file='infer.out')
      call dump_code_tree(coder,pm_null_obj,8,coder%vstack(1),1)
      call dump_res_sigs(coder,8)
      close(8)
   endif
+  if(coder%num_errors>0) stop 'Type inference errors'
+  if(pm_debug_level>0) write(*,*) 'FINAL'
   call init_fs(context,fs,coder%proc_cache)
   call finalise_prog(fs,coder%vstack(1))
   call finalise_procs(fs)

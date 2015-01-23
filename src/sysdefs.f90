@@ -49,33 +49,39 @@ module pm_sysdefs
 
   integer(pm_i16),parameter:: last_jmp_op=13
 
-  integer(pm_i16),parameter:: op_struct=13
-  integer(pm_i16),parameter:: op_struct_vect=14
-  integer(pm_i16),parameter:: op_array=15
-  integer(pm_i16),parameter:: op_array_vect=16
-  integer(pm_i16),parameter:: op_any=17
-  integer(pm_i16),parameter:: op_any_vect=18
-  integer(pm_i16),parameter:: op_struct_elem=19
-  integer(pm_i16),parameter:: op_struct_elem_vect=20
-  integer(pm_i16),parameter:: op_check=21
-  integer(pm_i16),parameter:: op_check_vect=22
+  integer(pm_i16),parameter:: op_struct=14
+  integer(pm_i16),parameter:: op_struct_vect=15
+  integer(pm_i16),parameter:: op_array=16
+  integer(pm_i16),parameter:: op_array_vect=17
+  integer(pm_i16),parameter:: op_any=18
+  integer(pm_i16),parameter:: op_any_vect=19
+  integer(pm_i16),parameter:: op_struct_elem=20
+  integer(pm_i16),parameter:: op_struct_elem_vect=21
+  integer(pm_i16),parameter:: op_poly_struct_elem=22
+  integer(pm_i16),parameter:: op_poly_struct_elem_vect=23
+  integer(pm_i16),parameter:: op_check=24
+  integer(pm_i16),parameter:: op_check_vect=25
 
-  integer(pm_i16),parameter:: op_import=22
-  integer(pm_i16),parameter:: op_export=24
-  integer(pm_i16),parameter:: op_return=25
-  integer(pm_i16),parameter:: op_par_loop_end=26
+  integer(pm_i16),parameter:: op_import=26
+  integer(pm_i16),parameter:: op_export=27
+  integer(pm_i16),parameter:: op_return=28
+  integer(pm_i16),parameter:: op_par_loop_end=29
 
-  integer(pm_i16),parameter:: op_dump= 27
-  integer(pm_i16),parameter:: first_assign_op=28
-  integer(pm_i16),parameter:: op_par_loop=28
-  integer(pm_i16),parameter:: op_par_loop_vect=29
+  integer(pm_i16),parameter:: op_dump= 30
+  integer(pm_i16),parameter:: first_assign_op=31
+  integer(pm_i16),parameter:: op_par_loop=32
+  integer(pm_i16),parameter:: op_par_loop_vect=33
 
-  integer(pm_i16),parameter:: op_setref=30
-  integer(pm_i16),parameter:: op_setref_vect=31
-  integer(pm_i16),parameter:: op_clone=32
-  integer(pm_i16),parameter:: op_clone_vect=33
+  integer(pm_i16),parameter:: op_setref=34
+  integer(pm_i16),parameter:: op_setref_vect=35
+  integer(pm_i16),parameter:: op_clone=36
+  integer(pm_i16),parameter:: op_clone_vect=37
+  integer(pm_i16),parameter:: op_vcall =38
 
-  integer(pm_i16),parameter:: op_assign=34
+  integer(pm_i16),parameter:: op_print=39
+  integer(pm_i16),parameter:: op_concat=40
+
+  integer(pm_i16),parameter:: op_assign=49
   integer(pm_i16),parameter:: op_ass=op_assign+1-pm_int
   integer(pm_i16),parameter:: op_assign_int=op_ass+pm_int
   integer(pm_i16),parameter:: op_assign_long=op_ass+pm_long
@@ -176,6 +182,8 @@ module pm_sysdefs
   integer(pm_i16),parameter:: op_gt_i_vect=op_start_i+22
   integer(pm_i16),parameter:: op_ge_i=op_start_i+25
   integer(pm_i16),parameter:: op_ge_i_vect=op_start_i+26
+  integer(pm_i16),parameter:: op_string_i=op_start_i+27
+  integer(pm_i16),parameter:: op_string_i_vect=op_start_i+28
   integer(pm_i16),parameter:: op_get_elt_i=op_start_i+29
   integer(pm_i16),parameter:: op_get_elt_i_vect=op_start_i+30
   integer(pm_i16),parameter:: op_set_elt_i=op_start_i+31
@@ -187,23 +195,30 @@ module pm_sysdefs
   integer,parameter:: num_op=op_set_elt
 
   integer,parameter:: sym_pm_system = num_sym+1
-  integer,parameter:: sym_get_element = num_sym+3
-  integer,parameter:: sym_set_element = num_sym+5
-  integer,parameter:: sym_check_conform = num_sym+6
-  integer,parameter:: sym_sub_ref = num_sym+8
-  integer,parameter:: sym_indices=num_sym+9
-  integer,parameter:: sym_num_elements=num_sym+10
-  integer,parameter:: num_syshook = 10
-
+  integer,parameter:: sym_get_element = num_sym+2
+  integer,parameter:: sym_set_element = num_sym+3
+  integer,parameter:: sym_num_elements= num_sym+4
+  integer,parameter:: sym_import_val = num_sym+5
+  integer,parameter:: sym_import = num_sym+6
+  integer,parameter:: sym_export = num_sym+7 
+  integer,parameter:: sym_partition = num_sym+8
+  integer,parameter:: sym_check_conform = num_sym+9
+  integer,parameter:: sym_sub_ref = num_sym+10
+  integer,parameter:: sym_sync = num_sym + 11
+  integer,parameter:: sym_proc_grid = num_sym + 12
+  integer,parameter:: sym_num_procs = num_sym + 13
+  integer,parameter:: sym_grid = num_sym + 14
+  integer,parameter:: sym_dom = num_sym + 15
+ 
+  integer,parameter:: num_syshook = 15
 
   character(len=20),dimension(0:num_op):: op_names
 
   character(len=14),dimension(num_syshook),parameter:: syshook = (/ &
-       'PM system     ','get_element   ','_get_element  ',&
-       'set_element   ','_set_element  ','check_conform ',&
-       'sub_ref       ','_sub_ref      ','indices       ',&
-       'num_elements  '&
-       /)
+       'PM system     ','get_elem      ','set_elem      ','num_elem      ',&
+       'PM__import_val','PM__import    ','PM__export    ','PM__partition ',&
+       'check_conform ','PM__sub_ref   ','PM__sync      ','proc_grid     ',&
+       'num_procs     ','grid          ','dom           ' /)
 
 contains
 
@@ -234,6 +249,13 @@ contains
     parser%sysmodl=parser%modl
     call syshooks(parser)
     call init_typ(parser%context)
+ 
+    call dcl_proc(parser,'print(string)',op_print,0_pm_i16,pm_null_obj,0)
+    call dcl_uproc(parser,'print(x) do print(string(x)) endproc')
+    call dcl_proc(parser,'//(string,string)->string',op_concat,0_pm_i16,pm_null_obj,0)
+    call dcl_uproc(parser,'//(x:string,y)=proc //(x,string(y))')
+    call dcl_uproc(parser,'//(x,y)=proc //(string(x),string(y))')
+    call dcl_uproc(parser,'string(x:string)=x')
     call dcl_proc(parser,'div(int,int)->int',op_div_i,0_pm_i16,pm_null_obj,0)
     call dcl_proc(parser,'mod(int,int)->int',op_mod_i,0_pm_i16,pm_null_obj,0)
     call dcl_proc(parser,'==(int,int)->bool',op_eq_i,0_pm_i16,pm_null_obj,0)
@@ -247,22 +269,91 @@ contains
     call dcl_proc(parser,'**(int,int)->int',op_pow_i,0_pm_i16,pm_null_obj,0)
     call dcl_proc(parser,'-(int)->int',op_uminus_i,0_pm_i16,pm_null_obj,0)
     call dcl_proc(parser,'=(&int,int)',op_assign_int,0_pm_i16,pm_null_obj,0)
+    call dcl_proc(parser,'string(int)->string',op_string_i,0_pm_i16,pm_null_obj,0)
     call dcl_proc(parser,'=(==&)',op_assign,0_pm_i16,pm_null_obj,0)
-    call dcl_proc(parser,'_get_element(a:int(/any/),long)->int',op_get_elt_i,&
+    call dcl_proc(parser,'get_elem(a:int(/_/),long)->int',op_get_elt_i,&
          0_pm_i16,pm_null_obj,0)
-    call dcl_proc(parser,'_set_element(a:int(/any/),int,long)',op_set_elt_i,&
+    call dcl_proc(parser,'set_elem(a:int(/_/),int,long)',op_set_elt_i,&
          0_pm_i16,pm_null_obj,0)
-
-    call dcl_proc(parser,'check_conform(any...)->long',op_set_elt_i,&
+    call dcl_proc(parser,'(//)(a:int(/long/),long)->int',op_get_elt_i,&
          0_pm_i16,pm_null_obj,0)
+    call dcl_proc(parser,'(//)=(&a:int(/long/),int,long)',op_set_elt_i,&
+         0_pm_i16,pm_null_obj,0)  
 
-    call dcl_proc(parser,'=(&any[any],any[any])',op_assign,0_pm_i16,pm_null_obj,0)
+    call dcl_uproc(parser,'check_conform(arg...) do endproc')
+    call dcl_proc(parser,'=(&_(/_/),_(/_/))',op_assign,0_pm_i16,pm_null_obj,0)
+    call dcl_proc(parser,'dump(_)',op_dump,0_pm_i16,pm_null_obj,0)
+    
+    call dcl_type(parser,'std_int is int,long')
+    call dcl_type(parser,'any_int is std_int,int8,int16,int32,int64,int128')
+    call dcl_type(parser,'std_real is real,double')
+    call dcl_type(parser,'any_real is std_real,real32,real64,real128')
+    call dcl_type(parser,'std_cpx is cpx,double_cpx')
+    call dcl_type(parser,'any_cpx is std_cpx, cpx64, cpx128, cpx256')
+    call dcl_type(parser,'int_num includes any_int')
+    call dcl_type(parser,'real_num includes int_num, any_real')
+    call dcl_type(parser,'cpx_num includes real_num,any_cpx')
+    call dcl_type(parser,'num includes cpx_num')
 
-    call dcl_proc(parser,'dump(any)',op_dump,0_pm_i16,pm_null_obj,0)
+    call dcl_type(parser,'range_base includes real_num')
+    call dcl_type(parser,'range{t:range_base} is rec _range{_lo:t,_hi:t}')
+    call dcl_uproc(parser,'..(x:range_base,y:range_base)= rec _range{_lo=x,_hi=y}')
+    call dcl_proc(parser,'low(x:range{})->=x._lo',op_struct_elem,1_pm_i16,pm_null_obj,0)
+    call dcl_proc(parser,'high(x:range{})->=x._hi',op_struct_elem,2_pm_i16,pm_null_obj,0)
+    call dcl_type(parser,'seq{t:range_base} is rec _seq{_lo:t,_hi:t,_st:t}')
+    call dcl_proc(parser,'low(x:seq{})->=x._lo',op_struct_elem,1_pm_i16,pm_null_obj,0)
+    call dcl_proc(parser,'high(x:seq{})->=x._hi',op_struct_elem,2_pm_i16,pm_null_obj,0)
+    call dcl_proc(parser,'step(x:seq{})->=x._st',op_struct_elem,3_pm_i16,pm_null_obj,0)
+    call dcl_type(parser,'grid_base includes std_int,range{std_int},seq{}')
+    call dcl_type(parser,'grid{t1:grid_base,t2:grid_base} is rec _grid{_d1:t1,_d2:t2}')
+    call dcl_type(parser,'grid{t1:grid_base,t2:grid_base,t3:grid_base} is'//&
+         ' rec _grid{_d1:t1,_d2:t2,_d3:t3}')
+    call dcl_type(parser,'grid{t1:grid_base,t2:grid_base,t3:grid_base,t4:grid_base} is'//&
+         ' rec _grid{_d1:t1,_d2:t2,_d3:t3,_d4:t4}')
+    call dcl_type(parser,'grid{t1:grid_base,t2:grid_base,t3:grid_base,t4:grid_base,t5:grid_base} is'//&
+         ' rec _grid{_d1:t1,_d2:t2,_d3:t3,_d4:t4,_d5:t5}')
+    call dcl_type(parser,'grid{t1:grid_base,t2:grid_base,t3:grid_base,t4:grid_base,'//&
+         't5:grid_base,t6:grid_base} is'//&
+         ' rec _grid{_d1:t1,_d2:t2,_d3:t3,_d4:t4,_d5:t5,_d6:t6}')
+    call dcl_type(parser,'grid{t1:grid_base,t2:grid_base,t3:grid_base,t4:grid_base,t5:grid_base,'//&
+         't6:grid_base,t7:grid_base} is'//&
+         ' rec _grid{_d1:t1,_d2:t2,_d3:t3,_d4:t4,_d5:t5,_d6:t6,_d7:t7}')
+    call dcl_type(parser,'grid2d is grid{,}')
+    call dcl_type(parser,'grid3d is grid{,,}')
+    call dcl_type(parser,'grid4d is grid{,,,}')
+    call dcl_type(parser,'grid5d is grid{,,,,}')
+    call dcl_type(parser,'grid6d is grid{,,,,,}')
+    call dcl_type(parser,'grid7d is grid{,,,,,,}')
+    call dcl_type(parser,'grid is grid2d,grid3d,grid4d,grid5d,grid6d,grid7d')
+    call dcl_uproc(parser,'num_elem(x:grid2d)=num_elem(x._d1)*num_elem(x._d2)')
+    call dcl_uproc(parser,'num_elem(x:grid3d)=num_elem(x._d1)*num_elem(x._d2)*num_elem(x._d3)')
+    call dcl_uproc(parser,'num_elem(x:grid4d)=num_elem(x._d1)*num_elem(x._d2)*num_elem(x._d3)'//&
+         '*num_elem(x._d4)')
+    call dcl_uproc(parser,'num_elem(x:grid5d)=num_elem(x._d1)*num_elem(x._d2)*num_elem(x._d3)'//&
+         '*num_elem(x._d4)*num_elem(x._d5)')
+    call dcl_uproc(parser,'num_elem(x:grid6d)=num_elem(x._d1)*num_elem(x._d2)*num_elem(x._d3)'//&
+         '*num_elem(x._d4)*num_elem(x._d5)*num_elem(x._d6)')
+    call dcl_uproc(parser,'num_elem(x:grid7d)=num_elem(x._d1)*num_elem(x._d2)*num_elem(x._d3)'//&
+         '*num_elem(x._d4)*num_elem(x._d5)*num_elem(x._d6)*num_elem(x._d7)')
+
+    call dcl_type(parser,'dom is grid_base,grid')
+    call dcl_uproc(parser,'dim(x:_,y:long)=_array(x,y,y)')
+    call dcl_proc(parser,'num_elem(_(/long/))->long',op_struct_elem,2_pm_i16,pm_null_obj,0)
+    call dcl_uproc(parser,'dim(x:_,y:_)=_array(x,num_elem(y),y)')
+    call dcl_proc(parser,'_array(x:_,y:long,z:_)->dim x,z',op_array,0_pm_i16,pm_null_obj,0)
+    call dcl_proc(parser,'dom(x:_(/_/))->#x',op_struct_elem,2_pm_i16,pm_null_obj,0)
+    call dcl_proc(parser,'elts(x:_(/_/))->*x',op_struct_elem,1_pm_i16,pm_null_obj,0)
+
+    call dcl_uproc(parser,'PM__import(x,y,z)=elts(x)')
+    call dcl_uproc(parser,'PM__export(w,x,y,z) do endproc')
+    call dcl_uproc(parser,'PM__sync(w,x,y,z) do endproc')
+    call dcl_uproc(parser,'PM__partition(w,arg...)=1,1,1,1')
+    call dcl_uproc(parser,'num_procs()=1l')
     
   end subroutine sysdefs
 
   subroutine set_op_names
+    op_names='??'
     op_names(op_call)='op_call'
     op_names(op_poly_call)='op_poly_call'
     op_names(op_poly_call_vect)='op_poly_call_vect'
@@ -292,6 +383,8 @@ contains
     op_names(op_par_loop_vect)='op_par_loop_vect'
     op_names(op_import)='op_import'
     op_names(op_export)='op_export'
+
+    op_names(op_vcall)='op_vcall'
     
     op_names(op_assign)='op_assign'
     op_names(op_assign_int)='op_assign_int'
@@ -396,9 +489,6 @@ contains
     op_names(op_get_elt_i_vect)='op_get_elt_i_vect'
     op_names(op_set_elt_i)='op_set_elt_i'
     op_names(op_set_elt_i_vect)='op_set_elt_i_vect'
-    
-
-
     
     op_names(op_check_conform)='op_check_conform'
     op_names(op_get_elt)='op_get_elt'

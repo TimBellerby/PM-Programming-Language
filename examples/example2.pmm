@@ -1,0 +1,6 @@
+! Type inference & dispatch
+type foo{t,u} is rec { x: t, y:u }
+proc f(q)=0
+proc f(q:foo{real,int})=1
+proc f(q:foo{int,int})=2
+print(f(rec{x=4.1,y=3}))

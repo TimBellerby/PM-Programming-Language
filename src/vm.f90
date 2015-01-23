@@ -55,7 +55,7 @@ contains
     logical:: convert_out,flip,ok
     integer(pm_p):: stacksize,line,modl
     type(pm_reg),pointer:: reg
-    character(len=200):: emess
+    character(len=200):: mess
     nargs=1
     reg=>pm_register(context,'vm args',&
          stack,array=arg,array_size=nargs)
@@ -79,19 +79,26 @@ contains
        oparg=pc%data%i16(pc%offset+i+2_pm_p)
        if(oparg>=0) then
           arg(i)=stack%data%ptr(stack%offset+oparg)
+          if(pm_debug_level>3) then
+             write(*,*) i,'STACK',oparg
+             write(*,*) i,'>',arg(i)%data%vkind
+             write(*,*) i,'>',stack%data%hash,stack%offset+oparg
+          endif
        else if(oparg>=-int(pm_max_stack,pm_i16)) then
           arg(i)%data=>stack%data
           arg(i)%offset=stack%offset-oparg
-          stack%data%ptr(stack%offset-oparg)=pm_null_obj
+          !stack%data%ptr(stack%offset-oparg)=pm_null_obj
+          if(pm_debug_level>3) write(*,*) i,'STACKREF',-oparg,arg(i)%data%hash,arg(i)%offset
        else
           arg(i)=func%data%ptr(func%offset-oparg-pm_max_stack)
+          if(pm_debug_level>3) write(*,*) i,'CONST',oparg
        endif
     enddo
     nargs=n
     pc%offset=pc%offset+n+3_pm_p
 
     20 continue
-    if(pm_debug_level>2) then
+    if(pm_debug_level>3) then
        write(*,*) 'RUNNING',opcode,&
             op_names(opcode),opcode2,opcode3
     endif
@@ -130,6 +137,19 @@ contains
        else
           goto 20
        endif
+    case(op_vcall)
+       v=arg(nargs)
+       do i=0,pm_fast_esize(v)
+          arg(nargs+i)=v%data%ptr(v%offset+i)
+       enddo
+       write(*,*) 'NARGS before',nargs,v%data%vkind,v%data%esize
+       nargs=nargs+pm_fast_esize(v)
+       write(*,*) 'NARGS after',nargs
+       opcode=pc%data%i16(pc%offset)
+       opcode2=pc%data%i16(pc%offset+1_pm_p)
+       opcode3=pc%data%i16(pc%offset+2_pm_p)
+       pc%offset=pc%offset+3_pm_p
+       goto 20
     case(op_return)
        pc=stack%data%ptr(stack%offset+1)
        func=stack%data%ptr(stack%offset+3)
@@ -197,16 +217,32 @@ contains
           ! .. _jmp_any
           if(k>0) pc%offset=pc%offset+opcode2
        endif
+    case(op_loop_start)
+       if(arg(2)%data%ln(arg(2)%offset)<=0) then
+          pc%offset=pc%offset+opcode2
+       else
+          arg(1)%data%ln(arg(1)%offset)=1
+       endif
+    case(op_loop_end)
+       arg(1)%data%ln(arg(1)%offset)=arg(1)%data%ln(arg(1)%offset)+1
+       if(arg(1)%data%ln(arg(1)%offset)<=arg(2)%data%ln(arg(2)%offset)) &
+            pc%offset=pc%offset+opcode2
+       if(pm_debug_level>3) &
+            write(*,*) '#', arg(1)%data%ln(arg(1)%offset),arg(2)%data%ln(arg(2)%offset)
     case(op_par_loop)
        stack%data%ptr(stack%offset)%offset=opcode3/128
        call par_loop(context,func,stack,pc,args,nargs,opcode2)
     case(op_par_loop_end)
        errno=0
        return
+    case(op_print)
+       write(*,*) arg(1)%data%s(arg(1)%offset:arg(1)%offset+pm_fast_esize(arg(1)))
     case(op_dump)
        write(*,*) '== dump =='
        call pm_dump_tree(context,6,arg(1),1)
        write(*,*) '=========='
+    case(op_concat)
+       arg(1)%data%ptr(arg(1)%offset)=pm_concat_string(context,arg(2),arg(3))
     case(op_setref)
        arg(1)%data%ptr(arg(1)%offset)=arg(2)
     case(op_setref_vect)
@@ -232,20 +268,39 @@ contains
           end forall
        endif
     case(op_struct,op_struct_vect)
-       
+       stack%data%ptr(stack%offset)%offset=opcode3/128
+       v=pm_fast_newusr(context,int(opcode2,pm_p),int(nargs,pm_p))
+       arg(1)%data%ptr(arg(1)%offset)=v
+       v%data%ptr(v%offset+1:v%offset+nargs-1)=arg(2:nargs)
     case(op_clone)
        stack%data%ptr(stack%offset)%offset=opcode3/128
-       arg(1)%data%ptr(arg(1)%offset)=pm_deep_copy(context,arg(2))
+       stack%data%ptr(stack%offset+opcode2)=pm_deep_copy(context,arg(1))
     case(op_array)
-       
+       v=pm_fast_newusr(context,int(opcode2,pm_p),3_pm_p)
+       arg(1)%data%ptr(arg(1)%offset)=v
+       v%data%ptr(v%offset+1_pm_p)=pm_null_obj
+       v%data%ptr(v%offset+2_pm_p)=arg(4)
+       call pm_assign_new(context,v,1_pm_ln,pm_fast_vkind(arg(2)),&
+            arg(3)%data%ln(arg(3)%offset),.false.)
+       call pm_fill_vect(context,v%data%ptr(v%offset+1_pm_p),arg(2))
     case(op_check)
 
     case(op_struct_elem,op_struct_elem_vect)
-       arg(1)%data%ptr(arg(1)%offset)=arg(2)%data%ptr(arg(2)%offset&
-            +opcode2)
+       arg(1)%data%ptr(arg(1)%offset)=&
+            arg(2)%data%ptr(arg(2)%offset+opcode2)
     case(op_alloc_int)
        stack%data%ptr(stack%offset)%offset=opcode3/128
        call pm_new_multi(context,pm_int,1_pm_ln,&
+            int(opcode2/(pm_max_stack+1),pm_ln),&
+            int(iand(opcode2,pm_max_stack),pm_ln),stack)
+    case(op_alloc_long)
+       stack%data%ptr(stack%offset)%offset=opcode3/128
+       call pm_new_multi(context,pm_long,1_pm_ln,&
+            int(opcode2/(pm_max_stack+1),pm_ln),&
+            int(iand(opcode2,pm_max_stack),pm_ln),stack)
+    case(op_alloc_single)
+       stack%data%ptr(stack%offset)%offset=opcode3/128
+       call pm_new_multi(context,pm_single,1_pm_ln,&
             int(opcode2/(pm_max_stack+1),pm_ln),&
             int(iand(opcode2,pm_max_stack),pm_ln),stack)
     case(op_alloc_double)
@@ -258,7 +313,10 @@ contains
        call pm_new_multi(context,pm_logical,1_pm_ln,&
             int(opcode2/(pm_max_stack+1),pm_ln),&
             int(iand(opcode2,pm_max_stack),pm_ln),stack)
- 
+    case(op_nullify)
+       i=opcode2/(pm_max_stack+1)
+       stack%data%ptr(stack%offset+i:stack%offset+i&
+            +iand(opcode2,pm_max_stack)-1)=pm_null_obj
     case(op_assign_int)
        v=stack%data%ptr(stack%offset+opcode2)
        v%data%i(v%offset)=arg(1)%data%i(arg(1)%offset)
@@ -352,6 +410,32 @@ contains
     case(op_ge_i)
        arg(1)%data%l(arg(1)%offset)=&
             arg(2)%data%i(arg(2)%offset)>=arg(3)%data%i(arg(3)%offset)
+    case(op_string_i)
+       write(mess,'(i10)') arg(2)%data%i(arg(2)%offset)
+       v=pm_fast_newnc(context,pm_string,int(len_trim(adjustl(mess)),pm_p))
+       v%data%s(v%offset:v%offset+pm_fast_esize(v))=adjustl(mess)
+       arg(1)%data%ptr(arg(1)%offset)=v
+    case(op_get_elt_i)
+       v=arg(2)%data%ptr(arg(2)%offset+1_pm_p)
+       j=arg(3)%data%ln(arg(3)%offset)-1
+       if(j<0.or.j>pm_fast_esize(v)) then
+          if(pm_debug_level>1) write(*,*) '##',j,pm_fast_esize(v)
+          call runtime_error(context,'Index out of bounds')
+          goto 999
+       endif
+       arg(1)%data%i(arg(1)%offset)=v%data%i(v%offset+j)
+    case(op_set_elt_i)
+       v=arg(1)%data%ptr(arg(1)%offset+1_pm_p)
+       j=arg(3)%data%ln(arg(3)%offset)-1
+       if(j<0.or.j>pm_fast_esize(v)) then
+          call runtime_error(context,'Index out of bounds')
+          goto 999
+       endif
+       v%data%i(v%offset+j)=arg(2)%data%i(arg(2)%offset)
+    case(op_assign_long)
+       v=stack%data%ptr(stack%offset+opcode2)
+       v%data%ln(v%offset)=arg(1)%data%ln(arg(1)%offset)
+
     case default
 !!$       if(pm_lib_proc(context,opcode,&
 !!$            int(func%data%ptr(func%offset+1)%offset,pm_i16),&
@@ -375,18 +459,54 @@ contains
     ! save current stack top
     newpc=newfunc%data%ptr(newfunc%offset)
     stacksize=newpc%data%i16(newpc%offset)
+    i=newpc%data%i16(newpc%offset+1)
     newstack=pm_fast_newnc(context,pm_stack,stacksize)
     newstack%data%ptr(newstack%offset)=&
-         pm_fast_tinyint(context,int(pm_stack_locals,pm_p))
+         pm_fast_tinyint(context,int(pm_stack_locals+nargs,pm_p))
     newstack%data%ptr(newstack%offset+1)=pc
     newstack%data%ptr(newstack%offset+2)=stack
     newstack%data%ptr(newstack%offset+3)=func
-    newstack%data%ptr(newstack%offset+4:newstack%offset+nargs+3)=&
-         arg(1:nargs)
+    if(i<nargs) then
+       newstack%data%ptr(newstack%offset+4:newstack%offset+i+2)=&
+         arg(1:i-1)
+       newstack%data%ptr(newstack%offset)%offset=i+2
+       context%temp_obj1=pm_fast_newnc(context,pm_pointer,int(nargs-i+1,pm_p))
+       context%temp_obj1%data%ptr(context%temp_obj1%offset:&
+            context%temp_obj1%offset+nargs-i)=arg(i:nargs)
+       newstack%data%ptr(newstack%offset+i+3)=context%temp_obj1
+       context%temp_obj1=pm_null_obj
+       nargs=i
+       newstack%data%ptr(newstack%offset)%offset=i+3
+    else
+       if(pm_debug_level>0) then
+          if(i/=nargs) then
+             write(*,*) 'Num Args=',nargs,'Num pars expected=',i
+             call pm_panic('Arg/param mismatch')
+          endif
+       endif
+       if(nargs>0) then
+          newstack%data%ptr(newstack%offset+4:newstack%offset+nargs+3)=&
+               arg(1:nargs)
+       endif
+    endif
+    if(pm_debug_level>0) then
+       if(stacksize>nargs+3) then
+          newstack%data%ptr(newstack%offset+nargs+4:newstack%offset+stacksize-1)=&
+               pm_fast_tinyint(context,-9999_pm_p)
+       endif
+    endif
     pc=newpc
-    pc%offset=pc%offset+1_pm_p
+    pc%offset=pc%offset+2_pm_p
     stack=newstack
     func=newfunc
+    if(pm_debug_level>3) then
+       write(*,*) '======CALL==NEW STACK======',nargs
+       do i=5,nargs+3
+          write(*,*) i,nargs+3
+          call pm_dump_tree(context,6,stack%data%ptr(stack%offset+i),1)
+       enddo
+       write(*,*) '============================'
+    endif
       
     goto 10
 
@@ -395,8 +515,8 @@ contains
     ! Error return
     call proc_line_module(func,&
          int(pc%offset-func%data%ptr(func%offset)%offset)+1,line,modl)
-    call pm_name_string(context,modl,emess)
-    write(*,*) trim(emess),'  line:',line
+    call pm_name_string(context,modl,mess)
+    write(*,*) trim(mess),'  line:',line
 
 888 continue
 
@@ -410,6 +530,7 @@ contains
     include 'fvkind.inc'
     include 'fnew.inc'
     include 'fnewnc.inc'
+    include 'fnewusr.inc'
     include 'fesize.inc'
     include 'ftiny.inc'
 
@@ -655,7 +776,7 @@ contains
     integer(pm_i16),intent(out):: op,op2
     integer(pm_i16):: tno
     integer:: i
-    tno=pm_arglist_type(context,args,nargs)
+    tno=pm_arglist_type(context,pm_typ_is_tuple,args,nargs)
     do i=0,pm_fast_esize(polyfunc),3
        if(pm_arglist_type_includes(context,&
             polyfunc%data%i16(polyfunc%offset+i),tno)) then
@@ -664,6 +785,7 @@ contains
           return
        endif
     enddo
+    !!! op=op_lookup_error
   contains
     include 'fesize.inc'
   end subroutine poly_call_lookup
@@ -1005,19 +1127,23 @@ contains
     include 'fesize.inc'
   end function  ptr_vec_get_type
 
-  function pm_arglist_type(context,args,nargs) result(tno)
+  function pm_arglist_type(context,tkind,args,nargs) result(tno)
     type(pm_context),pointer:: context
+    integer(pm_i16),intent(in):: tkind
     type(pm_ptr),dimension(nargs),intent(in):: args
     integer,intent(in):: nargs
     integer(pm_i16):: tno
     integer(pm_i16),dimension(pm_max_args+2):: t
     integer:: i
-    t(1)=pm_typ_is_tuple
+    t(1)=tkind
     t(2)=0
     do i=1,nargs
        t(i+2)=pm_fast_typeof(args(i))
     enddo
-    !!!
+    tno=pm_ivect_lookup(context,context%tcache, &
+         t,nargs)
+    if(tno==0) tno=pm_idict_add(context,context%tcache,&
+         t,nargs,pm_null_obj)
   contains
     include 'ftypeof.inc'
   end function pm_arglist_type

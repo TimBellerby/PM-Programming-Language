@@ -28,6 +28,12 @@ module pm_memory
 
   private
 
+  integer,parameter,public:: pm_debug_level=0
+  ! 0= basic checks - slows things down
+  ! 1= print short additional info
+  ! 2= print substantial additional info
+  ! 3= print & check everything
+
   ! Public routines
   public :: operator(.eq.)
   interface operator(.eq.)
@@ -37,7 +43,7 @@ module pm_memory
   public pm_ptr_eq, pm_new, pm_new_multi,pm_new_small, pm_new_large
   public pm_assign_new, pm_expand, pm_ptr_assign
   public pm_new_as_root,pm_get_ptr_as_root, pm_copy, pm_assign_copy
-  public pm_new_string, pm_concat_string, pm_strval
+  public pm_new_string, pm_concat_string, pm_strval, pm_fill_vect
   public pm_add_root, pm_delete_root
   public pm_numroot, pm_delete_numroot
   public pm_register, pm_delete_register 
@@ -213,11 +219,7 @@ module pm_memory
      integer(pm_ln):: hash
   end type pm_context
 
-  integer,parameter,public:: pm_debug_level=0
-  ! 0= basic checks
-  ! 1= print short additional info
-  ! 2= print substantial additional info
-  ! 3= check everything
+
 
   type(pm_ptr),public:: pm_null_obj,pm_tinyint_obj,pm_name_obj
 
@@ -553,7 +555,7 @@ contains
                    if(is_marked) call mark(ptr)
                    ptr%offset=ptr%offset+1_pm_p
                 enddo
-                i=i+m
+                i=i+m+1
                 ptr_p=ptr
                 cycle
              endif
@@ -562,6 +564,7 @@ contains
           i=i+1_pm_ln
           ptr=pm_new_small(context,vkind,int(esize,pm_p))
           vect%data%ptr(vect%offset+j)=ptr
+          write(*,*) 'ALSO ALLOC',ptr%offset
           if(is_marked) call mark(ptr)
        enddo
     else
@@ -597,6 +600,8 @@ contains
     logical:: ok
     integer:: i
     
+    !write(*,*) 'ALLOCATE>',vkind,esize
+
     if(pm_debug_level>0) then
        if(vkind<pm_null.or.vkind>pm_usr) &
             call pm_panic('New small - bad vkind')
@@ -691,7 +696,7 @@ contains
 
  10 continue
 
-
+    if(pm_debug_level>3) call pm_verify_heap(context)
 
     ! Always initialise pointers
     if(vkind>=pm_pointer) &
@@ -810,7 +815,7 @@ contains
     else
        context%temp_obj1=obj
        ptr=pm_new(context,obj%data%vkind,obj%data%esize+1)
-       call copy_obj(ptr,0_pm_ln,context%temp_obj1,0_pm_ln,context%temp_obj1%data%esize)
+       call copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,context%temp_obj1%data%esize)
        context%temp_obj1=pm_null_obj
     endif
   end function pm_copy
@@ -833,7 +838,7 @@ contains
        context%temp_obj1=obj
        context%temp_obj2=obj2
        context%temp_obj3=pm_new(context,obj%data%vkind,obj%data%esize+1)
-       call copy_obj(ptr,0_pm_ln,context%temp_obj1,0_pm_ln,context%temp_obj1%data%esize)
+       call copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,context%temp_obj1%data%esize)
        context%temp_obj2%data%ptr(context%temp_obj2%offset+n)=&
             context%temp_obj3
        context%temp_obj1=pm_null_obj
@@ -842,16 +847,31 @@ contains
     endif
   end subroutine  pm_assign_copy
 
+  ! Fill ptr1 with first value in ptr2
+  subroutine pm_fill_vect(context,ptr1,ptr2)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: ptr1,ptr2
+    call set_obj(ptr1,0_pm_ln,ptr1%data%esize,ptr2,0_pm_ln)
+  end subroutine pm_fill_vect
+
   ! Dump a tree - used mainly for debugging
-  recursive subroutine pm_dump_tree(context,iunit,ptr,depth)
+  recursive subroutine pm_dump_tree(context,iunit,ptr,depth,single)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
     type(pm_ptr),intent(in):: ptr
     integer,intent(in):: depth
+    logical,intent(in),optional:: single
     character(len=100):: spaces
     integer:: i
+    logical:: ok,nomore,is_single
+    if(present(single)) then
+       is_single=single
+    else
+       is_single=.false.
+    endif
     spaces=' '
-    call pm_verify_ptr(ptr,'Dumping tree',.true.)
+    call pm_verify_ptr(ptr,'Dumping tree',.true.,ok)
+    if(.not.ok) return
     select case(ptr%data%vkind)
     case(pm_name)
        write(iunit,*) spaces(1:depth*2),'Name: ',ptr%offset
@@ -1091,12 +1111,12 @@ contains
        else
           write(iunit,*) spaces(1:depth*2),'User(',ptr%data%esize
        endif
-       if(depth>49) then
+       if(depth>49.or.is_single.and.depth>2) then
           write(iunit,*) spaces,'>>more'
        else
           do i=0,min(ptr%data%esize,19)
              call pm_dump_tree(context,iunit,ptr%data%ptr(ptr%offset+i),&
-                  depth+1)
+                  depth+1,is_single)
           enddo
           if(ptr%data%esize>19) write(iunit,*) spaces(1:depth*2+2),'...'
        endif
@@ -1107,29 +1127,80 @@ contains
   end subroutine pm_dump_tree
 
   ! Verify a pointer (used for debugging)
-  subroutine pm_verify_ptr(ptr,emess,nocrash)
+  subroutine pm_verify_ptr(ptr,emess,nocrash,ok)
     type(pm_ptr):: ptr
     character(len=*)::emess
-    logical,optional:: nocrash
+    logical,optional:: nocrash,ok
+    if(present(ok)) ok=.true.
     if(.not.associated(ptr%data)) then
        write(*,*) 'Non associated pointer'
-       write(*,*) ptr%data%vkind
        if(.not.present(nocrash))&
             call pm_panic('corrupt memory')
+       if(present(ok)) ok=.false.
     else if(ptr%data%magic/=1234567.or.ptr%data%vkind<0&
          .or.ptr%data%vkind>pm_num_vkind) then
        write(*,*) 'Bad ptr in ',emess,ptr%data%magic,ptr%data%vkind
        if(.not.present(nocrash))&
             call pm_panic('Corrupt memory')
+       if(present(ok)) ok=.false.
     else if(ptr%data%vkind>pm_null) then
        if(ptr%offset<1.or.ptr%offset>ptr%data%size) then
           write(*,*) 'Bad ptr offset',&
                ptr%offset,ptr%data%size,ptr%data%vkind,' in: ',emess
           if(.not.present(nocrash)) &
                call pm_panic('Corrupt memory')
+          if(present(ok)) ok=.false.
        endif
     endif
   end subroutine pm_verify_ptr
+
+  subroutine pm_verify_heap(context)
+    type(pm_context),pointer:: context
+    integer:: i,j,k,m
+    type(pm_block),pointer:: blk,blk2
+    type(pm_ptr):: p
+    logical:: ok
+    do k=pm_int,pm_num_vkind
+       do j=1,pm_large_obj_size
+          if(associated(context%obj_list(j,k)%data)) then
+             blk=>context%obj_list(j,k)%data
+             blk2=>blk
+             do
+                if(blk2%magic/=1234567) then
+                   write(*,*) 'Bad block vkind=',k,'esize=',j,'hash=',blk2%hash
+                   call pm_panic('Bad block in verify heap')
+                endif
+                if(k>=pm_pointer.and.k/=pm_stack) then
+                   p%data=>blk2
+                   do i=1,blk2%size,blk2%esize+1
+                      p%offset=i
+                      if(marked(p)) then
+                         do m=i,i+blk2%esize
+                            call pm_verify_ptr(p%data%ptr(m),'verify-heap',.true.,ok)
+                            if(.not.ok) then
+                               write(*,*) 'Bad block offset=',m,'start=',i,&
+                                    'vkind=',k,'esize=',j
+                               write(*,*) 'hash=',blk2%hash
+                               write(*,*) '----'
+                               call pm_dump_tree(context,6,p,2,.true.)
+                               write(*,*) '----'
+                               call pm_panic('Bad ptr in verify heap')              
+                            endif
+                         enddo
+                      endif
+                   enddo
+                endif
+                blk2=>blk2%next
+                if(.not.associated(blk2)) then
+                   write(*,*) 'Bad block vkind=',k,'esize=',j,'hash=',blk2%hash
+                   call pm_panic('Broken ring in verify heap')
+                endif
+                if(associated(blk2,blk)) exit
+             enddo
+          endif
+       enddo
+    enddo    
+  end subroutine pm_verify_heap
 
   ! Run the garbage collector
   subroutine pm_gc(context,force_major_cycle)
@@ -1144,6 +1215,8 @@ contains
 
 
     if(pm_debug_level>1) write(*,*) '==GC started=='
+
+    if(pm_debug_level>2) call pm_verify_heap(context)
 
     major_cycle=force_major_cycle.or.context%tick>max_ticks
     10 continue
@@ -1294,6 +1367,12 @@ contains
 
     ! Reset block count
     context%blocks_allocated=0
+
+    if(pm_debug_level>2) then
+       write(*,*) 'Verify heap'
+       call pm_verify_heap(context)
+       write(*,*) 'Verified'
+    endif
 
     if(pm_debug_level>1) write(*,*) '==GC Finished=='
 
@@ -1626,6 +1705,7 @@ contains
     do while(context%top>0)
        ptr2=pop()
        n=ptr2%data%esize
+       !write(*,*) 'MARKING FROM:',ptr2%offset,n
        if(ptr2%offset<0) then
           ptr2%offset=-ptr2%offset
           i=ptr%data%esize+1
@@ -1681,6 +1761,8 @@ contains
        endif
        do i=ptr2%offset,ptr2%offset+n
           ptr3=ptr2%data%ptr(i)
+          !write(*,*) 'SLOT',i
+          !write(*,*) 'Slot',i,ptr3%data%vkind,ptr3%offset
           if(associated(ptr3%data%context,context)) then
              if(pm_debug_level>0) &
                   call pm_verify_ptr(ptr3,'in mark_from')
@@ -1688,6 +1770,7 @@ contains
                 if(.not.marked(ptr3)) then
                    call mark(ptr3)
                    call push(ptr3)
+                   !write(*,*) '  PUSH>',ptr3%offset,ptr%data%vkind
                 endif
              else
                 call mark(ptr3)
@@ -1920,7 +2003,8 @@ contains
   subroutine nullify_obj(ptr,loc1,loc2)
     type(pm_ptr):: ptr
     integer(pm_ln):: loc1,loc2
-    call pm_verify_ptr(ptr,'nullify')
+    if(pm_debug_level>0) &
+         call pm_verify_ptr(ptr,'nullify')
     select case(ptr%data%vkind)  
     case(pm_int)
        ptr%data%i(ptr%offset+loc1:ptr%offset+loc2)= 0
@@ -1972,6 +2056,59 @@ contains
     end select
   end subroutine nullify_obj
 
+  subroutine set_obj(ptr,loc1,loc2,ptr2,loc3)
+    type(pm_ptr):: ptr,ptr2
+    integer(pm_ln):: loc1,loc2,loc3
+    if(pm_debug_level>0) then
+       call pm_verify_ptr(ptr,'set_obj1')
+       call pm_verify_ptr(ptr,'set_obj2')
+    endif
+    select case(ptr%data%vkind)  
+    case(pm_int)
+       ptr%data%i(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%i(ptr2%offset+loc3)
+    case(pm_long)
+       ptr%data%ln(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%ln(ptr2%offset+loc3) 
+    case(pm_int8)
+       ptr%data%i8(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%i8(ptr2%offset+loc3)
+    case(pm_int16)
+       ptr%data%i16(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%i16(ptr2%offset+loc3)
+    case(pm_int32)
+       ptr%data%i32(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%i32(ptr2%offset+loc3)
+    case(pm_int64)
+       ptr%data%i64(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%i64(ptr2%offset+loc3)
+    case(pm_int128)
+       ptr%data%i128(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%i128(ptr2%offset+loc3)
+    case(pm_single)
+       ptr%data%r(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%r(ptr2%offset+loc3)
+    case(pm_double)
+       ptr%data%d(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%d(ptr2%offset+loc3)
+    case(pm_real32)
+       ptr%data%r32(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%r32(ptr2%offset+loc3)
+    case(pm_real64)
+       ptr%data%r64(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%r64(ptr2%offset+loc3)
+    case(pm_real128)
+       ptr%data%r128(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%r128(ptr2%offset+loc3)
+    case(pm_single_complex)
+       ptr%data%c(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%c(ptr2%offset+loc3)
+    case(pm_double_complex)
+       ptr%data%dc(ptr%offset+loc1:ptr%offset+loc2) = ptr2%data%dc(ptr2%offset+loc3)
+    case(pm_complex64)
+       ptr%data%c64(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%c64(ptr2%offset+loc3)          
+    case(pm_complex128)
+       ptr%data%c128(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%c128(ptr2%offset+loc3)
+    case(pm_complex256)
+       ptr%data%c256(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%c256(ptr2%offset+loc3)
+    case(pm_logical)
+       ptr%data%l(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%l(ptr2%offset+loc3)
+    case(pm_packed_logical)
+       ptr%data%pl(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%pl(ptr2%offset+loc3)
+    case(pm_string)
+       ptr%data%s(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%s(ptr2%offset+loc3)
+    case(pm_pointer:pm_usr)
+       ptr%data%ptr(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%ptr(ptr2%offset+loc3)
+    end select
+  end subroutine set_obj
+
   subroutine pm_finalize(context,ext)
     type(pm_context),pointer:: context
     integer(pm_ln),dimension(:)::ext
@@ -1984,7 +2121,8 @@ contains
   subroutine pm_panic(emess)
     character(len=*):: emess
     write(*,*) 'Panic: '//trim(emess)
-    write(*,*) pm_null_obj%data%ptr(1)%offset
+    write(*,*) pm_null_obj%data%ptr(-10001)%offset
+    stop 'System crash!'
   end subroutine pm_panic
 
 end module pm_memory

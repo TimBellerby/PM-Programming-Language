@@ -31,7 +31,7 @@ module pm_lib
   public:: pm_dict_new, pm_dict_lookup,&
        pm_dict_set,pm_dict_merge
   public:: pm_dict_keys,pm_dict_vals,pm_dict_key,&
-       pm_dict_val,pm_dict_size
+       pm_dict_val,pm_dict_set_val,pm_dict_size
   public:: pm_set_new, pm_set_lookup, pm_set_add, &
        pm_set_keys,pm_set_key,pm_set_size
   public:: pm_ivect_lookup,pm_iset_add,pm_idict_add
@@ -206,7 +206,6 @@ contains
     ptr=obj%data%ptr(obj%offset+3)
   end function pm_dict_vals
 
-
   ! Dictionary object key
   function pm_dict_key(context,obj,n) result(ptr)
     type(pm_context),pointer:: context
@@ -215,9 +214,9 @@ contains
     type(pm_ptr):: ptr
     if(pm_debug_level>0) then
        if(obj%data%vkind/=pm_usr) &
-            call pm_panic('Dict keys - not ptr')
+            call pm_panic('Dict key - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
-            call pm_panic('Dict keys - not dict type')
+            call pm_panic('Dict key - not dict type')
     endif
     ptr=obj%data%ptr(obj%offset+2)
     ptr=ptr%data%ptr(ptr%offset+n-1)
@@ -231,13 +230,31 @@ contains
     type(pm_ptr):: ptr
     if(pm_debug_level>0) then
        if(obj%data%vkind/=pm_usr) &
-            call pm_panic('Dict vals - not ptr')
+            call pm_panic('Dict val - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
-            call pm_panic('Dict vals - not dict type')
+            call pm_panic('Dict val - not dict type')
     endif
     ptr=obj%data%ptr(obj%offset+3)
     ptr=ptr%data%ptr(ptr%offset+n-1)
   end function pm_dict_val
+
+  ! Set dictionary object value
+  subroutine pm_dict_set_val(context,obj,n,val)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: obj
+    integer(pm_ln),intent(in):: n
+    type(pm_ptr),intent(in):: val
+    type(pm_ptr):: ptr
+    if(pm_debug_level>0) then
+       if(obj%data%vkind/=pm_usr) &
+            call pm_panic('Dict set val - not ptr')
+       if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
+            call pm_panic('Dict set val - not dict type')
+    endif
+    ptr=obj%data%ptr(obj%offset+3)
+    call pm_ptr_assign(context,ptr,n-1_pm_ln,val)
+    ptr%data%ptr(ptr%offset+n-1)=val
+  end subroutine pm_dict_set_val
 
   ! Dictionary object size
   function pm_dict_size(context,obj) result(n)
@@ -666,7 +683,7 @@ contains
     keys=pm_obj_set_keys(context,dict)
     n=pm_obj_set_size(context,dict)
     q=pm_new(context,pm_pointer,n)
-    do i=0,n
+    do i=0,n-1
        r=keys%data%ptr(keys%offset+i)
        if(pm_fast_vkind(r)>=pm_pointer) then
           r=pm_new(context,pm_pointer,pm_fast_esize(r))

@@ -62,8 +62,8 @@ contains
     '<tiny>     ','type       ','proc       ','name       ',&
     'null       ','int        ','long       ','int8       ',&
     'int16      ','int32      ','int64      ','int128     ',&
-    'single     ','real       ','real32     ','real64     ',&
-    'real128    ','single_cpx ','cpx        ','cpx64      ',&
+    'real       ','double     ','real32     ','real64     ',&
+    'real128    ','cpx        ','double_cpx ','cpx64      ',&
     'cpx128     ','cpx256     ','bool       ','<packbool> ',&
     'string     ','<ext>      ','<pointer>  ','<stack>    ',&
     '<usr>      ','<matched>  ','<dict>     ','<set>      ',&
@@ -93,8 +93,9 @@ contains
     key(3)=subtype
     j=pm_ivect_lookup(context,context%tcache,key,3)
     if(j>0) then
-       p=pm_dict_key(context,context%tcache,j)
+       p=pm_dict_val(context,context%tcache,j)
        ok=p%offset/=0
+       if(pm_debug_level>3) write(*,*) 'Cached include',supertype,subtype,ok,'(',j,')'
     else
        if(.not.associated(context%heap,context)) then
           j=pm_ivect_lookup(context,context%heap%tcache,key,3)
@@ -112,6 +113,7 @@ contains
           p=pm_fast_tinyint(context,0_pm_p)
        endif
        j=pm_idict_add(context,context%tcache,key,3,p)
+       if(pm_debug_level>3) write(*,*) 'Calc include',supertype,subtype,ok,'cache as',j
     endif
   contains
     include 'ftiny.inc'
@@ -130,8 +132,9 @@ contains
     key(3)=subtype
     j=pm_ivect_lookup(context,context%tcache,key,3)
     if(j>0) then
-       p=pm_dict_key(context,context%tcache,j)
+       p=pm_dict_val(context,context%tcache,j)
        ok=p%offset/=0
+       if(pm_debug_level>3) write(*,*) 'caced intersect',supertype,subtype,ok
     else
        if(.not.associated(context%heap,context)) then
           j=pm_ivect_lookup(context,context%heap%tcache,key,3)
@@ -143,6 +146,7 @@ contains
           endif
        endif
        ok=pm_test_typ_intersects(context,supertype,subtype)
+       if(pm_debug_level>3) write(*,*) 'Calc intersect',supertype,subtype,ok
        if(ok) then
           p=pm_fast_tinyint(context,1_pm_p)
        else
@@ -191,6 +195,18 @@ contains
        ok=pm_typ_includes(context,p,pm_tv_arg(u,1)).and.&
             pm_typ_includes(context,p,pm_tv_arg(u,2))
        return
+    else if(uk==pm_typ_is_user) then
+       r=pm_dict_val(context,context%tcache,int(q,pm_ln))
+       if(.not.pm_fast_isnull(r)) then
+          do i=1,r%data%i16(r%offset)
+             if(.not.pm_typ_includes(context,p,r%data%i16(r%offset+i))) then
+                ok=.false.
+                return
+             endif
+          enddo
+          ok=.true.
+          return
+       endif
     endif
     tk=pm_tv_kind(t)
     select case(tk)
@@ -329,12 +345,27 @@ contains
        ok=pm_typ_intersects(context,p,pm_tv_arg(u,1)).or.&
             pm_typ_intersects(context,p,pm_tv_arg(u,2))
        return
+    else if(uk==pm_typ_is_user) then
+       r=pm_dict_val(context,context%tcache,int(q,pm_ln))
+       if(.not.pm_fast_isnull(r)) then
+          do i=1,r%data%i16(r%offset)
+             if(pm_typ_intersects(context,p,r%data%i16(r%offset+i))) then
+                ok=.true.
+                return
+             endif
+          enddo
+          ok=.false.
+          return
+       endif
     endif
     tk=pm_tv_kind(t)
     select case(pm_tv_kind(t))
     case(pm_typ_is_struct,pm_typ_is_rec)
-       if(uk/=tk) return
-       if(.not.pm_tv_name(t)==pm_tv_name(u)) then
+       if(uk/=tk) then
+          ok=.false.
+          return
+       endif
+       if(pm_tv_name(t)/=pm_tv_name(u)) then
           ok=.false.
           return
        endif
@@ -352,6 +383,7 @@ contains
        return
     case(pm_typ_is_array)
        if(pm_tv_kind(u)/=pm_typ_is_array) then
+          ok=.false.
           return
        else
           ok=pm_typ_intersects(context,pm_tv_arg(t,1),pm_tv_arg(u,1)).and.&
@@ -541,6 +573,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr):: ptr
     ptr=pm_fast_newnc(context,pm_int16,4_pm_p)
+    ptr%data%i16(ptr%offset)=0
   contains
     include 'fnewnc.inc'
   end function pm_tset_new
@@ -617,6 +650,7 @@ contains
           write(*,*) 'Bad typno=',typno
           call pm_panic('add-type-to-set bad type')
        endif
+       call pm_verify_ptr(set,'Set in tset-add')
     endif
     siz=pm_fast_esize(set)
     off=set%data%i16(set%offset)

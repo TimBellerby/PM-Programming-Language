@@ -62,7 +62,7 @@ contains
              write(*,*) 'including',trim(str)
           endif
           imodl=node%data%ptr(node%offset+node_args+1)
-          if(node_sym(node)==sym_include) then
+          if(node_sym(node)==sym_use) then
              call link_include(context,node,modl,imodl)
           else
              call link_include_mod(context,node,modl,imodl)
@@ -162,7 +162,7 @@ contains
           ! Merge proc lists
           call pm_ptr_assign(context,&
                old%data%ptr(old%offset+node_args+2),&
-               int(node_args+1,pm_ln),&
+               int(proc_link,pm_ln),&
                val%data%ptr(val%offset+node_args+1))
           call pm_ptr_assign(context,old,int(node_args+2,pm_ln),&
                val%data%ptr(val%offset+node_args+2))
