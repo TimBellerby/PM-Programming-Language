@@ -99,8 +99,9 @@ program pm
   call trav_prog(coder,prog)
   if(out_debug_files) then
      open(unit=8,file='coder.out')
-     call dump_sigs(coder,8)
      call dump_code_tree(coder,pm_null_obj,8,coder%vstack(1),1)
+     write(8,*) '------------------------'
+     call dump_sigs(coder,8)
      close(8)
   endif
   if(coder%num_errors>0) stop 'Code generation errors'

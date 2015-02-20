@@ -327,7 +327,7 @@ contains
     type(pm_ptr),intent(in):: callnode,cblock
     integer,intent(in):: base
     logical,intent(out):: break
-    integer(pm_i16):: sig,tno,tno2,name
+    integer(pm_i16):: sig,tno,tno2,name,off
     type(pm_ptr):: p,t,list,list2
     integer:: i,j,nret,narg,slot,slot2,tbase
     integer:: vbase_check,tbase_check
@@ -384,11 +384,12 @@ contains
           coder%stack(get_slot(1))=pm_long
           call prc_cblock(coder,cnode_arg(p,3),base)
           call prc_cblock(coder,cnode_arg(p,4),base)
-       case(sym_par_loop)
+       case(sym_par_loop,sym_par_find)
+          slot=get_slot(1)
+          coder%stack(slot)=pm_long
           call prc_cblock(coder,cnode_arg(p,nret+1),base)
-       case(sym_par_find)
-          call prc_cblock(coder,cnode_arg(p,nret+1),base)
-          call prc_cblock(coder,cnode_arg(p,nret+2),base)
+          if(sig==-sym_par_find) &
+               call prc_cblock(coder,cnode_arg(p,nret+2),base)
        case(sym_define)
           slot=get_slot(1)
           slot2=get_slot_or_type(2)
@@ -397,6 +398,8 @@ contains
           else
              coder%stack(slot)=-slot2
           endif
+       case(sym_assign)
+          call full_call(coder%assign_sig)   
        case(sym_arrow)
           call combine_types(coder,base,callnode,&
                cnode_arg(p,1),arg_type(2))
@@ -452,10 +455,24 @@ contains
                cnode_arg(p,1),pop_type(coder))
        case(sym_dot,sym_dotref)
           call resolve_elem
-       case(sym_array)
-          slot=get_slot(1)
-          coder%stack(slot)=&
-               make_array_type(coder,arg_type(2),arg_type(3))
+       case(sym_set_dot,sym_set_dot_index,sym_set_dot_open_index)
+          tno=arg_type(1)
+          name=cnode_get_num(cnode_arg(p,3),cnode_args)
+          if(sig/=-sym_set_dot) then
+             call pm_array_elem_offset(coder%context,tno,name,.true.,off,tno2)
+          else
+             call pm_elem_offset(coder%context,tno,name,.true.,off,tno2)
+          endif
+          i=base+cnode_get_num(callnode,call_index)
+          coder%stack(i)=off
+          if(off<0) then
+             ok=.false.
+             call resolve_struct_elems(pm_null_obj,tno,sym_dotref,int(name,pm_p),sig/=sym_set_dot)
+             if(.not.ok) then
+                call cnode_error(coder,callnode,'Value being set cannot have element: ',&
+                     cnode_arg(cnode_arg(p,3),1))
+             endif
+          endif
        case(sym_any)
           tno=cnode_get_num(p,cnode_args+1)
           call get_slot_and_type(3,slot2,tno2)
@@ -703,7 +720,6 @@ contains
       slot=base+cnode_get_num(list,cblock_index)
       marked=coder%stack(slot)/=0
     end function cblock_marked
-
   
     recursive function var_type(tno) result(newtno)
       integer(pm_i16),intent(in):: tno
@@ -776,69 +792,61 @@ contains
     end function  check_slot_intersect
 
     subroutine resolve_elem
-      integer:: vbase,k
-      integer(pm_i16),dimension(1):: key
+      integer(pm_i16):: eltyp,offset
       type(pm_ptr):: namep
-      character(len=100):: str
       j=cnode_get_num(callnode,call_index)
-      vbase=coder%vtop
       namep=cnode_arg(cnode_arg(p,3),1)
       name=namep%offset
       tno=arg_type(2)
       if(tno==0) then
          coder%stack(base+j)=0
+         call unrestrict(1)
       else
-         call pm_name_string(coder%context,namep%offset,str)
-         call find_struct_elems(cnode_arg(p,1),tno,int(-sig,pm_p),int(name,pm_p))
-         if(coder%vtop==vbase) then
-            call cnode_error(coder,p,'Value cannot have this element',namep)
-         else if(coder%vtop==vbase+2) then
-            coder%stack(base+j)=coder%vstack(vbase+2)%offset
-            coder%vtop=vbase
+         call pm_elem_offset(coder%context,tno,name,sig==-sym_dotref,offset,eltyp)
+         coder%stack(base+j)=offset
+         if(offset<0_pm_i16) then
+            call resolve_struct_elems(cnode_arg(p,1),tno,int(-sig,pm_p),int(name,pm_p),.false.)
          else
-            call make_code(coder,p,cnode_is_multi_proc,coder%vtop-vbase)
-            key(1)=pm_dict_size(coder%context,coder%proc_cache)
-            k=pm_idict_add(coder%context,coder%proc_cache,key,1,top_code(coder))
-            call drop_code(coder)
-            coder%stack(base+j)=-k
+            call combine_types(coder,base,callnode,cnode_arg(p,1),eltyp)
          endif
       endif
     end subroutine resolve_elem
 
-    recursive subroutine find_struct_elems(&
-         var,typ,which,name)
+    recursive subroutine resolve_struct_elems(&
+         var,typ,which,name,array)
       type(pm_ptr),intent(in):: var
       integer(pm_i16),intent(in):: typ
       integer(pm_p),intent(in):: name,which
+      logical,intent(in):: array
       type(pm_ptr):: tv,nv,set
       integer(pm_i16):: tk,tno
       integer:: tbase,i
       if(typ==0) then
-         call code_num(coder,0_pm_p)
-         call code_num(coder,-which)
-         call unrestrict(1)
+         if(.not.pm_fast_isnull(var)) &
+              call combine_types(coder,base,callnode,var,0_pm_i16)
          return
       endif
       tv=pm_typ_vect(coder%context,typ)
       tk=pm_tv_kind(tv)
       select case(tk)
-      case(pm_typ_is_array)
-         call find_struct_elems(var,pm_tv_arg(tv,1),which+1_pm_i16,name)
       case(pm_typ_is_struct,pm_typ_is_rec)
          if(which==sym_dotref.and.tk==pm_typ_is_rec) return
+         if(array) return
          nv=pm_name_val(coder%context,int(pm_tv_name(tv),pm_p))
          if(nv%data%i16(nv%offset+1)>name) return
          if(nv%data%i16(nv%offset+pm_fast_esize(nv))<name) return
          do i=1,pm_fast_esize(nv)
             if(nv%data%i16(nv%offset+i)==name) then
                tno=pm_tv_arg(tv,int(i))
-               call code_num(coder,int(tno,pm_p))
-               call code_num(coder,int(i,pm_p))
-               call combine_types(coder,base,callnode,var,tno)
+               if(.not.pm_fast_isnull(var))&
+                    call combine_types(coder,base,callnode,var,tno)
                ok=.true.
                return
             endif
          enddo
+      case(pm_typ_is_array)
+         if(.not.array) return
+         call resolve_struct_elems(var,pm_tv_arg(tv,1),sym_dot,name,.false.)
       case(pm_typ_is_user)
          set=pm_dict_val(coder%context,&
               coder%context%tcache,int(typ,pm_ln))
@@ -846,16 +854,16 @@ contains
             return
          else
             do i=1,set%data%i16(set%offset)
-               call find_struct_elems(var,&
+               call resolve_struct_elems(var,&
                     set%data%i16(set%offset+i),&
-                    which,name)
+                    which,name,array)
             enddo
          endif
       case(pm_typ_is_ambig)
-         call find_struct_elems(var,pm_tv_arg(tv,1),which,name)
-         call find_struct_elems(var,pm_tv_arg(tv,2),which,name)
+         call resolve_struct_elems(var,pm_tv_arg(tv,1),which,name,array)
+         call resolve_struct_elems(var,pm_tv_arg(tv,2),which,name,array)
       end select
-    end subroutine find_struct_elems
+    end subroutine resolve_struct_elems
 
     recursive subroutine find_array_elems(var,typ,ok)
       type(pm_ptr),intent(in):: var
@@ -931,7 +939,6 @@ contains
        if(varg) then
           at=top_type(coder)
           do i=narg+1,n
-             write(*,*) 'PUSH-EXTRA',at
              call push_type(coder,at)
           enddo
           narg=n

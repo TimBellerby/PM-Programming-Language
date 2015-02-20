@@ -102,8 +102,9 @@ module pm_codegen
   integer,parameter:: var_link=cnode_args+3
   integer,parameter:: var_index=cnode_args+4
   integer,parameter:: var_loop=cnode_args+5
-  integer,parameter:: var_assign_call=cnode_args+6
-  integer,parameter:: var_node_size=7
+  integer,parameter:: var_set_call=cnode_args+6
+  integer,parameter:: var_get_call=cnode_args+7
+  integer,parameter:: var_node_size=8
 
   ! Flags for var cnodes
   integer(pm_p),parameter:: var_const=1
@@ -111,10 +112,12 @@ module pm_codegen
   integer(pm_p),parameter:: var_param=4
   integer(pm_p),parameter:: var_amp=8
   integer(pm_p),parameter:: var_iter=16
-  integer(pm_p),parameter:: var_changed=32
-  integer(pm_p),parameter:: var_shadow=64
-  integer(pm_p),parameter:: var_imported=128
-  integer(pm_p),parameter:: var_undefined=256
+  integer(pm_p),parameter:: var_shadow=32
+  integer(pm_p),parameter:: var_imported=64
+  integer(pm_p),parameter:: var_accessed=128
+  integer(pm_p),parameter:: var_changed=256
+  integer(pm_p),parameter:: var_multi_access=512
+  integer(pm_p),parameter:: var_multi_change=1024
 
   ! Offsets into proc nodes
   integer,parameter:: pr_cblock=cnode_args+0
@@ -124,17 +127,19 @@ module pm_codegen
   integer,parameter:: pr_nargs=cnode_args+4
   integer,parameter:: pr_nret=cnode_args+5
   integer,parameter:: pr_flags=cnode_args+6
-  integer,parameter:: pr_node_size=7
+  integer,parameter:: pr_name=cnode_args+7
+  integer,parameter:: pr_node_size=8
 
   ! Offsets into builtin nodes
   integer,parameter:: bi_opcode=cnode_args+0
   integer,parameter:: bi_opcode2=cnode_args+1
   integer,parameter:: bi_data=cnode_args+2
-  integer,parameter:: bi_rtype=cnode_args+3
-  integer,parameter:: bi_rcode=cnode_args+4
-  integer,parameter:: bi_rsym=cnode_args+5
-  integer,parameter:: bi_id=cnode_args+6
-  integer,parameter:: bi_node_size=7
+  integer,parameter:: bi_flags=cnode_args+3
+  integer,parameter:: bi_rtype=cnode_args+4
+  integer,parameter:: bi_rcode=cnode_args+5
+  integer,parameter:: bi_rsym=cnode_args+6
+  integer,parameter:: bi_id=cnode_args+7
+  integer,parameter:: bi_node_size=8
   
   ! Flags indicating start/end of a block of type variables
   ! as opposed to regular variables on variables stack
@@ -161,11 +166,13 @@ module pm_codegen
      integer:: ttop
      ! Caches for call signatures and resolved procedures
      type(pm_ptr):: sig_cache,proc_cache
+     ! Counter to give each proc a unique index
+     integer(pm_p):: id
      ! Misc info on procedures (particularly proc=)
      type(pm_ptr)::assign_proc
-     integer(pm_p):: assign_sig,subseq_sig,id
+     integer(pm_p):: assign_sig,subseq_sig,openeq_sig
      ! Misc values
-     type(pm_ptr):: temp,true,false
+     type(pm_ptr):: temp,temp2,true,false
      ! Contextual information for this point in the traverse
      logical:: loop_is_par
      type(pm_ptr):: sub_array,loop_cblock
@@ -185,7 +192,7 @@ contains
     type(code_state),intent(out):: coder
     type(pm_ptr):: sig
     coder%context=>context
-    coder%reg=>pm_register(context,'coder-var stack',coder%temp,&
+    coder%reg=>pm_register(context,'coder-var stack',coder%temp,coder%temp2,&
          coder%sig_cache,coder%proc_cache,coder%true,coder%false,&
          array=coder%var,array_size=coder%top)
     coder%reg2=>pm_register(context,'coder-node stack',&
@@ -205,6 +212,7 @@ contains
     coder%false%data%l(coder%false%offset)=.false.
     coder%assign_sig=-1
     coder%subseq_sig=-1
+    coder%openeq_sig=-1
     coder%assign_proc=pm_null_obj
     coder%id=0
   contains
@@ -224,18 +232,21 @@ contains
     type(pm_ptr),intent(in):: statlist
     type(pm_ptr):: sv,amp,sig
     
-    ! Initialise assignment, definition 
+    ! Initialise assignment 
     ! and element access signatures
     amp=pm_fast_newnc(coder%context,pm_int16,1_pm_p)
     amp%data%i16(amp%offset)=1
     call code_val(coder,amp)
     amp%offset=pm_set_add(coder%context,coder%context%names,amp)
-    sig=find_sig(coder,statlist,pm_fast_name(coder%context,&
-         int(sym_assign,pm_p)),amp,2,0,0,sv)
-    coder%assign_sig=sig%offset
+    !sig=find_sig(coder,statlist,pm_fast_name(coder%context,&
+    !     int(sym_convert,pm_p)),amp,2,1,0,sv)
+    !coder%assign_sig=sig%offset
     sig=find_sig(coder,statlist,pm_fast_name(coder%context,&
          int(sym_subseq,pm_p)),amp,3,0,0,sv)
     coder%subseq_sig=sig%offset
+    sig=find_sig(coder,statlist,pm_fast_name(coder%context,&
+         int(sym_openeq,pm_p)),amp,3,0,0,sv)
+    coder%openeq_sig=sig%offset
     call drop_code(coder)
     
     ! Traverse statement list
@@ -306,8 +317,6 @@ contains
        case(sym_par_loop,sym_par_find)
           save_loop_base=coder%loop_base
           save_loop_cblock=coder%loop_cblock
-          ! Use this to pass in node for processing in trav_xexpr
-          coder%loop_cblock=node 
           call trav_xexpr(coder,cblock,node,node_arg(node,1),node)
           coder%loop_base=save_loop_base
           coder%loop_cblock=save_loop_cblock
@@ -369,9 +378,9 @@ contains
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,pnode,node
     integer,intent(in):: sym
-    integer:: i,n,base,nsym
+    integer:: i,n,m,base,nsym
     integer(pm_p):: flag
-    type(pm_ptr):: lhs,var,p,arg
+    type(pm_ptr):: lhs,var,arg,arg2
     logical:: save_loop_local,confine_assign
    
     nsym=node_sym(node)
@@ -409,42 +418,94 @@ contains
        endif
     endif
  
-    coder%loop_local=.true.
-    if(n>1) then
-       call trav_call(coder,cblock,node,&
-            node_arg(node,node_numargs(node)),&
-            node_numargs(node)-2)
-    else
-       call trav_expr(coder,cblock,node,&
-            node_arg(node,node_numargs(node)))
-    endif
-
     if(nsym==sym_arrow) then
+       arg=node_arg(node,2)
+       if(node_sym(node)==sym_open_square) then
+          call make_temp_var(coder,cblock,arg)
+          call trav_lhs(coder,cblock,arg,node_arg(arg,1))
+          call trav_index_list(coder,cblock,arg,m)
+          call make_sys_call(coder,cblock,arg,sym_make_subref,m+1,1)
+       else if(node_sym(node)==sym_open_brace) then
+          call make_temp_var(coder,cblock,arg)
+          call trav_lhs(coder,cblock,arg,node_arg(arg,1))
+          call trav_index_list(coder,cblock,arg,m)
+          call make_sys_call(coder,cblock,arg,sym_make_openref,m+1,1)
+       else if(node_sym(node)==sym_dot) then
+          call make_temp_var(coder,cblock,arg)
+          call trav_lhs(coder,cblock,arg,node_arg(arg,1))
+          call make_const(coder,cblock,arg,node_arg(arg,2))
+          call make_sys_call(coder,cblock,arg,sym_make_dotref,2,1)
+       else
+          call trav_lhs(coder,cblock,node,arg)
+       endif
        call make_call(coder,cblock,node,sym_arrow,2,0)
     else 
+       coder%loop_local=.true.
+       if(n>1) then
+          call trav_call(coder,cblock,node,&
+               node_arg(node,node_numargs(node)),&
+               node_numargs(node)-2)
+       else
+          call trav_expr(coder,cblock,node,&
+               node_arg(node,node_numargs(node)))
+       endif
        if(nsym==sym_let.or.nsym==sym_assign) then
           do i=1,n
              arg=node_arg(node,i)
+             coder%temp2=pop_code(coder)
+             if(pm_fast_isname(arg)) then
+                call trav_lhs(coder,cblock,node,arg)
+             else
+                call make_temp_var(coder,cblock,node)
+                call dup_code(coder)
+             endif
+             call code_val(coder,coder%temp2)
+             call trav_expr(coder,cblock,node,arg)
+             call make_sys_call(coder,cblock,node,sym_convert,2,1)
              if(node_sym(arg)==sym_dot) then
-                call trav_lhs(coder,cblock,node,node_arg(arg,1))
-                call swap_code(coder)
-                call make_const(coder,cblock,node,node_arg(arg,2))
-                call make_call(coder,cblock,node,sym_dotref,2,1)
+                arg2=node_arg(arg,1)
+                if(node_sym(arg2)==sym_open_square) then
+                   call trav_lhs(coder,cblock,node,node_arg(arg2,1))
+                   call swap_code(coder)
+                   call make_const(coder,cblock,node,node_arg(arg,2))
+                   call make_temp_var(coder,cblock,node)
+                   call dup_code(coder)
+                   call dup_expr(coder,coder%vstack(coder%vtop-3))
+                   call trav_index_list(coder,cblock,arg2,m)
+                   call make_sys_call(coder,cblock,node,sym_index,m+1,1)
+                   call make_call(coder,cblock,node,sym_set_dot_index,&
+                        m+3,0)
+                elseif(node_sym(arg2)==sym_open_brace) then
+                   call trav_lhs(coder,cblock,node,node_arg(arg2,1))
+                   call swap_code(coder)
+                   call make_const(coder,cblock,node,node_arg(arg,2))
+                   call make_temp_var(coder,cblock,node)
+                   call dup_code(coder)
+                   call dup_expr(coder,coder%vstack(coder%vtop-3))
+                   call trav_index_list(coder,cblock,arg2,m)
+                   call make_sys_call(coder,cblock,node,sym_index,m+1,1)
+                   call make_call(coder,cblock,node,sym_set_dot_open_index,&
+                        m+3,0)
+                else
+                   call trav_lhs(coder,cblock,node,arg2)
+                   call swap_code(coder)
+                   call make_const(coder,cblock,node,node_arg(arg,2))
+                   call make_call(coder,cblock,node,sym_set_dot,3,0)
+                endif
              else if(node_sym(arg)==sym_open_square) then
                 call trav_lhs(coder,cblock,node,node_arg(arg,1))
                 call swap_code(coder)
-                call trav_index_list(coder,cblock,arg)
+                call trav_index_list(coder,cblock,arg,m)
                 call make_full_call(coder,cblock,node,&
                      pm_fast_tinyint(coder%context,coder%subseq_sig),&
-                     node_numargs(arg)+1,0,0,0)
-             else
-                call trav_lhs(coder,cblock,node,arg)
+                     m+2,0,0,0)
+             else if(node_sym(arg)==sym_open_brace) then
+                call trav_lhs(coder,cblock,node,node_arg(arg,1))
                 call swap_code(coder)
+                call trav_index_list(coder,cblock,arg,m)
                 call make_full_call(coder,cblock,node,&
-                     pm_fast_tinyint(coder%context,coder%assign_sig),2,0,0,0)
-                if(cnode_is_tempvar(arg)) &
-                     call cnode_set(arg,var_assign_call,&
-                     cnode_get(cblock,cblock_last_call))
+                     pm_fast_tinyint(coder%context,coder%openeq_sig),&
+                     m+2,0,0,0)
              endif
           enddo
           if(confine_assign.and.coder%loop_local) then
@@ -453,11 +514,7 @@ contains
           endif
        else
           do i=1,n
-             arg=top_code(coder)
-             call make_call(coder,cblock,node,sym_define,2,0)
-             if(cnode_is_tempvar(arg)) &
-                  call cnode_set(arg,var_assign_call,&
-                  cnode_get(cblock,cblock_last_call))
+             call make_sys_call(coder,cblock,node,sym_dup,1,1)
           enddo
        endif
     endif
@@ -472,7 +529,7 @@ contains
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,pnode,lhs
     type(pm_ptr):: var,p
-    integer:: sym
+    integer:: sym,n
     if(pm_fast_isname(lhs)) then
        var=find_var(coder,lhs,base=coder%loop_base)
        if(pm_fast_isnull(var)) then
@@ -492,34 +549,47 @@ contains
                'Variable being assigned to has not been defined:',lhs)
           call make_temp_var(coder,cblock,pnode)
        endif
-    else 
+    else if(pm_fast_vkind(lhs)==pm_pointer) then
        sym=node_sym(lhs)
        select case(sym)
        case(sym_dot)
           call make_temp_var(coder,cblock,lhs)
+          call dup_code(coder)
           call trav_lhs(coder,cblock,lhs,node_arg(lhs,1))
           call make_const(coder,cblock,lhs,node_arg(lhs,2))
-          call make_call(coder,cblock,lhs,sym_dot,2,1)
+          call make_call(coder,cblock,lhs,sym_dotref,2,1)
        case(sym_open_square)
           call make_temp_var(coder,cblock,lhs)
+          call dup_code(coder)
           call trav_lhs(coder,cblock,lhs,node_arg(lhs,1))
-          call trav_index_list(coder,cblock,lhs)
-          call make_sys_call(coder,cblock,lhs,sym_open_square,node_numargs(lhs),1)
+          call make_temp_var(coder,cblock,lhs)
+          call dup_code(coder)
+          call dup_expr(coder,coder%vstack(coder%vtop-2))
+          call trav_index_list(coder,cblock,lhs,n)
+          call make_sys_call(coder,cblock,lhs,sym_index,n+1,1)
+          call make_sys_call(coder,cblock,lhs,sym_get_element,2,1)
        case default
           call code_error(coder,pnode,&
                'Cannot assign to expression')
+          call make_temp_var(coder,cblock,pnode)
        end select
+    else
+       call code_error(coder,pnode,&
+            'Cannot assign to expression')
+       call make_temp_var(coder,cblock,pnode)
     endif
   contains
+    include 'fvkind.inc'
     include 'fisname.inc'
     include 'fisnull.inc'
     include 'ftiny.inc'
   end subroutine trav_lhs
 
   ! Index list
-  subroutine trav_index_list(coder,cblock,node)
+  subroutine trav_index_list(coder,cblock,node,n)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,node
+    integer,intent(out):: n
     integer:: i,save_sub_index
     logical:: save_loop_local
     type(pm_ptr):: save_sub_array,lhs
@@ -528,7 +598,8 @@ contains
     save_sub_index=coder%sub_index
     save_sub_array=coder%sub_array
     coder%sub_array=top_code(coder)
-    do i=1,node_numargs(lhs)
+    n=node_numargs(lhs)
+    do i=1,n
        coder%sub_index=i
        call trav_expr(coder,cblock,&
             lhs,node_arg(lhs,i))
@@ -639,16 +710,21 @@ contains
                call dup_expr(coder,coder%vstack(lbase+i))
             enddo
             call make_sys_call(coder,cblock,q,sym_partition,1+nq/2,4)
-            call make_var(coder,cblock2,q,&
+            call make_var(coder,cblock,q,&
                  pm_fast_name(coder%context,int(sym_iter,pm_p)),&
                  ior(var_shadow,var_iter))
+            call make_var(coder,cblock,q,&
+                 pm_fast_name(coder%context,int(sym_dollar,pm_p)),&
+                 ior(var_shadow,var_iter))
+            call code_val(coder,coder%var(coder%loop_base+1))
+            call code_val(coder,coder%var(coder%loop_base+5))
+            call make_sys_call(coder,cblock2,q,sym_get_element,2,1)
             do i=1,nq/2
                call make_var(coder,cblock2,q,&
                     node_arg(q,i),var_iter)
                call code_val(coder,coder%vstack(lbase+i))
-               call code_val(coder,coder%var(coder%loop_base+1))
-               call code_val(coder,coder%var(coder%loop_base+5))
-               call make_sys_call(coder,cblock2,q,sym_import,3,1)
+               call code_val(coder,coder%var(coder%loop_base+6))
+               call make_sys_call(coder,cblock2,q,sym_import,2,1)
             enddo
             coder%loop_cblock=cblock2
             call trav_statlist(coder,cblock2,stmt,node_arg(stmt,3),sym_do)
@@ -677,7 +753,7 @@ contains
             endif
             call code_val(coder,coder%var(coder%loop_base+2))
             call code_val(coder,coder%var(coder%loop_base+4))
-            call make_call(coder,cblock,q,sym,k,0)
+            call make_call(coder,cblock,q,sym,k,1)
             if(j>0) then
                if(base>=0) then
                   do i=base+1,nx
@@ -705,7 +781,7 @@ contains
             call make_var(coder,cblock,q,&
                  pm_fast_name(coder%context,int(sym_dollar,pm_p)),var_shadow)
             call swap_code(coder)
-            call make_call(coder,cblock,q,sym_define,1,1)
+            call make_sys_call(coder,cblock,q,sym_dup,1,1)
             call make_var(coder,cblock,q,&
                  pm_fast_name(coder%context,int(sym_iter,pm_p)),var_shadow)
             iter=coder%top
@@ -807,12 +883,12 @@ contains
              call code_val(coder,p)
              q=cnode_get(p,var_loop)
              if(pm_fast_isnull(q)) then
-                call code_val(coder,coder%var(coder%loop_base+1))
-                call make_call(coder,coder%loop_cblock,pnode,sym_import,2,1)
+                call code_val(coder,coder%var(coder%loop_base+6))
+                call make_sys_call(coder,coder%loop_cblock,pnode,sym_import_val,2,1)
              else
                 call code_val(coder,cnode_get(q,cblock_first_var))
-                call code_val(coder,coder%var(coder%loop_base+1))
-                call make_call(coder,coder%loop_cblock,pnode,sym_import,3,1)
+                call code_val(coder,coder%var(coder%loop_base+6))
+                call make_sys_call(coder,coder%loop_cblock,pnode,sym_import_val,3,1)
              endif
              return
           endif
@@ -955,7 +1031,7 @@ contains
           coder%sub_array=save_sub_array
        case(sym_call,sym_loop_call)
           call trav_call(coder,cblock,pnode,node,1)
-       case(sym_reduce)
+       case(sym_dcolon)
           p=find_sig(coder,node,node_arg(node,1),pm_null_obj,&
                1,1,call_is_reduce,q)
           call trav_expr(coder,cblock,node,node_arg(node,2))
@@ -1051,6 +1127,7 @@ contains
             if(j>0) then
                coder%vstack(start+j)=pop_code(coder)
             else
+               !!! Check vkeys
                call code_error(coder,list,&
                     'Unexpected keyword argument',&
                     node_arg(list,i))
@@ -1075,6 +1152,7 @@ contains
        enddo
     endif
     call make_full_call(coder,cblock,node,procs,nargs,nret,nkeys,flags)
+    !!! Post assign & args
   contains
     include 'fisnull.inc'
   end subroutine trav_call
@@ -1255,8 +1333,10 @@ contains
     integer:: sym,i,j,base
     integer(pm_i16):: newtyp,argtyp,argtype,basetyp,partyp
     type(pm_reg),pointer:: reg
-    if(pm_debug_level>2) &
-         write(*,*) 'Traverse type def: ',trim(pm_name_as_string(coder%context,name%offset))
+    if(pm_debug_level>2) then
+       write(*,*) 'Traverse type def: ',&
+            trim(pm_name_as_string(coder%context,name%offset))
+    endif
     base=coder%ttop
     if(nargs==0) then
        decl=find_type_var(name)
@@ -1360,7 +1440,7 @@ contains
                    partyp=typ_with_default(basetyp,argtyp)
                    if(.not.pm_typ_includes(coder%context,basetyp,partyp)) then
                       call code_error(coder,dec,&
-                           'Parameter constraints for "also includes" do not conform to "includes"',&
+                   'Parameter constraints for "also includes" do not conform to "includes"',&
                            name)
                       call code_error(coder,incl_node,&
                            'Conflicting definition')
@@ -1542,6 +1622,7 @@ contains
        call code_val(coder,node_get(node,proc_opcode))
        call code_val(coder,node_get(node,proc_opcode2))
        call code_val(coder,node_get(node,proc_data))
+       call code_val(coder,node_get(node,proc_flags))
        if(nret>0) then
           if(pm_fast_isnull(node_get(node,proc_retas))) then
              call trav_type(coder,node,node_get(node,proc_rettypes))
@@ -1613,9 +1694,6 @@ contains
           call trav_xexpr(coder,cblock,node,p)
           do i=1,nret
              arg=coder%vstack(coder%vtop+1-i)
-             if(cnode_is_tempvar(arg)) &
-                  call cnode_set(arg,var_assign_call,&
-                  cnode_get(cblock,cblock_last_call))
           enddo
           call make_call(coder,cblock,node,sym_result,nret,0)
           if(pm_debug_level>0) then
@@ -1630,6 +1708,7 @@ contains
        call code_num(coder,int(npars,pm_p))  ! Number of parameters
        call code_num(coder,int(nret,pm_p))   ! Number of returns
        call code_num(coder,0_pm_p)           !!! Flags
+       call code_num(coder,node_get_num(node,proc_name)) ! Name
        call make_code(coder,node,cnode_is_proc,pr_node_size)
        call restore_proc_state
        if(pm_debug_level>0) then
@@ -1748,7 +1827,7 @@ contains
     if(pm_debug_level>2) then
        call pm_name_string(coder%context,name%offset,str)
        call pm_name_string(coder%context,amplocs%offset,str(len_trim(str)+2:))
-       write(*,*) 'SIG:',trim(str),'NARGS=',nargs,'nret=',nret
+       write(*,*) 'SIG:',trim(str),'NARGS=',nargs,'nret=',nret,'AMP',amplocs%offset
     endif
     k=pm_ivect_lookup(coder%context,coder%sig_cache,sig_key,4)
     if(k==0) then
@@ -1814,7 +1893,8 @@ contains
              if(pm_fast_isnull(proc)) exit
           enddo
           if(pm_debug_level>2) &
-               write(*,*) 'SIGEND>',trim(str),'NARGS=',nargs,'nret=',nret,'N=',coder%vtop-base
+               write(*,*) 'SIGEND>',trim(str),&
+               'NARGS=',nargs,'nret=',nret,'N=',coder%vtop-base
           if(coder%vtop>base+2) then
              if(coder%vtop>base+3) call sort_sig(coder,base+2,coder%vtop)
              if(pm_debug_level>2) &
@@ -1848,6 +1928,9 @@ contains
       amplocs2=node_get(proc,proc_amplocs)
       rtn=node_get(proc,proc_numret)
       nret2=rtn%offset
+      if(pm_debug_level>3) then
+         write(*,*) 'CHECK CONFORM>',cflags,flags2,amplocs%offset,amplocs2%offset,nret,nret2,pm_null_obj%offset
+      endif
       ok=(amplocs2%offset==amplocs%offset&
            .and.nret2==nret.and.&
            iand(flags2,cflags)==cflags)
@@ -2041,6 +2124,7 @@ contains
     call code_num(coder,coder%index)
     call code_val(coder,coder%loop_cblock)
     call code_val(coder,pm_null_obj)
+    call code_val(coder,pm_null_obj)
     call make_code(coder,node,cnode_is_var,var_node_size)
     link=cnode_get(cblock,cblock_last_var)
     if(pm_fast_isnull(link)) then
@@ -2097,6 +2181,7 @@ contains
     call code_num(coder,coder%index)
     call code_val(coder,coder%loop_cblock)
     call code_val(coder,pm_null_obj)
+    call code_val(coder,pm_null_obj)
     call make_code(coder,node,cnode_is_var,var_node_size)
     coder%top=coder%top+1
     coder%stack(coder%top)=name%offset
@@ -2120,23 +2205,6 @@ contains
     include 'fisnull.inc'
   end subroutine make_var
 
-  ! Is code node a temp variable?
-  function cnode_is_tempvar(arg) result(ok)
-    type(pm_ptr),intent(in):: arg
-    logical:: ok
-    if(pm_fast_vkind(arg)==pm_pointer) then
-       if(cnode_get_kind(arg)==cnode_is_var) then
-          if(cnode_get_num(arg,var_name)==0) then
-             ok=.true.
-             return
-          endif
-       endif
-    endif
-    ok=.false.
-  contains
-    include 'fvkind.inc'
-  end function cnode_is_tempvar
-
   ! Make a constant access code node
   subroutine make_const(coder,cblock,node,val,typ)
     type(code_state),intent(inout):: coder
@@ -2147,7 +2215,7 @@ contains
        call make_temp_var(coder,coder%loop_cblock,node)
        call dup_code(coder)
        call mk_const
-       call code_val(coder,coder%var(coder%loop_base+1))
+       call code_val(coder,coder%var(coder%loop_base+6))
        call make_sys_call(coder,coder%loop_cblock,node,sym_import_val,2,1)
     else
        call mk_const
@@ -2170,8 +2238,8 @@ contains
     ! Give temp var a name - nameless vars may only
     ! be used once
     e=expr
-    if(cnode_is_tempvar(e)) &
-         call cnode_set_num(e,var_name,sym_var)
+    if(cnode_get_kind(e)==cnode_is_var) &
+         call cnode_set_flags(e,var_flags,ior(var_multi_access,var_accessed))
     call code_val(coder,e)
   end subroutine dup_expr
   
@@ -2187,8 +2255,8 @@ contains
        expr=coder%vstack(coder%vtop-n+1)
        ! Give temp var a name - nameless vars may only
        ! be used once
-       if(cnode_is_tempvar(expr)) &
-            call cnode_set_num(expr,var_name,sym_var)
+       if(cnode_get_kind(expr)==cnode_is_var) &
+            call cnode_set_flags(expr,var_flags,ior(var_multi_access,var_accessed))
        coder%vstack(coder%vtop+i)=expr
     enddo
     coder%vtop=coder%vtop+n
@@ -2226,9 +2294,10 @@ contains
     type(pm_ptr),intent(in):: cblock,node,procs
     integer,intent(in):: narg,nret,nkeys
     integer,intent(in):: iflag
-    type(pm_ptr):: p,q,n
+    type(pm_ptr):: p,q,n,args
     integer i
-    call make_code(coder,node,cnode_is_arglist,narg+nret+nkeys)
+    call make_code(coder,node,cnode_is_arglist,nret+nkeys+narg)
+    args=top_code(coder)
     call code_val(coder,cblock)
     call code_val(coder,procs)
     call code_num(coder,int(iflag,pm_p))
@@ -2239,6 +2308,26 @@ contains
     call code_num(coder,coder%index)
     call make_code(coder,node,cnode_is_call,call_node_size)
     n=top_code(coder)
+    do i=1,nret
+       p=cnode_arg(args,i)
+       call cnode_set(p,var_set_call,n)
+       if(cnode_flags_set(p,var_flags,var_changed)) then
+          call cnode_set_flags(p,var_flags,var_multi_change)
+       else
+          call cnode_set_flags(p,var_flags,var_changed)
+       endif
+    enddo
+    do i=nret+1,nret+nkeys+narg
+       p=cnode_arg(args,i)
+       if(cnode_get_kind(p)==cnode_is_var) then
+          call cnode_set(p,var_get_call,n)
+          if(cnode_flags_set(p,var_flags,var_accessed)) then
+             call cnode_set_flags(p,var_flags,var_multi_access)
+          else
+             call cnode_set_flags(p,var_flags,var_accessed)
+          endif
+       endif
+    enddo
     p=cnode_get(cblock,cblock_last_call)
     if(pm_fast_isnull(p)) then
        call pm_ptr_assign(coder%context,cblock,&
@@ -2592,7 +2681,8 @@ contains
             varkind=trim(varkind)//' amp'
        write(iunit,*) spaces(1:depth*2),'Variable '&
             //trim(adjustl(varkind))//': '//trim(str),&
-            cnode_get_num(node,var_index)
+            cnode_get_num(node,var_index),pm_fast_isnull(cnode_get(node,var_get_call)),&
+            pm_fast_isnull(cnode_get(node,var_get_call))
        if(.not.pm_fast_isnull(rvec)) then
           i= rvec%data%i16(rvec%offset+&
                cnode_get_num(node,var_index))

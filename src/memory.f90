@@ -222,6 +222,7 @@ module pm_memory
 
 
   type(pm_ptr),public:: pm_null_obj,pm_tinyint_obj,pm_name_obj
+  type(pm_ptr),public:: pm_true_obj,pm_false_obj
 
 contains
 
@@ -233,6 +234,7 @@ contains
   ! Initialise memory management
   function pm_init_gc() result(context)
     type(pm_context),pointer:: context
+    type(pm_root),pointer:: troot,froot
     allocate(context)
     call init_context(context,.true.)
     if(pm_debug_level>1) &
@@ -747,6 +749,9 @@ contains
     blk=>new_block(context,vkind,esize)
     blk%next=>context%new_large
     context%new_large=>blk
+    if(pm_debug_level>0) then
+       if(associated(blk,blk%next)) call pm_panic('big loop')
+    endif
     ptr%data=>blk
     ptr%offset=1
     if(vkind>=pm_pointer) &
@@ -855,15 +860,17 @@ contains
   end subroutine pm_fill_vect
 
   ! Dump a tree - used mainly for debugging
-  recursive subroutine pm_dump_tree(context,iunit,ptr,depth,single)
+  recursive subroutine pm_dump_tree(context,iunit,ptrin,depth,single)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
-    type(pm_ptr),intent(in):: ptr
+    type(pm_ptr),intent(in):: ptrin
     integer,intent(in):: depth
     logical,intent(in),optional:: single
     character(len=100):: spaces
     integer:: i
     logical:: ok,nomore,is_single
+    type(pm_ptr):: ptr
+    ptr=ptrin
     if(present(single)) then
        is_single=single
     else
@@ -1107,11 +1114,20 @@ contains
        if(ptr%data%vkind==pm_pointer) then
           write(iunit,*) spaces(1:depth*2),'Pointer(',ptr%data%esize
        else if(ptr%data%vkind==pm_stack) then
-          write(iunit,*) spaces(1:depth*2),'Stack(',ptr%data%esize
+
+          if(((ptr%offset-1)/(ptr%data%esize+1)*(ptr%data%esize+1)/=ptr%offset-1)) then
+             write(iunit,*) spaces(1:depth*2),'Stackptr(',ptr%data%esize
+             call pm_dump_tree(context,iunit,ptr%data%ptr(ptr%offset),&
+                  depth+1,is_single)
+             write(iunit,*) spaces(1:depth*2),')'
+             return
+          else
+             write(iunit,*) spaces(1:depth*2),'Stack(',ptr%data%esize
+          endif
        else
           write(iunit,*) spaces(1:depth*2),'User(',ptr%data%esize
        endif
-       if(depth>49.or.is_single.and.depth>2) then
+       if(depth>30.or.(is_single.and.depth>2)) then
           write(iunit,*) spaces,'>>more'
        else
           do i=0,min(ptr%data%esize,19)
@@ -1334,6 +1350,7 @@ contains
     ! Migrate large blocks to heap
     call migrate_large_blocks(context,context%new_large,&
          context%heap_large)
+    nullify(context%new_large)
     
     if(major_cycle) then
        if(pm_debug_level>1) write(*,*) 'Finalize'
@@ -1397,6 +1414,14 @@ contains
        pm_tinyint_obj%offset=0
        pm_name_obj%data=>new_block(context,pm_name,0_pm_ln)
        pm_name_obj%offset=0
+       pm_true_obj%data=>new_block(context,pm_logical,1_pm_ln)
+       pm_false_obj%data=>pm_true_obj%data
+       deallocate(pm_true_obj%data%l)
+       allocate(pm_true_obj%data%l(2))
+       pm_true_obj%offset=2
+       pm_false_obj%offset=1
+       pm_true_obj%data%l(pm_true_obj%offset)=.true.
+       pm_false_obj%data%l(pm_false_obj%offset)=.false.
     endif
     forall (i=1:pm_large_obj_size, j=pm_int:pm_num_vkind)
        context%obj_list(i,j)%data=>null()
@@ -1705,7 +1730,7 @@ contains
     do while(context%top>0)
        ptr2=pop()
        n=ptr2%data%esize
-       !write(*,*) 'MARKING FROM:',ptr2%offset,n
+       !write(*,*) 'MARKING FROM:',ptr2%data%vkind,ptr2%offset,n
        if(ptr2%offset<0) then
           ptr2%offset=-ptr2%offset
           i=ptr%data%esize+1
@@ -1724,13 +1749,17 @@ contains
              ! Slot 3 is FUNC not scanned
              ! Stack one below last new frame on the chain may be 
              ! dirty -- mark from it directly rather than pushing
+             write(*,*) 'RESET',ptr2%offset
+             i=ptr2%data%esize+1
+             ptr2%offset=((ptr2%offset-1)/i)*i+1
+             write(*,*) 'TO',ptr2%offset,'USING',ptr2%data%esize+1
              ptr3=ptr2%data%ptr(ptr2%offset+pm_stack_oldstack)
              if(associated(ptr3%data%context,context)) then 
-                if(ptr3%data%vkind>pm_null) then 
+                if(ptr3%data%vkind==pm_stack) then 
                    if(marked(ptr3)) then
                       ! OLDSTACK is older frame - mark from it
                       n=ptr3%data%ptr(ptr3%offset)%offset
-                      do i=ptr3%offset+3,ptr3%offset+n
+                      do i=ptr3%offset+pm_stack_locals,ptr3%offset+n
                          ptr4=ptr3%data%ptr(ptr3%offset+i)
                          if(associated(ptr4%data%context,context)) then
                             if(.not.marked(ptr4)) then
@@ -1749,7 +1778,8 @@ contains
                 endif
              endif
              ! Ignore first four elements of stack
-             n=ptr2%data%ptr(ptr2%offset)%offset-pm_stack_locals
+             n=ptr2%data%esize-pm_stack_locals
+             !write(*,*) 'set N=',n
              ptr2%offset=ptr2%offset+pm_stack_locals
           endif
        endif
@@ -1762,10 +1792,10 @@ contains
        do i=ptr2%offset,ptr2%offset+n
           ptr3=ptr2%data%ptr(i)
           !write(*,*) 'SLOT',i
-          !write(*,*) 'Slot',i,ptr3%data%vkind,ptr3%offset
-          if(associated(ptr3%data%context,context)) then
-             if(pm_debug_level>0) &
+          !write(*,*) 'Slot',i,ptr3%data%vkind,ptr3%offset,ptr2%offset,ptr2%offset+ptr2%data%esize
+          if(pm_debug_level>0) &
                   call pm_verify_ptr(ptr3,'in mark_from')
+          if(associated(ptr3%data%context,context)) then
              if(ptr3%data%vkind>=pm_pointer) then
                 if(.not.marked(ptr3)) then
                    call mark(ptr3)

@@ -41,9 +41,9 @@ module pm_backend
      type(pm_reg),pointer:: reg
      type(pm_ptr),dimension(max_const):: values
      type(pm_ptr):: temp,code_cache,sig_cache
-     integer:: nval,pc,last,npar,stacktop
-     logical,dimension(pm_max_stack,pm_pointer):: in_use
-     integer,dimension(pm_pointer):: nvar,avar
+     integer:: nval,pc,last
+     logical,dimension(pm_max_stack):: in_use
+     integer:: nvar,avar,npar,mvar
      integer(pm_i16),dimension(max_code_stack):: rdata
      integer(pm_i16),dimension(max_code_size):: wc
      integer(pm_i16):: cur_modl,cur_line
@@ -51,7 +51,7 @@ module pm_backend
 
 contains
 
-  ! Initialise finalise stage control structure
+  ! Initialise final-stage control structure
   subroutine init_fs(context,fs,sig_cache)
     type(pm_context),pointer:: context
     type(finaliser),intent(out):: fs
@@ -86,8 +86,8 @@ contains
     cblock=cnode_arg(p,1)
     rv=cnode_arg(p,2)
     ve=0
-    call finalise_cblock(fs,cblock,rv,ve)
-    call make_proc_code(fs,1_pm_ln)
+    call finalise_cblock(fs,cblock,rv,ve,0)
+    call make_proc_code(fs,1_pm_ln,int(sym_pm_system,pm_i16))
     if(pm_debug_level>2) &
            write(*,*) 'FINALISE PROG COMPLETE>'
   contains
@@ -97,7 +97,7 @@ contains
   ! Finise procedure definitions
   subroutine finalise_procs(fs)
     type(finaliser),intent(inout):: fs
-    type(pm_ptr):: prc,rv,cblock,p,tv
+    type(pm_ptr):: prc,pr,rv,cblock,p,tv
     integer(pm_i16):: ve,k
     integer(pm_ln):: i,n
     i=2
@@ -108,13 +108,16 @@ contains
        ve=p%data%i16(p%offset+1_pm_p)
        call init_final_proc(fs,prc)
        rv=cnode_arg(prc,2)
-       cblock=cnode_arg(prc,1)
-       fs%npar=cnode_get_num(cblock,pr_nret)
-       cblock=cnode_get(cblock,pr_cblock)
+       pr=cnode_arg(prc,1)
+       fs%npar=cnode_get_num(pr,pr_nret)
+       fs%nvar=fs%npar
+       fs%avar=fs%npar
+       fs%in_use(1:fs%nvar)=.true.
+       cblock=cnode_get(pr,pr_cblock)
        if(pm_debug_level>2) &
             write(*,*) 'FINALISE PROC>',i,'SIGNO>',n,'VE>',ve,'NRET>',fs%npar
-       call finalise_cblock(fs,cblock,rv,ve)
-       call make_proc_code(fs,i)
+       call finalise_cblock(fs,cblock,rv,ve,0)
+       call make_proc_code(fs,i,int(cnode_get_num(pr,pr_name),pm_i16))
        i=i+1
     end do
   contains
@@ -129,52 +132,42 @@ contains
     fs%last=max_code_size
     fs%nval=0
     fs%nvar=0
+    fs%mvar=0
     fs%avar=0
     fs%npar=0
-    fs%stacktop=0
     fs%rdata(1:pm_fast_esize(cnode_arg(prc,2))+1)=-1
   contains
     include 'fesize.inc'
   end subroutine init_final_proc
   
-
   ! Make proc object
-  subroutine make_proc_code(fs,i)
+  subroutine make_proc_code(fs,i,name)
     type(finaliser),intent(inout):: fs
     integer(pm_ln),intent(in):: i
-    integer:: n,m,nalloc,vs,j,k
+    integer(pm_i16),intent(in):: name
+    integer:: n,m,vs,j,k
     type(pm_ptr):: p,p2
-    if(pm_debug_level>2) write(*,*) 'MAKE PROC CODE>',i
+    if(pm_debug_level>2) write(*,*) 'MAKE PROC CODE>',i,&
+         trim(pm_name_as_string(fs%context,int(name,pm_p)))
     call wc(fs,op_return)
     call wc(fs,0_pm_i16)
     call wc(fs,0_pm_i16)
-    call tidy_up(fs,nalloc)
+    call tidy_up(fs)
     n=fs%nval
     m=max_code_size-fs%last
     fs%temp=pm_fast_new(fs%context,pm_pointer,int(n+2,pm_p))
     call pm_ptr_assign(fs%context,&
          pm_dict_vals(fs%context,fs%code_cache),i-1,fs%temp)
-    if(.not.pm_dict_val(fs%context,fs%code_cache,i)==fs%temp) call pm_panic('uuu')
     call pm_assign_new(fs%context,fs%temp,&
-         0_pm_ln,pm_int16,int(fs%pc-1+nalloc,pm_ln),.false.)
+         0_pm_ln,pm_int16,int(fs%pc+2,pm_ln),.false.)
     call pm_assign_new(fs%context,fs%temp,&
          1_pm_ln,pm_int16,int(m,pm_ln),.false.)
     p=fs%temp
     p2=p%data%ptr(p%offset)
-    j=p2%offset+2
-    vs=pm_stack_locals+fs%npar
-    do k=pm_int,pm_pointer
-       if(fs%nvar(k)>0) then
-          p2%data%i16(j)=op_alloc_int+k-pm_int
-          p2%data%i16(j+1)=vs*(pm_max_stack+1)+fs%nvar(k)
-          p2%data%i16(j+2)=128*(vs-1)
-          vs=vs+fs%nvar(k)
-          j=j+3
-       endif
-    enddo
-    p2%data%i16(p2%offset)=vs ! Required stack size
+    p2%data%i16(p2%offset)=fs%mvar+pm_stack_locals ! Required stack size
     p2%data%i16(p2%offset+1)=fs%npar
-    p2%data%i16(p2%offset+nalloc:p2%offset+fs%pc-2+nalloc)=fs%wc(1:fs%pc-1)
+    p2%data%i16(p2%offset+2)=name
+    p2%data%i16(p2%offset+3:p2%offset+fs%pc+1)=fs%wc(1:fs%pc-1)
     p2=p%data%ptr(p%offset+1_pm_p)
     p2%data%i16(p2%offset:p2%offset+m-1)=fs%wc(fs%last+1:max_code_size)
     if(n>0) then
@@ -188,10 +181,11 @@ contains
   end subroutine make_proc_code
 
   ! Finalise a call block
-  subroutine finalise_cblock(fs,cblock,rv,ve)
+  subroutine finalise_cblock(fs,cblock,rv,ve,base)
     type(finaliser),intent(inout):: fs
     type(pm_ptr),intent(in):: cblock,rv
     integer(pm_i16),intent(in):: ve
+    integer,intent(in):: base
     type(pm_ptr):: p
     integer:: slot,par,num_named,first_pc,j
     integer(pm_i16):: name
@@ -203,33 +197,28 @@ contains
     if(.not.pm_fast_isnull(p)) then
        do while(iand(cnode_get_num(p,var_flags),var_param)/=0)
           slot=cnode_get_num(p,var_index)
-          fs%rdata(slot)=par+pm_stack_locals
+          fs%rdata(slot+base)=alloc_var(fs)
           par=par+1
           p=cnode_get(p,var_link)
           if(pm_fast_isnull(p)) exit
        enddo
     endif
     fs%npar=par
-    ! Allocate named variables
+    ! Allocate multiple-use variables
     num_named=0
     do while(.not.pm_fast_isnull(p))
-       if(cnode_get_num(p,var_name)/=0) then
+       if(arg_is_mvar(p)) then
           slot=cnode_get_num(p,var_index)
-          if(ve==0) then
-             tk=var_kind(int(rv%data%i16(rv%offset+slot)))
-          else
-             tk=pm_pointer
-          endif
-          fs%rdata(slot)=alloc_var(fs,&
-               tk)
-          num_named=num_named+1
+          fs%rdata(slot+base)=alloc_var(fs)
+          if(cnode_get_num(p,var_name)/=0) &
+               num_named=num_named+1
        endif
        p=cnode_get(p,var_link)
     enddo
     ! Process calls
     p=cnode_get(cblock,cblock_first_call)
     do while(.not.pm_fast_isnull(p))
-       call finalise_call(fs,p,rv,ve)
+       call finalise_call(fs,p,rv,ve,base)
        p=cnode_get(p,call_link)
     enddo
     if(num_named+par>0) then
@@ -245,13 +234,15 @@ contains
        j=1
        p=cnode_get(cblock,cblock_first_var)
        do while(.not.pm_fast_isnull(p))
-          name=cnode_get_num(p,var_name)
-          if(name/=0) then
+          if(arg_is_mvar(p)) then
              slot=cnode_get_num(p,var_index)
-             fs%wc(fs%last+j*2)=name
-             fs%wc(fs%last+j*2-1)=fs%rdata(slot)
-             j=j+1
-             call release_var(fs,fs%rdata(slot))
+             call release_var(fs,fs%rdata(slot+base))
+             name=cnode_get_num(p,var_name)
+             if(name/=0) then
+                fs%wc(fs%last+j*2)=name
+                fs%wc(fs%last+j*2-1)=fs%rdata(slot+base)
+                j=j+1
+             endif
           endif
           p=cnode_get(p,var_link)
        enddo
@@ -261,10 +252,11 @@ contains
   end subroutine finalise_cblock
 
   ! Finalise procedure calls and control structures
-  subroutine finalise_call(fs,callnode,rv,ve)
+  subroutine finalise_call(fs,callnode,rv,ve,base)
     type(finaliser),intent(inout):: fs
     type(pm_ptr),intent(in):: callnode,rv
     integer(pm_i16),intent(in):: ve
+    integer,intent(in):: base
     type(pm_ptr):: args,arg,v,tv
     integer:: nargs,nret,n,slot,slot2
     integer:: k
@@ -291,25 +283,25 @@ contains
     case(sym_if)
        if(ve==0) then
           i=wc_jump_call(fs,args,op_jmp_false,0_pm_i16,1)
-          call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve)
-          call finalise_cblock(fs,cnode_arg(args,2),rv,ve)
+          call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve,base)
+          call finalise_cblock(fs,cnode_arg(args,2),rv,ve,base)
           arg=cnode_arg(args,3)
           if(.not.pm_fast_isnull(arg)) then
              j=wc_jump_call(fs,args,op_jmp,0_pm_i16,0)
              call set_jump_to_here(i)
-             call finalise_cblock(fs,arg,rv,ve)
+             call finalise_cblock(fs,arg,rv,ve,base)
              call set_jump_to_here(j)
           else
              call set_jump_to_here(i)
           endif
        else
-          new_ve=alloc_var(fs,pm_pointer)
+          new_ve=alloc_var(fs)
           j=wc_jump_call(fs,callnode,op_and_jmp_none,&
                0_pm_i16,3)
           call wc(fs,new_ve)
           call wc(fs,ve)
-          call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve)
-          call finalise_cblock(fs,cnode_arg(args,2),rv,new_ve)
+          call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve,base)
+          call finalise_cblock(fs,cnode_arg(args,2),rv,new_ve,base)
           call set_jump_to_here(j)
           arg=cnode_arg(args,3)
           if(.not.pm_fast_isnull(arg)) then
@@ -317,15 +309,15 @@ contains
                   0_pm_i16,3)
              call wc(fs,new_ve)
              call wc(fs,ve)
-             call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve)
-             call finalise_cblock(fs,arg,rv,new_ve)
+             call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve,base)
+             call finalise_cblock(fs,arg,rv,new_ve,base)
              call set_jump_to_here(j)
           endif
           call release_var(fs,new_ve)
        endif
     case(sym_while)
        if(ve/=0) then
-          new_ve=alloc_var(fs,pm_pointer)
+          new_ve=alloc_var(fs)
           call wc_call(fs,callnode,op_clone,new_ve,1)
           call wc(fs,ve)
        else
@@ -333,113 +325,102 @@ contains
        endif
        i=wc_jump_call(fs,args,op_jmp,0_pm_i16,0)
        j=fs%pc
-       call finalise_cblock(fs,cnode_arg(args,3),rv,new_ve)
+       call finalise_cblock(fs,cnode_arg(args,3),rv,new_ve,base)
        call set_jump_to_here(i)
-       call finalise_cblock(fs,cnode_arg(args,1),rv,new_ve)
+       call finalise_cblock(fs,cnode_arg(args,1),rv,new_ve,base)
        if(ve/=0) then
           call wc_call(fs,args,op_and_jmp_any,&
                j,3)
           call wc(fs,new_ve)
           call wc(fs,ve)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve,base)
           call release_var(fs,new_ve)
        else
           call wc_call(fs,args,op_jmp_true,j,1)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve,base)
        endif
     case(sym_repeat)
        if(ve==0) then
           i=fs%pc
-          call finalise_cblock(fs,cnode_arg(args,1),rv,ve)
+          call finalise_cblock(fs,cnode_arg(args,1),rv,ve,base)
           call wc_call(fs,callnode,op_jmp_false,&
                i,1)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve,base)
        else
-          new_ve=alloc_var(fs,pm_pointer)
+          new_ve=alloc_var(fs)
           call wc_call(fs,callnode,op_clone,new_ve,1)
           call wc(fs,ve)
           i=fs%pc
-          call finalise_cblock(fs,cnode_arg(args,1),rv,new_ve)
+          call finalise_cblock(fs,cnode_arg(args,1),rv,new_ve,base)
           call wc_call(fs,args,op_andnot_jmp_any,&
                i,2)
           call wc(fs,new_ve)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve,base)
           call release_var(fs,new_ve)
        endif
     case(sym_loop,sym_find)
        j=wc_jump_call(fs,callnode,&
             op_loop_start+ve_adds(1_pm_i16),0_pm_i16,2+ve_adds(1_pm_i16))
        if(ve/=0) call wc(fs,ve)
-       call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve)
-       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve,base)
+       call wc(fs,get_var_slot(fs,cnode_arg(args,2),base))
        i=fs%pc
-       call finalise_cblock(fs,cnode_arg(args,3),rv,ve)
+       call finalise_cblock(fs,cnode_arg(args,3),rv,ve,base)
        call wc_call(fs,callnode,&
             op_loop_end+ve_adds(1_pm_i16),i,2+ve_adds(1_pm_i16))
        if(ve/=0) call wc(fs,ve)
-       call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve)
-       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve,base)
+       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve,base)
        call set_jump_to_here(j)
     case(sym_do)
-       call finalise_cblock(fs,cnode_arg(args,1),rv,ve)
+       call finalise_cblock(fs,cnode_arg(args,1),rv,ve,base)
     case(sym_par_loop,sym_par_find)
        j=0
        if(sig==sym_par_find) j=j+1
-       new_ve=alloc_contig_vars(fs,pm_pointer,nargs+1)
+       new_ve=alloc_var(fs)
        call wc_call(fs,args,op_par_loop+ve_adds(1_pm_i16),&
             new_ve,nargs-1-j+ve_adds(1_pm_i16))
        if(ve/=0) call wc(fs,ve)
-       do k=2+j,nargs
-          call wc_arg(fs,cnode_arg(args,k),k<=nret,rv,ve)
+       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve,base)
+       do k=3+j,nargs
+          call wc_arg(fs,cnode_arg(args,k),.false.,rv,ve,base)
        enddo
        j=wc_jump_call(fs,args,op_jmp,0_pm_i16,0)
-       call finalise_cblock(fs,cnode_arg(args,nret+1),rv,new_ve)
+       call finalise_cblock(fs,cnode_arg(args,2),rv,new_ve,base)
        call wc_call(fs,args,op_par_loop_end,0_pm_i16,0)
-       call release_contig_vars(fs,pm_pointer,nargs+1,new_ve)
+       call release_var(fs,new_ve)
        call set_jump_to_here(j)
-    case(sym_define)
-       tno=check_arg_type(args,rv,1)
-       arg=cnode_arg(args,2)
-       if(.not.arg_is_tempvar(arg)) then
-          i=get_var_slot(fs,cnode_arg(args,1))
-          call add_in_assign
-       else
-          slot=fs%rdata(cnode_get_num(arg,var_index))
-          if(tno>pm_null.and.tno<pm_string.and.fs%wc(slot)<0) then
-             i=get_var_slot(fs,cnode_arg(args,1))
-             call add_in_assign
-          endif
-       endif
     case(sym_arrow)
-       i=get_var_slot(fs,cnode_get(args,1))
+       i=get_var_slot(fs,cnode_arg(args,1),base)
        if(ve==0) then
           call wc_call(fs,callnode,op_setref,i,1)
        else
           call wc_call(fs,callnode,op_setref_vect,i,2)
        endif
-       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve,base)
     case(sym_array)
        j=check_arg_type(args,rv,1)
        if(.not.pm_typ_is_concrete(fs%context,j)) then
           j=-j
        endif
-       call wc_call_args(fs,args,op_array+ve_adds(1_pm_i16),j,3,1,rv,ve)
+       call wc_call_args(fs,args,op_array+ve_adds(1_pm_i16),j,3,1,rv,ve,base)
     case(sym_any)
        tno=cnode_get_num(args,cnode_args+1)
        call wc_call(fs,args,op_any+ve_adds(1_pm_i16),tno,2)
        if(ve/=0) call wc(fs,ve)
-       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve)
-       call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve,base)
+       call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve,base)
     case(sym_struct,sym_rec)
        i=fs%pc
        do k=3,nargs
           arg=cnode_arg(args,k)
           if(cnode_get_kind(arg)==cnode_is_const.and.sig==sym_struct&
-               .or.arg_is_namedvar(arg)) then
-             j=alloc_var(fs,pm_pointer)
-             call wc_call(fs,args,op_clone+ve_adds(1_pm_i16),j,1+ve_adds(1_pm_i16))
+               .or.arg_is_mvar(arg)) then
+             j=alloc_var(fs)
+             call wc_call(fs,args,op_clone+ve_adds(1_pm_i16),0_pm_i16,2+ve_adds(1_pm_i16))
              if(ve/=0) call wc(fs,ve)
-             call wc_arg(fs,arg,.false.,rv,ve)
+             call wc(fs,-j)
+             call wc_arg(fs,arg,.false.,rv,ve,base)
           endif
        enddo
        j=check_arg_type(args,rv,1)
@@ -449,69 +430,73 @@ contains
        call wc_call(fs,args,op_struct+ve_adds(1_pm_i16),&
             j,nargs-1+ve_adds(1_pm_i16))
        if(ve/=0) call wc(fs,ve)
-       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve,base)
        do k=3,nargs
           arg=cnode_arg(args,k)
           if(cnode_get_kind(arg)==cnode_is_const.and.sig==sym_struct&
-               .or.arg_is_namedvar(arg)) then
-             call wc(fs,fs%wc(i+1))
-             call release_var(fs,fs%wc(i+1))
-             i=i+4+ve_adds(1_pm_i16)
+               .or.arg_is_mvar(arg)) then
+             call wc(fs,-fs%wc(i+3))
+             call release_var(fs,-fs%wc(i+3))
+             i=i+5+ve_adds(1_pm_i16)
           else
-             call wc_arg(fs,cnode_arg(args,k),.false.,rv,ve)
+             call wc_arg(fs,cnode_arg(args,k),.false.,rv,ve,base)
           endif
        enddo
     case(sym_dot,sym_dotref)
        i=rvv(cnode_get_num(callnode,call_index))
        j=ve_adds(1_pm_i16)
        if(i>0) then
-          call wc_call(fs,callnode,op_struct_elem+j,i,2+j)
+          call wc_call(fs,callnode,op_elem+j,i,2+j)
        else 
           v=cnode_arg(cnode_arg(args,3),1)
-          j=v%offset
-          call wc_call(fs,callnode,op_poly_struct_elem+j,-i,2+j)
+          i=v%offset
+          call wc_call(fs,callnode,op_poly_elem+j,i,2+j)
        endif
        if(ve/=0) call wc(fs,ve)
-       j=alloc_var(fs,pm_pointer)
-       call wc(fs,-j)
-       fs%rdata(cnode_get_num(cnode_arg(args,1),var_index))=fs%pc-1
-       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve,base)
+       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve,base)
+    case(sym_set_dot,sym_set_dot_index,sym_set_dot_open_index)
+       i=rvv(cnode_get_num(callnode,call_index))
+       j=ve_adds(1_pm_i16)
+       k=2+j
+       if(sig/=sym_set_dot) then
+          k=k+1
+       else
+          j=j+(sig-sym_set_dot)*2
+       endif
+       if(i>0) then
+          call wc_call(fs,callnode,op_set_elem+j,i,k)
+       else 
+          v=cnode_arg(cnode_arg(args,3),1)
+          i=v%offset
+          call wc_call(fs,callnode,op_set_poly_elem+j,i,k)
+       endif
+       if(ve/=0) call wc(fs,ve)
+       call wc_arg(fs,cnode_arg(args,1),.false.,rv,ve,base)
+       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve,base)
+       if(sig/=sym_set_dot) call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve,base)
     case(sym_import)
        call wc_call(fs,args,op_import,0_pm_i16,nargs)
-       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve,base)
        do k=2,nargs
-          call wc_arg(fs,cnode_arg(args,k),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,k),.false.,rv,ve,base)
        enddo
     case(sym_export)
        call wc_call(fs,args,op_export,0_pm_i16,nargs)
-       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,1),.true.,rv,ve,base)
        do k=2,nargs
-          call wc_arg(fs,cnode_arg(args,k),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,k),.false.,rv,ve,base)
        enddo
     case(sym_check)
        if(nargs==1) then
-          call wc_call_args(fs,args,op_check,0_pm_i16,1,0,rv,ve)
+          call wc_call_args(fs,args,op_check,0_pm_i16,1,0,rv,ve,base)
        else
-!!$          call wc_call_args(fs,args,op_check_assign,0_pm_i16,2,1,rv,ve)
+!!$          call wc_call_args(fs,args,op_check_assign,0_pm_i16,2,1,rv,ve,base)
        endif
     case(sym_open)
        continue ! Nothing to do
     case(sym_result)
-       do k=1,nargs
-          i=k+pm_stack_locals-1
-          arg=cnode_arg(args,k)
-          tno=check_arg_type(args,rv,k)
-          if(arg_is_tempvar(arg)) then
-             slot=fs%rdata(cnode_get_num(arg,var_index))
-             if(tno>pm_null.and.tno<pm_string.and.fs%wc(slot)<0) then
-                call add_in_assign
-             else
-                fs%wc(slot)=i
-             endif
-          else
-             call add_in_assign
-          endif
-       enddo
+       call wc_call_args(fs,args,op_return,0_pm_i16,nargs,0,rv,ve,base)
     case default
        if(sig>0) then
           write(*,*) 'SIG=',sig
@@ -525,10 +510,10 @@ contains
        if(tk==cnode_is_single_proc) then
           if(varg) then
              call wc_call_args(fs,args,op_vcall,int(pm_stack_locals+fs%npar-1,pm_i16),&
-                  nargs,nret,rv,ve)
+                  nargs,nret,rv,ve,base)
              call wc_call(fs,args,op_call,add_fn(i),0)
           else
-             call wc_call_args(fs,args,op_call,add_fn(i),nargs,nret,rv,ve)
+             call wc_call_args(fs,args,op_call,add_fn(i),nargs,nret,rv,ve,base)
           endif
        elseif(tk==cnode_is_multi_proc) then
           do i=1,cnode_numargs(v),2
@@ -550,11 +535,11 @@ contains
           fs%pc=fs%pc-siz
           if(varg) then
              call wc_call_args(fs,args,op_vcall,int(pm_stack_locals+fs%npar-1,pm_i16),&
-                  nargs,nret,rv,ve)
+                  nargs,nret,rv,ve,base)
              call wc_call(fs,args,op_poly_call,add_const(fs,fs%temp),0)
           else
              call wc_call_args(fs,args,op_poly_call,add_const(fs,fs%temp),&
-                  nargs,nret,rv,ve)
+                  nargs,nret,rv,ve,base)
           endif
        else
           if(tk/=cnode_is_builtin) then
@@ -563,58 +548,16 @@ contains
           endif
           ! Builtin
           j=cnode_get_num(v,bi_opcode)
-          select case(j)
-          case(op_assign:op_assign_vect)
-             arg=cnode_arg(args,2)
-             slot=get_var_slot(fs,cnode_arg(args,1))
-             if(arg_is_tempvar(arg)) then
-                slot2=get_var_slot(fs,arg)
-                if(slot==slot2) return ! Already optimised out
-             endif
-             if(varg) then
-                if(ve==0) then
-                   call wc_call(fs,callnode,op_vcall,&
-                        int(pm_stack_locals+fs%npar-1,pm_i16),1)
-                else
-                   call wc_call(fs,callnode,op_vcall,&
-                        int(pm_stack_locals+fs%npar-1,pm_i16),2)
-                   call wc(fs,ve)
-                endif
-                call wc_arg(fs,arg,.false.,rv,ve)
-                if(ve==0) then
-                   call wc_call(fs,callnode,j,int(slot,pm_i16),0)
-                else
-                   call wc_call(fs,callnode,j+(op_assign_vect-op_assign),int(slot,pm_i16),0)
-                endif
-             else
-                if(ve==0) then
-                   call wc_call(fs,callnode,j,int(slot,pm_i16),1)
-                else
-                   call wc_call(fs,callnode,j+(op_assign_vect-op_assign),int(slot,pm_i16),2)
-                   call wc(fs,ve)
-                endif
-                call wc_arg(fs,arg,.false.,rv,ve)
-             endif
-          case(op_struct_elem)
-             call wc_call(fs,callnode,op_struct_elem+ve_adds(1_pm_i16),&
-                  int(cnode_get_num(v,bi_opcode2),pm_i16),2+ve_adds(1_pm_i16))
-             if(ve/=0) call wc(fs,ve)
-             j=alloc_var(fs,pm_pointer)
-             call wc(fs,-j)
-             fs%rdata(cnode_get_num(cnode_arg(args,1),var_index))=fs%pc-1
-             call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
-          case default
-             if(varg) then
-                call wc_call_args(fs,args,op_vcall,int(pm_stack_locals+fs%npar-1,pm_i16),&
-                     nargs,nret,rv,ve)
-                call wc_call(fs,callnode,j+ve_adds(1_pm_i16),&
-                     int(cnode_get_num(v,bi_opcode2),pm_i16),0)
-             else
-                call wc_call_args(fs,args,j+ve_adds(1_pm_i16),&
-                     int(cnode_get_num(v,bi_opcode2),pm_i16),&
-                     nargs,nret,rv,ve)
-             endif
-          end select
+          if(varg) then
+             call wc_call_args(fs,args,op_vcall,int(pm_stack_locals+fs%npar-1,pm_i16),&
+                  nargs,nret,rv,ve,base)
+             call wc_call(fs,callnode,j+ve_adds(1_pm_i16),&
+                  int(cnode_get_num(v,bi_opcode2),pm_i16),0)
+          else
+             call wc_call_args(fs,args,j+ve_adds(1_pm_i16),&
+                  int(cnode_get_num(v,bi_opcode2),pm_i16),&
+                  nargs,nret,rv,ve,base)
+          endif
        endif
     end select
   contains
@@ -665,104 +608,56 @@ contains
       endif
     end function add_fn
 
-    subroutine add_in_assign
-      if(tno>pm_null.and.tno<pm_string) then
-         if(ve==0) then
-            call wc_call(fs,callnode,op_assign_int+tno-int(pm_int,pm_i16),&
-                 i,1)
-         else
-            call wc_call(fs,callnode,op_assign_int_vect+tno-int(pm_int,pm_i16),&
-                 i,2)
-            call wc(fs,ve)
-         endif
-         call wc_arg(fs,arg,.false.,rv,ve)
-      else
-         if(ve==0) then
-            call wc_call(fs,callnode,op_clone,i,1)
-         else
-            call wc_call(fs,callnode,op_clone_vect,i,1)
-            call wc(fs,ve)
-         endif
-         call wc_arg(fs,arg,.false.,rv,ve)
-      endif
-    end subroutine add_in_assign
-    
   end subroutine finalise_call
   
-  ! Allocate variable yielding intermediate index
-  ! that will need post-processing by tidy-up
-  function alloc_var(fs,vkind) result(k)
+  ! Allocate variable
+  function alloc_var(fs) result(k)
     type(finaliser),intent(inout):: fs
-    integer(pm_p),intent(in):: vkind
     integer:: i
     integer(pm_i16)::k
-    if(pm_debug_level>0) then
-       if(vkind<pm_int.or.vkind>=pm_string.and.vkind/=pm_pointer) &
-            call pm_panic('allocating unresolved var')
-    endif
-    if(fs%nvar(vkind)==fs%avar(vkind)) then
-       fs%nvar(vkind)=fs%nvar(vkind)+1
-       if(vkind==pm_pointer) fs%stacktop=fs%nvar(vkind)
-       fs%avar(vkind)=fs%nvar(vkind)
-       fs%in_use(fs%nvar(vkind),vkind)=.true.
-       k=fs%nvar(vkind)*32+vkind
+    if(fs%nvar==fs%avar) then
+       fs%nvar=fs%nvar+1
+       if(fs%nvar>fs%mvar) fs%mvar=fs%nvar
+       fs%avar=fs%nvar
+       fs%in_use(fs%nvar)=.true.
+       k=fs%nvar
     else
-       fs%avar(vkind)=fs%avar(vkind)+1
-       do i=1,fs%nvar(vkind)
-          if(.not.fs%in_use(i,vkind)) then
-             fs%in_use(i,vkind)=.true.
-             k=i*32+vkind
-             if(vkind==pm_pointer.and.i>fs%stacktop)&
-                  fs%stacktop=i
-             return
+       k=-21
+       fs%avar=fs%avar+1
+       do i=1,fs%nvar
+          if(.not.fs%in_use(i)) then
+             fs%in_use(i)=.true.
+             k=i
+             exit
           endif
        enddo
+       if(pm_debug_level>0) then
+          if(k==-21) call pm_panic('ak')
+       endif
     endif
+    k=k+pm_stack_locals-1
+    if(pm_debug_level>3) write(*,*) 'Alloc var:',k
   end function alloc_var
   
   ! Release variable
-  subroutine release_var(fs,k)
+  subroutine release_var(fs,slot)
     type(finaliser),intent(inout):: fs
-    integer(pm_i16):: k
-    integer(pm_i16):: vk,n
-    if(k<=fs%npar+pm_stack_locals) return
-    vk=iand(k,31)
-    n=k/32
-    if(n==0) call pm_panic('jri')
-    if(.not.fs%in_use(n,vk)) return
-    fs%in_use(n,vk)=.false.
-    fs%avar(vk)=fs%avar(vk)-1
-    if(n==fs%stacktop.and.vk>=pm_pointer) &
-         fs%stacktop=fs%stacktop-1
-  end subroutine release_var
-
-  ! Allocate contiguous block of variables of given type
-  function alloc_contig_vars(fs,vk,n) result(slot)
-    type(finaliser),intent(inout):: fs
-    integer(pm_p),intent(in):: vk
-    integer,intent(in):: n
-    integer(pm_i16):: slot
-    integer:: i
-    slot=fs%nvar(vk)+1
-    fs%nvar(vk)=fs%nvar(vk)+n
-    fs%avar(vk)=fs%avar(vk)+n
-    do i=slot,slot+n-1
-       fs%in_use(i,vk)=.true.
-    enddo
-    slot=slot*32+vk
-  end function alloc_contig_vars
-  
-  ! Release contiguous block of variables of given type
-  subroutine release_contig_vars(fs,vk,n,slot)
-    type(finaliser),intent(inout):: fs
-    integer(pm_p),intent(in):: vk
-    integer,intent(in):: n
     integer(pm_i16),intent(in):: slot
-    integer(pm_i16):: i
-    do i=slot+(n-1)*32,slot,-32
-       call release_var(fs,i)
-    enddo
-  end subroutine release_contig_vars
+    integer:: k
+    k=slot-pm_stack_locals+1
+    if(pm_debug_level>0) then
+       if(k<1.or.k>fs%mvar) then
+          write(*,*) 'k=',k,fs%mvar
+          call pm_panic('release var')
+       endif
+    endif
+    if(.not.fs%in_use(k)) return
+    if(k==fs%nvar) then
+       fs%nvar=fs%nvar-1
+    endif
+    fs%in_use(k)=.false.
+    fs%avar=fs%avar-1
+  end subroutine release_var
 
   ! Code call to a jump operator
   function wc_jump_call(fs,args,op_s,op_a,nargs) result(pc)
@@ -776,11 +671,11 @@ contains
   end function wc_jump_call
 
   ! Code call with arguments
-  subroutine wc_call_args(fs,args,op,op2,nargs,nret,rv,ve)
+  subroutine wc_call_args(fs,args,op,op2,nargs,nret,rv,ve,base)
     type(finaliser),intent(inout):: fs
     type(pm_ptr),intent(in):: args,rv
     integer(pm_i16),intent(in):: op,op2,ve
-    integer,intent(in):: nargs,nret
+    integer,intent(in):: nargs,nret,base
     integer:: i,start
     integer(pm_i16):: slot
     type(pm_ptr):: arg
@@ -793,17 +688,17 @@ contains
     if(ve/=0) call wc(fs,ve)
     do i=1+nret,nargs
        arg=cnode_arg(args,i)
-       if(arg_is_tempvar(arg)) then
-          slot=get_var_slot(fs,arg)
+       if(arg_is_svar(arg)) then
+          slot=get_var_slot(fs,arg,base)
           call release_var(fs,slot)
        endif
     enddo
     do i=1,nargs
        arg=cnode_arg(args,i)
-       if(i>nret.and.arg_is_tempvar(arg)) then
-          call wc(fs,get_var_slot(fs,arg))
+       if(i>nret.and.arg_is_svar(arg)) then
+          call wc(fs,get_var_slot(fs,arg,base))
        else
-          call wc_arg(fs,arg,i<=nret,rv,ve)
+          call wc_arg(fs,arg,i<=nret,rv,ve,base)
        endif
     enddo
   end subroutine wc_call_args
@@ -830,92 +725,45 @@ contains
     endif
     call wc(fs,op)
     call wc(fs,op2)
-    call wc(fs,int(nargs+128*fs%stacktop,pm_i16))
+    call wc(fs,int(nargs,pm_i16))
   end subroutine wc_call
 
   ! Code one argument of call/operation
-  subroutine wc_arg(fs,argnode,isret,rv,ve)
+  subroutine wc_arg(fs,argnode,isret,rv,ve,base)
     type(finaliser),intent(inout):: fs
     type(pm_ptr),intent(in):: argnode
     logical,intent(in):: isret
     type(pm_ptr),intent(in):: rv
     integer(pm_i16),intent(in):: ve
+    integer,intent(in):: base
     integer(pm_i16):: k,t,akind
+    integer(pm_p):: sym
     integer:: slot
     type(pm_ptr):: arg,ass
     arg=argnode
     akind=cnode_get_kind(arg)
-    if(akind==cnode_is_var) then
-       if(cnode_get_num(arg,var_name)==0) then
-          ! Temporary variable
-          if(isret) then
-             ! Optimise out assignments/definitions/returns
-             ass=cnode_get(arg,var_assign_call)
-             if(.not.pm_fast_isnull(ass)) then
-                k=cnode_get_num(ass,call_sig)
-                if(k==-sym_result) then
-                   call wc(fs,0_pm_i16)
-                   fs%rdata(cnode_get_num(arg,var_index))=fs%pc-1
-                   return
-                endif
-                ass=cnode_get(ass,call_args)
-                ass=cnode_arg(ass,1)
-                if(k==-sym_define) then
-                   slot=cnode_get_num(ass,var_index)
-                   t=rvv(slot)
-                   if(t>pm_null.and.t<pm_string) then
-                      call wc(fs,fs%rdata(slot))
-                   else
-                      call wc(fs,-fs%rdata(slot))
-                   endif
-                   return
-                endif
-                if(.not.arg_is_tempvar(ass)) then
-                   k=rvv(cnode_get_num(arg,var_index))
-                   t=rvv(cnode_get_num(ass,var_index))
-                   if(k==t) then
-                      if(pm_typ_is_concrete(fs%context,t)) then
-                         slot=cnode_get_num(ass,var_index)
-                         t=rvv(slot)
-                         if(t>pm_null.and.t<pm_string) then
-                            call wc(fs,fs%rdata(slot))
-                         else
-                            call wc(fs,-fs%rdata(slot))
-                         endif
-                         fs%rdata(cnode_get_num(arg,var_index))=fs%pc-1
-                         return
-                      endif
-                   endif
-                endif
-             endif
-             ! Make temp var
-             if(ve/=0) then
-                t=pm_pointer
-                k=alloc_var(fs,pm_pointer)
-             else
-                t=rvv(cnode_get_num(arg,var_index))
-                t=var_kind(int(t))
-                k=alloc_var(fs,int(t))
-             endif
-             if(t>=pm_pointer) k=-k ! Allocate temp ptr
-             call wc(fs,k) 
-             slot=cnode_get_num(arg,var_index)
-             fs%rdata(slot)=fs%pc-1
-          else
-             ! Get temp var
-             slot=cnode_get_num(arg,var_index)
-             k=abs(fs%wc(fs%rdata(slot)))
-             call wc(fs,k)
-             call release_var(fs,k)
-          endif
-       else
-          ! Named variable
+    if(arg_is_svar(arg)) then
+       ! Single use variable
+       if(isret) then 
+          ! Make temp var
+          k=alloc_var(fs)
+          call wc(fs,-k) 
           slot=cnode_get_num(arg,var_index)
-          if((.not.isret).or.rvv(slot)>pm_null.and.rvv(slot)<pm_string) then
-             call wc(fs,fs%rdata(slot))
-          else
-             call wc(fs,-fs%rdata(slot))
-          endif
+          fs%rdata(slot+base)=k
+       else
+          ! Get temp var
+          slot=cnode_get_num(arg,var_index)
+          k=fs%rdata(slot)
+          call wc(fs,k)
+          call release_var(fs,k)
+       endif
+    else if(cnode_get_kind(arg)==cnode_is_var) then
+       ! Multiple use variable
+       slot=cnode_get_num(arg,var_index)
+       if(isret) then
+          call wc(fs,-fs%rdata(slot))
+       else
+          call wc(fs,fs%rdata(slot))
        endif
     else
        if(pm_debug_level>0) then
@@ -964,20 +812,14 @@ contains
   end function add_const
 
   ! Get slot associated with variable
-  function get_var_slot(fs,arg) result(slot)
+  function get_var_slot(fs,arg,base) result(slot)
     type(finaliser),intent(inout):: fs
     type(pm_ptr),intent(in):: arg
+    integer,intent(in):: base
     integer(pm_i16):: slot
-    type(pm_ptr):: var
-    integer:: i,name
-    var=arg
-    name=cnode_get_num(var,var_name)
-    i=cnode_get_num(var,var_index)
-    if(name==0) then
-       slot=abs(fs%wc(fs%rdata(i)))
-    else
-       slot=fs%rdata(i)
-    endif
+    integer:: i
+    i=cnode_get_num(arg,var_index)
+    slot=fs%rdata(base+i)
   end function get_var_slot
   
   ! Check type of args[n]
@@ -999,29 +841,31 @@ contains
     include 'ftypeof.inc'
   end function check_arg_type
 
-  ! Is argument a temporary variable?
-  function arg_is_tempvar(arg) result(ok)
+  ! Is argument a single use variable?
+  function arg_is_svar(arg) result(ok)
     type(pm_ptr),intent(in):: arg
     logical:: ok
     ok=.false.
     if(cnode_get_kind(arg)==cnode_is_var) then
-       if(cnode_get_num(arg,var_name)==0) then
+       if(cnode_flags_clear(arg,var_flags,&
+            ior(var_multi_access,var_multi_change))) then
           ok=.true.
        endif
     endif
-  end function arg_is_tempvar
+  end function arg_is_svar
 
-  ! Is argument a temporary variable?
-  function arg_is_namedvar(arg) result(ok)
+  ! Is argument a multiple use variable
+  function arg_is_mvar(arg) result(ok)
     type(pm_ptr),intent(in):: arg
     logical:: ok
     ok=.false.
     if(cnode_get_kind(arg)==cnode_is_var) then
-       if(cnode_get_num(arg,var_name)/=0) then
-          ok=.true.
-       endif
+      if(.not.cnode_flags_clear(arg,var_flags,&
+            ior(ior(var_multi_access,var_multi_change),var_param))) then
+         ok=.true.
+      endif
     endif
-  end function arg_is_namedvar
+  end function arg_is_mvar
 
   ! Code one word of code
   subroutine wc(fs,val)
@@ -1037,30 +881,13 @@ contains
   end subroutine wc
 
   ! Tidy up procedure code.
-  ! - post process variable indiced
   ! - follow loop chains
-  ! - correct stack information in calls
-  ! - correct stack information in info vect
-  subroutine tidy_up(fs,nalloc)
+  subroutine tidy_up(fs)
     type(finaliser),intent(inout):: fs
-    integer,intent(out):: nalloc
-    integer:: i,j,k,n,nargs,stacktop,last_slot,start
+    integer:: i,j,nargs
     integer(pm_i16)::code,code2,arg
     integer(pm_i16),dimension(pm_pointer):: vstart
     call set_op_names
-    k=fs%npar+pm_stack_locals-1
-    do i=1,pm_pointer
-       vstart(i)=k
-       k=k+fs%nvar(i)
-    enddo
-    last_slot=k-1
-    nalloc=2
-    do k=pm_int,pm_pointer
-       if(fs%nvar(k)>0) then
-          nalloc=nalloc+3
-       endif
-    enddo
-    start=nalloc
     i=1
     do
        code=fs%wc(i)
@@ -1069,16 +896,6 @@ contains
        endif
        code2=fs%wc(i+1)
        nargs=iand(fs%wc(i+2),127_pm_i16)
-       stacktop=fs%wc(i+2)/128
-       ! Correct second argument to assign
-       if(code>=first_assign_op.and.code<=last_assign_op)&
-            fs%wc(i+1)=fix_arg(code2)
-       ! Correct stack top information
-       if(stacktop==0) then
-          fs%wc(i+2)=nargs+128*last_slot
-       else
-          fs%wc(i+2)=nargs+128*(stacktop+vstart(pm_pointer))
-       endif
        ! Follow jump chain
        if(code>=first_jmp_op.and.code<=last_jmp_op) then
           do while(fs%wc(code2)==op_jmp)
@@ -1094,63 +911,13 @@ contains
        ! Change arguments
        do j=i+3,i+3+nargs-1
           arg=fs%wc(j)
-          if(arg>0) then
-             fs%wc(j)=fix_arg(arg)
-          else if(arg>=-pm_max_args*32) then
-             fs%wc(j)=-fix_arg(-arg)
-          else
-             fs%wc(j)=arg/32_pm_i16
+          if(arg<-pm_max_stack) then
+             fs%wc(j)=arg/32_pm_i16  !!! Correct
           endif
        enddo
        i=i+nargs+3
        if(i>=fs%pc) exit
     enddo
-    ! Fix slot information in info vector
-    if(pm_debug_level>2) &
-         write(*,*) 'TIDY INFO>',fs%last
-    j=max_code_size
-    do 
-       if(pm_debug_level>3) &
-            write(*,*) 'TIDY INFO> j=',j,fs%wc(j),fs%wc(j-1)
-       k=fs%wc(j)
-       if(k/=0) then 
-          fs%wc(j-1)=fs%wc(j-1)+start
-          j=j-2
-       else
-          n=fs%wc(j-1)
-          fs%wc(j-2)=fs%wc(j-2)+start
-          fs%wc(j-3)=fs%wc(j-3)+start
-          j=j-n*2-4
-          do i=1,n
-             fs%wc(j+i*2-1)=fix_arg(fs%wc(j+i*2-1))
-          enddo
-       endif
-       if(j<fs%last) exit
-    enddo
-  contains
-    function fix_arg(n) result(m)
-      integer(pm_i16),intent(in):: n
-      integer(pm_i16):: m
-      integer(pm_i16):: k
-      if(n<=fs%npar+pm_stack_locals) then
-         m=n
-         if(pm_debug_level>2) then
-            write(*,*) 'FIX>',n,'--->',m
-         endif
-      else
-         k=iand(n,31_pm_i16)
-         if(pm_debug_level>0) then
-            if(k<=0.or.k>pm_pointer) then
-               write(*,*) 'Fix',n,k,n/32
-               call pm_panic('fix_arg')
-            endif
-         endif
-         m=n/32+vstart(k)
-         if(pm_debug_level>2) then
-            write(*,*) 'FIX>',n,k,n/32,fs%nvar(k),'--->',m
-         endif
-      endif
-    end function fix_arg
   end subroutine tidy_up
 
   subroutine dump_wc(context,iunit)
@@ -1158,28 +925,32 @@ contains
     integer,intent(in):: iunit
     integer(pm_ln):: idx
     integer:: i,j,n
-    type(pm_ptr):: p,code,lines
+    type(pm_ptr):: p,code,lines,q
     integer(pm_i16):: k
     integer(pm_p):: line,modl
     character(len=100):: str,str2
     character(len=20):: ostr,mstr
     call set_op_names
     do idx=1_pm_ln,pm_dict_size(context,context%funcs)
-       write(iunit,*) idx,'(=='
        p=pm_dict_val(context,context%funcs,idx)
        if(pm_fast_isnull(p)) then
           write(iunit,*) '----------NULL FUNC!-----------'
           cycle
        endif
-       code=p%data%ptr(p%offset+1)
-       do i=code%offset,code%offset+pm_fast_esize(code)
-          write(iunit,*) 'INFO>',i,code%data%i16(i)
-       enddo
+!!$       code=p%data%ptr(p%offset+1)
+!!$       do i=code%offset,code%offset+pm_fast_esize(code)
+!!$          write(iunit,*) 'INFO>',i,code%data%i16(i)
+!!$       enddo
        code=p%data%ptr(p%offset)
-       do i=code%offset,code%offset+pm_fast_esize(code)
-          write(iunit,*) 'CODE>',i,code%data%i16(i)
-       enddo
-       i=code%offset+2
+!!$       do i=code%offset,code%offset+pm_fast_esize(code)
+!!$          write(iunit,*) 'CODE>',i,code%data%i16(i)
+!!$       enddo
+       write(iunit,*) idx,&
+            trim(pm_name_as_string(context,int(code%data%i16(code%offset+2),pm_p))),&
+            ' (=='
+       write(iunit,*) 'STACKSIZE=',&
+            code%data%i16(code%offset),'NARGS=',code%data%i16(code%offset+1)
+       i=code%offset+3
        do
           k=code%data%i16(i)
           j=code%data%i16(i+1)
@@ -1187,15 +958,20 @@ contains
           call proc_line_module(p,i-int(code%offset)+1,line,modl)
           str='at: '
           call pm_name_string(context,modl,str(5:))
-          if(k>=first_assign_op.and.k<=last_assign_op) then
+          if(k==op_call) then
+             q=pm_dict_val(context,context%funcs,j+1_pm_ln)
+             q=q%data%ptr(q%offset)
+             str2='('
+             call pm_name_string(context,int(q%data%i16(q%offset+2),pm_p),str2(2:))
+             str2(len_trim(str2)+1:)=')'
+             write(iunit,'(i4,1x,a20,i4,a20,i4,1x,a15,i4)') i-code%offset+1,&
+                  op_names(k),j,str2,n,str,line
+          elseif(k>=first_assign_op.and.k<=last_assign_op) then
              str2='('
              call pm_name_string(context,proc_slot_name(p,i,j),str2(2:))
              str2(len_trim(str2)+1:)=')'
              write(iunit,'(i4,1x,a20,i4,a20,i4,1x,a15,i4)') i-code%offset+1,&
                   op_names(k),j,str2,n,str,line
-          else if(k>=first_alloc_op.and.k<=last_alloc_op) then
-             write(iunit,'(i4,1x,a20,i4,1a,i4,i4,1a,10x,i4,1x,a15,i4)') i-code%offset+1,&
-                  op_names(k),j,'(',iand(j,pm_max_stack),j/(pm_max_stack+1),')',n,str,line
           else if(k>=first_jmp_op.and.k<=last_jmp_op) then
              write(iunit,'(i4,1x,a20,i4,1a,i4,1a,14x,i4,1x,a15,i4)') i-code%offset+1,&
                   op_names(k),j,'(',i+j+3+n,')',n,str,line

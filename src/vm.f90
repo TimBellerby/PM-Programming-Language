@@ -48,15 +48,15 @@ contains
     type(pm_ptr),target,dimension(pm_max_args):: arg
     integer,target:: nargs
     type(pm_ptr),target:: stack
-    type(pm_ptr):: func,pc,newstack,newfunc,newpc,ve,v
-    integer(pm_i16):: opcode,opcode2,opcode3,oparg
+    type(pm_ptr):: func,pc,newstack,newfunc,newpc,ve,v,w,gbl
+    integer(pm_i16):: opcode,opcode2,opcode3,oparg,t1,t2
     integer:: i,n
     integer(pm_ln):: esize,j,jj,k
     logical:: convert_out,flip,ok
     integer(pm_p):: stacksize,line,modl
     type(pm_reg),pointer:: reg
     character(len=200):: mess
-    nargs=1
+    nargs=0
     reg=>pm_register(context,'vm args',&
          stack,array=arg,array_size=nargs)
     opcode=op
@@ -66,7 +66,7 @@ contains
     func=funcin
     stack=stackin
     pc=pcin
-    goto 20
+    if(opcode>=0) goto 20
 
     10 continue
     
@@ -75,20 +75,25 @@ contains
     opcode2=pc%data%i16(pc%offset+1_pm_p)
     opcode3=pc%data%i16(pc%offset+2_pm_p)
     n=iand(opcode3,127) ! Number arguments
+    if(pm_debug_level>3) then
+       write(*,*) 'DECODING',opcode,&
+            op_names(opcode),opcode2,opcode3,stack%offset
+    endif
     do i=1,n
        oparg=pc%data%i16(pc%offset+i+2_pm_p)
+       if(pm_debug_level>3) write(*,*) 'OPARG=', oparg
        if(oparg>=0) then
           arg(i)=stack%data%ptr(stack%offset+oparg)
           if(pm_debug_level>3) then
              write(*,*) i,'STACK',oparg
-             write(*,*) i,'>',arg(i)%data%vkind
-             write(*,*) i,'>',stack%data%hash,stack%offset+oparg
           endif
        else if(oparg>=-int(pm_max_stack,pm_i16)) then
           arg(i)%data=>stack%data
           arg(i)%offset=stack%offset-oparg
           !stack%data%ptr(stack%offset-oparg)=pm_null_obj
-          if(pm_debug_level>3) write(*,*) i,'STACKREF',-oparg,arg(i)%data%hash,arg(i)%offset
+          if(pm_debug_level>3) &
+               write(*,*) i,'STACKREF',-oparg,arg(i)%data%esize,&
+               arg(i)%data%hash,stack%offset,arg(i)%offset
        else
           arg(i)=func%data%ptr(func%offset-oparg-pm_max_stack)
           if(pm_debug_level>3) write(*,*) i,'CONST',oparg
@@ -142,21 +147,25 @@ contains
        do i=0,pm_fast_esize(v)
           arg(nargs+i)=v%data%ptr(v%offset+i)
        enddo
-       write(*,*) 'NARGS before',nargs,v%data%vkind,v%data%esize
        nargs=nargs+pm_fast_esize(v)
-       write(*,*) 'NARGS after',nargs
        opcode=pc%data%i16(pc%offset)
        opcode2=pc%data%i16(pc%offset+1_pm_p)
        opcode3=pc%data%i16(pc%offset+2_pm_p)
        pc%offset=pc%offset+3_pm_p
        goto 20
     case(op_return)
+       if(nargs>0) then
+          do i=1,nargs
+             v=stack%data%ptr(stack%offset+pm_stack_locals+i-1)
+             v%data%ptr(v%offset)=arg(i)
+          enddo
+       endif
        pc=stack%data%ptr(stack%offset+1)
        func=stack%data%ptr(stack%offset+3)
        stack=stack%data%ptr(stack%offset+2)
        if(pm_fast_isnull(pc)) then
           errno=0
-          return
+          goto 888
        endif
     case(op_jmp)
        pc%offset=pc%offset+opcode2
@@ -221,7 +230,9 @@ contains
        if(arg(2)%data%ln(arg(2)%offset)<=0) then
           pc%offset=pc%offset+opcode2
        else
-          arg(1)%data%ln(arg(1)%offset)=1
+          v=pm_fast_newnc(context,pm_long,1_pm_p)
+          arg(1)%data%ptr(arg(1)%offset)=v
+          v%data%ln(v%offset)=1
        endif
     case(op_loop_end)
        arg(1)%data%ln(arg(1)%offset)=arg(1)%data%ln(arg(1)%offset)+1
@@ -230,11 +241,11 @@ contains
        if(pm_debug_level>3) &
             write(*,*) '#', arg(1)%data%ln(arg(1)%offset),arg(2)%data%ln(arg(2)%offset)
     case(op_par_loop)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
-       call par_loop(context,func,stack,pc,args,nargs,opcode2)
+       stack%data%ptr(stack%offset+opcode2)=pm_null_obj
+       call par_loop(context,func,stack,pc,arg,nargs)
     case(op_par_loop_end)
        errno=0
-       return
+       goto 888
     case(op_print)
        write(*,*) arg(1)%data%s(arg(1)%offset:arg(1)%offset+pm_fast_esize(arg(1)))
     case(op_dump)
@@ -268,13 +279,11 @@ contains
           end forall
        endif
     case(op_struct,op_struct_vect)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
        v=pm_fast_newusr(context,int(opcode2,pm_p),int(nargs,pm_p))
        arg(1)%data%ptr(arg(1)%offset)=v
        v%data%ptr(v%offset+1:v%offset+nargs-1)=arg(2:nargs)
     case(op_clone)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
-       stack%data%ptr(stack%offset+opcode2)=pm_deep_copy(context,arg(1))
+       arg(1)%data%ptr(arg(1)%offset)=pm_deep_copy(context,arg(2))
     case(op_array)
        v=pm_fast_newusr(context,int(opcode2,pm_p),3_pm_p)
        arg(1)%data%ptr(arg(1)%offset)=v
@@ -284,68 +293,45 @@ contains
             arg(3)%data%ln(arg(3)%offset),.false.)
        call pm_fill_vect(context,v%data%ptr(v%offset+1_pm_p),arg(2))
     case(op_check)
-
-    case(op_struct_elem,op_struct_elem_vect)
+       if(pm_fast_vkind(arg(1))/=pm_logical) then
+          call runtime_error(context,'Check expression did not yield a bool value')
+          goto 999
+       endif
+       if(.not.arg(1)%data%l(arg(1)%offset)) then
+          call runtime_error(context,'Check expression failed to return a true value')
+          goto 999
+       endif
+    case(op_elem,op_elem_vect)
        arg(1)%data%ptr(arg(1)%offset)=&
             arg(2)%data%ptr(arg(2)%offset+opcode2)
-    case(op_alloc_int)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
-       call pm_new_multi(context,pm_int,1_pm_ln,&
-            int(opcode2/(pm_max_stack+1),pm_ln),&
-            int(iand(opcode2,pm_max_stack),pm_ln),stack)
-    case(op_alloc_long)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
-       call pm_new_multi(context,pm_long,1_pm_ln,&
-            int(opcode2/(pm_max_stack+1),pm_ln),&
-            int(iand(opcode2,pm_max_stack),pm_ln),stack)
-    case(op_alloc_single)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
-       call pm_new_multi(context,pm_single,1_pm_ln,&
-            int(opcode2/(pm_max_stack+1),pm_ln),&
-            int(iand(opcode2,pm_max_stack),pm_ln),stack)
-    case(op_alloc_double)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
-       call pm_new_multi(context,pm_double,1_pm_ln,&
-            int(opcode2/(pm_max_stack+1),pm_ln),&
-            int(iand(opcode2,pm_max_stack),pm_ln),stack)
-    case(op_alloc_logical)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
-       call pm_new_multi(context,pm_logical,1_pm_ln,&
-            int(opcode2/(pm_max_stack+1),pm_ln),&
-            int(iand(opcode2,pm_max_stack),pm_ln),stack)
-    case(op_nullify)
-       i=opcode2/(pm_max_stack+1)
-       stack%data%ptr(stack%offset+i:stack%offset+i&
-            +iand(opcode2,pm_max_stack)-1)=pm_null_obj
-    case(op_assign_int)
-       v=stack%data%ptr(stack%offset+opcode2)
-       v%data%i(v%offset)=arg(1)%data%i(arg(1)%offset)
-    case(op_assign_int_vect)
-       if(pm_fast_vkind(arg(1))==pm_null) then
-          arg(2)%data%i(arg(2)%offset:arg(2)%offset+&
-               pm_fast_esize(arg(2)))=&
-               arg(3)%data%i(arg(3)%offset:arg(3)%offset+&
-               pm_fast_esize(arg(3)))
-       else if(pm_fast_vkind(arg(1))==pm_logical) then
-          esize=pm_fast_esize(arg(1))
-          where(arg(1)%data%l(arg(1)%offset:arg(1)%offset+esize))
-             arg(2)%data%i(arg(2)%offset:arg(2)%offset+&
-                  pm_fast_esize(arg(2)))=&
-                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+&
-                  pm_fast_esize(arg(3)))
-          end where
-       else
-          forall(j=1:pm_fast_esize(arg(1)))
-             arg(2)%data%i(arg(1)%data%ln(arg(1)%offset+j)+&
-                  arg(2)%offset)=&
-                  arg(3)%data%i(arg(1)%data%ln(arg(1)%offset+j)&
-                  +arg(3)%offset)
-          end forall
+    case(op_poly_elem)
+       call pm_elem_offset(context,int(pm_fast_typeof(arg(2)),pm_i16),&
+            opcode2,.false.,t1,t2)
+       if(t1<0) then
+          call runtime_error(context,'No structure/record element: '//&
+               trim(pm_name_as_string(context,int(opcode2,pm_p))))
+          goto 999
        endif
+       arg(1)%data%ptr(arg(1)%offset)=&
+            arg(2)%data%ptr(arg(2)%offset+opcode2)
+    case(op_set_elem,op_set_elem_vect)
+       arg(1)%data%ptr(arg(1)%offset+opcode2)=arg(2)
     case(op_uminus_i)
-       arg(1)%data%i(arg(1)%offset)=-arg(2)%data%i(arg(2)%offset)
+       if(opcode2>0) then
+          v=gbl%data%ptr(gbl%offset+opcode2)
+       else
+          v=pm_fast_newnc(context,pm_int,1_pm_p)
+       endif
+       arg(1)%data%ptr(arg(1)%offset)=v
+       v%data%i(v%offset)=-arg(2)%data%i(arg(2)%offset)
     case(op_add_i)
-       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)+ &
+       if(opcode2>0) then
+          v=gbl%data%ptr(gbl%offset+opcode2)
+       else
+          v=pm_fast_newnc(context,pm_int,1_pm_p)
+       endif
+       arg(1)%data%ptr(arg(1)%offset)=v
+       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)+ &
             arg(3)%data%i(arg(3)%offset)
     case(op_add_i_vect)
        esize=pm_fast_esize(arg(3))
@@ -377,53 +363,105 @@ contains
           end forall
        endif
     case(op_sub_i)
-       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)- &
+       if(opcode2>0) then
+          v=gbl%data%ptr(gbl%offset+opcode2)
+       else
+          v=pm_fast_newnc(context,pm_int,1_pm_p)
+       endif
+       arg(1)%data%ptr(arg(1)%offset)=v
+       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)- &
             arg(3)%data%i(arg(3)%offset)
     case(op_mult_i)
-       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)* &
+       if(opcode2>0) then
+          v=gbl%data%ptr(gbl%offset+opcode2)
+       else
+          v=pm_fast_newnc(context,pm_int,1_pm_p)
+       endif
+       arg(1)%data%ptr(arg(1)%offset)=v
+       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)* &
             arg(3)%data%i(arg(3)%offset)
     case(op_div_i)
-       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)/ &
+       if(opcode2>0) then
+          v=gbl%data%ptr(gbl%offset+opcode2)
+       else
+          v=pm_fast_newnc(context,pm_int,1_pm_p)
+       endif
+       arg(1)%data%ptr(arg(1)%offset)=v
+       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)/ &
             arg(3)%data%i(arg(3)%offset)
     case(op_mod_i)
-       arg(1)%data%i(arg(1)%offset)=mod(arg(2)%data%i(arg(2)%offset), &
+       if(opcode2>0) then
+          v=gbl%data%ptr(gbl%offset+opcode2)
+       else
+          v=pm_fast_newnc(context,pm_int,1_pm_p)
+       endif
+       arg(1)%data%ptr(arg(1)%offset)=v
+       v%data%i(v%offset)=mod(arg(2)%data%i(arg(2)%offset), &
             arg(3)%data%i(arg(3)%offset))
     case(op_pow_i)
-       arg(1)%data%i(arg(1)%offset)=arg(2)%data%i(arg(2)%offset)** &
+       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)** &
             arg(3)%data%i(arg(3)%offset)
     case(op_divide_i)
        if(arg(3)%data%i(arg(3)%offset)==0) then
           call runtime_error(context,'Division by zero')
           goto 999
        endif
+       if(opcode2>0) then
+          v=gbl%data%ptr(gbl%offset+opcode2)
+       else
+          v=pm_fast_newnc(context,pm_int,1_pm_p)
+       endif
+       arg(1)%data%ptr(arg(1)%offset)=v
        arg(1)%data%d(arg(1)%offset)=real(arg(2)%data%i(arg(2)%offset),pm_d)/ &
             arg(3)%data%i(arg(3)%offset)
     case(op_eq_i)
-       arg(1)%data%l(arg(1)%offset)=&
-            arg(2)%data%i(arg(2)%offset)==arg(3)%data%i(arg(3)%offset)
+       if(arg(2)%data%i(arg(2)%offset)==arg(3)%data%i(arg(3)%offset)) then
+          arg(1)%data%ptr(arg(1)%offset)=pm_true_obj
+       else
+          arg(1)%data%ptr(arg(1)%offset)=pm_false_obj
+       endif
     case(op_ne_i)
-       arg(1)%data%l(arg(1)%offset)=&
-            arg(2)%data%i(arg(2)%offset)/=arg(3)%data%i(arg(3)%offset)
+       if(arg(2)%data%i(arg(2)%offset)/=arg(3)%data%i(arg(3)%offset)) then
+          arg(1)%data%ptr(arg(1)%offset)=pm_true_obj
+       else
+          arg(1)%data%ptr(arg(1)%offset)=pm_false_obj
+       endif
     case(op_gt_i)
-       arg(1)%data%l(arg(1)%offset)=&
-            arg(2)%data%i(arg(2)%offset)>arg(3)%data%i(arg(3)%offset)
+       if(arg(2)%data%i(arg(2)%offset)>arg(3)%data%i(arg(3)%offset)) then
+          arg(1)%data%ptr(arg(1)%offset)=pm_true_obj
+       else
+          arg(1)%data%ptr(arg(1)%offset)=pm_false_obj
+       endif
     case(op_ge_i)
-       arg(1)%data%l(arg(1)%offset)=&
-            arg(2)%data%i(arg(2)%offset)>=arg(3)%data%i(arg(3)%offset)
+       if(arg(2)%data%i(arg(2)%offset)>=arg(3)%data%i(arg(3)%offset)) then
+          arg(1)%data%ptr(arg(1)%offset)=pm_true_obj
+       else
+          arg(1)%data%ptr(arg(1)%offset)=pm_false_obj
+       endif
     case(op_string_i)
        write(mess,'(i10)') arg(2)%data%i(arg(2)%offset)
-       v=pm_fast_newnc(context,pm_string,int(len_trim(adjustl(mess)),pm_p))
-       v%data%s(v%offset:v%offset+pm_fast_esize(v))=adjustl(mess)
+       mess=adjustl(mess)
+       n=int(len_trim(mess))
+       v=pm_fast_newnc(context,pm_string,int(n,pm_p))
+       do i=1,n
+          v%data%s(v%offset+i-1)=mess(i:i)
+       enddo
        arg(1)%data%ptr(arg(1)%offset)=v
     case(op_get_elt_i)
-       v=arg(2)%data%ptr(arg(2)%offset+1_pm_p)
+       if(opcode2>0) then
+          v=gbl%data%ptr(gbl%offset+opcode2)
+       else
+          v=pm_fast_newnc(context,pm_int,1_pm_p)
+       endif
+       arg(1)%data%ptr(arg(1)%offset)=v
+       arg(2)=arg(2)%data%ptr(arg(2)%offset+1_pm_p)
        j=arg(3)%data%ln(arg(3)%offset)-1
-       if(j<0.or.j>pm_fast_esize(v)) then
-          if(pm_debug_level>1) write(*,*) '##',j,pm_fast_esize(v)
+       if(j<0.or.j>pm_fast_esize(arg(2))) then
+          if(pm_debug_level>1) write(*,*) '##',j,pm_fast_esize(arg(2))
           call runtime_error(context,'Index out of bounds')
           goto 999
        endif
-       arg(1)%data%i(arg(1)%offset)=v%data%i(v%offset+j)
+       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset+j)
     case(op_set_elt_i)
        v=arg(1)%data%ptr(arg(1)%offset+1_pm_p)
        j=arg(3)%data%ln(arg(3)%offset)-1
@@ -432,16 +470,7 @@ contains
           goto 999
        endif
        v%data%i(v%offset+j)=arg(2)%data%i(arg(2)%offset)
-    case(op_assign_long)
-       v=stack%data%ptr(stack%offset+opcode2)
-       v%data%ln(v%offset)=arg(1)%data%ln(arg(1)%offset)
-
     case default
-!!$       if(pm_lib_proc(context,opcode,&
-!!$            int(func%data%ptr(func%offset+1)%offset,pm_i16),&
-!!$            func%data%ptr(func%offset+2),&
-!!$            func%data%ptr(func%offset+3),&
-!!$            arg,nargs)) goto 888
        write(*,*) 'Unknown opcode=',opcode
        write(*,*) op_names(opcode)
        call pm_panic('unknown opcode')
@@ -460,9 +489,9 @@ contains
     newpc=newfunc%data%ptr(newfunc%offset)
     stacksize=newpc%data%i16(newpc%offset)
     i=newpc%data%i16(newpc%offset+1)
-    newstack=pm_fast_newnc(context,pm_stack,stacksize)
+    newstack=pm_fast_new(context,pm_stack,stacksize)
     newstack%data%ptr(newstack%offset)=&
-         pm_fast_tinyint(context,int(pm_stack_locals+nargs,pm_p))
+         pm_fast_tinyint(context,int(stacksize,pm_p))
     newstack%data%ptr(newstack%offset+1)=pc
     newstack%data%ptr(newstack%offset+2)=stack
     newstack%data%ptr(newstack%offset+3)=func
@@ -476,7 +505,6 @@ contains
        newstack%data%ptr(newstack%offset+i+3)=context%temp_obj1
        context%temp_obj1=pm_null_obj
        nargs=i
-       newstack%data%ptr(newstack%offset)%offset=i+3
     else
        if(pm_debug_level>0) then
           if(i/=nargs) then
@@ -489,14 +517,8 @@ contains
                arg(1:nargs)
        endif
     endif
-    if(pm_debug_level>0) then
-       if(stacksize>nargs+3) then
-          newstack%data%ptr(newstack%offset+nargs+4:newstack%offset+stacksize-1)=&
-               pm_fast_tinyint(context,-9999_pm_p)
-       endif
-    endif
     pc=newpc
-    pc%offset=pc%offset+2_pm_p
+    pc%offset=pc%offset+3_pm_p
     stack=newstack
     func=newfunc
     if(pm_debug_level>3) then
@@ -533,32 +555,24 @@ contains
     include 'fnewusr.inc'
     include 'fesize.inc'
     include 'ftiny.inc'
+    include 'ftypeof.inc'
 
   end function pm_run
  
-  subroutine par_loop(context,func,stack,pc,args,num_args,start) 
+  subroutine par_loop(context,func,stack,pc,arg,num_args) 
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: func,stack,pc
-    type(pm_ptr),dimension(num_args):: args
+    type(pm_ptr),dimension(num_args):: arg
     integer,intent(in):: num_args
-    integer(pm_i16),intent(in):: start
-    type(pm_ptr):: newpc,ve,sptr,svec
+    type(pm_ptr):: newpc,v,sptr,svec
     integer:: errno,i
     newpc=pc
     newpc%offset=newpc%offset+3_pm_p
-    stack%data%ptr(stack%offset+start)=pm_null_obj
-    ve=pm_fast_newnc(context,pm_long,3_pm_p)
-    ve%data%ln(ve%offset)=0
-    ve%data%ln(ve%offset+1_pm_p)=&
-         pm_fast_esize(args(1)%data%ptr(args(1)%offset))
-    ve%data%ln(ve%offset+2_pm_p)=1
-    stack%data%ptr(stack%offset+start+1)=ve
-    do i=1,num_args
-       stack%data%ptr(stack%offset+start+1+i)=&
-            args(i)%data%ptr(args(i)%offset+1_pm_p)
-    enddo
-    errno=pm_run(context,func,stack,newpc,0_pm_i16,0_pm_i16,&
-         args,num_args,sptr,svec)
+    v=pm_fast_newnc(context,pm_long,1_pm_p)
+    arg(1)%data%ptr(arg(1)%offset)=v
+    v%data%ln(v%offset)=1
+    errno=pm_run(context,func,stack,newpc,-1_pm_i16,0_pm_i16,&
+         arg,num_args,sptr,svec)
   contains
     include 'fesize.inc'
     include 'fnewnc.inc'

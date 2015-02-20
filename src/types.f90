@@ -673,5 +673,57 @@ contains
     include 'fesize.inc'
   end subroutine pm_tset_add
 
-  
+
+  subroutine pm_elem_offset(context,tno,name,change,offset,etyp)
+    type(pm_context),pointer:: context
+    integer(pm_i16),intent(in):: tno,name
+    logical,intent(in):: change
+    integer(pm_i16),intent(out):: offset,etyp
+    integer:: i
+    type(pm_ptr):: tv,nv
+    if(tno==0) then
+       offset=-1
+       etyp=0
+       return
+    endif
+    tv=pm_typ_vect(context,tno)
+    offset=-1
+    etyp=0
+    if(pm_tv_kind(tv)==pm_typ_is_struct.or.&
+         ((.not.change).and.pm_tv_kind(tv)==pm_typ_is_rec)) then
+       nv=pm_name_val(context,int(pm_tv_name(tv),pm_p))
+       if(nv%data%i16(nv%offset+1)>name) return
+       if(nv%data%i16(nv%offset+pm_fast_esize(nv))<name) return
+       do i=1,pm_fast_esize(nv)
+          if(nv%data%i16(nv%offset+i)==name) then
+             etyp=pm_tv_arg(tv,int(i))
+             offset=i
+             return
+          endif
+       enddo
+    endif
+  contains
+    include 'fesize.inc'
+  end subroutine pm_elem_offset
+
+  subroutine pm_array_elem_offset(context,tno,name,change,offset,etyp)
+    type(pm_context),pointer:: context
+    integer(pm_i16),intent(in):: tno,name
+    logical,intent(in):: change
+    integer(pm_i16),intent(out):: offset,etyp
+    type(pm_ptr):: tv
+    if(tno==0) then
+       offset=-1
+       etyp=0
+       return
+    endif
+    tv=pm_typ_vect(context,tno)
+    if(pm_tv_kind(tv)==pm_typ_is_array) then
+       call pm_elem_offset(context,pm_tv_arg(tv,1),name,change,offset,etyp)
+    else
+       offset=-1
+       etyp=0
+    endif
+  end subroutine pm_array_elem_offset
+
 end module pm_types

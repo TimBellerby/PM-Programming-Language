@@ -40,6 +40,7 @@ module pm_lib
   public:: pm_deep_copy
   public:: pm_intern
   public:: pm_mask_indices,pm_shrink
+  public:: pm_name_val, pm_name_string, pm_name_as_string
   
   integer(pm_p),public,parameter:: pm_first_libtype=pm_usr+1
   integer(pm_p),public,parameter:: pm_matched_type=pm_first_libtype
@@ -637,7 +638,6 @@ contains
     ptr=ptr%data%ptr(ptr%offset+n-1)
   end function pm_obj_set_key
 
-
   ! Create object set of all nodes following from ptr
   function pm_obj_set_from(context,ptr) result(objset)
     type(pm_context),pointer:: context
@@ -656,7 +656,7 @@ contains
        if(pm_fast_vkind(p)>=pm_pointer) then
           do i=0,pm_fast_esize(p)
              q=p%data%ptr(p%offset+i)
-             if(pm_obj_set_lookup(context,root%ptr,q)<0) then
+             if(pm_obj_set_lookup(context,root%ptr,q)<=0) then
                 m=pm_obj_set_add(context,root%ptr,q)
              endif
           enddo
@@ -674,7 +674,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: ptr
     type(pm_ptr):: copy
-    integer(pm_ln):: i,n
+    integer(pm_ln):: i,j,n
     type(pm_ptr),target:: dict,q,r,pending
     type(pm_ptr):: p,keys
     type(pm_reg),pointer:: reg
@@ -685,22 +685,17 @@ contains
     q=pm_new(context,pm_pointer,n)
     do i=0,n-1
        r=keys%data%ptr(keys%offset+i)
-       if(pm_fast_vkind(r)>=pm_pointer) then
-          r=pm_new(context,pm_pointer,pm_fast_esize(r))
-          r%data%ptr(r%offset)=pending
-          pending=r
-          q%data%ptr(q%offset+i)=r
-       else
-          q%data%ptr(q%offset+i)=pm_copy(context,r)
-       endif
+       q%data%ptr(q%offset+i)=pm_copy(context,r)
     enddo
-    do while(.not.pm_fast_isnull(pending))
-       p=pending
-       pending=p%data%ptr(p%offset)
-       do i=0,pm_fast_esize(p)
-          p%data%ptr(p%offset+i)=q%data%ptr(q%offset+&
-               pm_obj_set_lookup(context,dict,p%data%ptr(p%offset+i)))
-       enddo
+    do i=0,n-1
+       r=q%data%ptr(q%offset+i)
+       if(pm_fast_vkind(r)>=pm_pointer) then
+          do j=0,pm_fast_esize(r)
+             r%data%ptr(r%offset+j)=&
+                  q%data%ptr(q%offset+&
+                  pm_obj_set_lookup(context,dict,r%data%ptr(r%offset+j))-1_pm_ln)
+          enddo
+       endif
     enddo
     copy=q%data%ptr(q%offset)
     call pm_delete_register(context,reg)
@@ -1292,5 +1287,86 @@ contains
     include 'fvkind.inc'
     include 'fesize.inc'
   end function pm_shrink
+
+  ! Get name value
+  function pm_name_val(context,m) result(val)
+    type(pm_context),pointer:: context
+    integer(pm_p):: m
+    type(pm_ptr):: val
+    integer:: n
+    type(pm_ptr):: keys
+    keys=pm_set_keys(context,context%names)
+    if(pm_debug_level>0) then
+       if(m<0.or.m>pm_fast_esize(keys)) &
+            call pm_panic('name_val')
+    endif
+    val=keys%data%ptr(keys%offset+m-1)
+  contains
+    include 'fesize.inc'
+  end function pm_name_val
+
+  ! Get name string from name entry
+  recursive subroutine pm_name_string(context,m,str)
+    type(pm_context),pointer:: context
+    integer(pm_p),intent(in):: m
+    character(len=*),intent(out):: str
+    integer(pm_p):: n
+    character(len=100):: str2
+    type(pm_ptr):: keys,vals,ptr
+    integer:: i
+    n=m
+    if(n>0) then
+       keys=pm_set_keys(context,context%names)
+       if(n<=pm_fast_esize(keys)) then
+          ptr=keys%data%ptr(keys%offset+n-1)
+          if(pm_fast_vkind(ptr)==pm_string) then
+             call pm_strval(ptr,str)
+          else if(pm_fast_vkind(ptr)==pm_int16) then
+             str='('
+             do i=0,pm_fast_esize(ptr)
+                if(ptr%data%i16(ptr%offset+i)>64) then
+                   call pm_name_string(context,&
+                        int(ptr%data%i16(ptr%offset+i),pm_p),str2)
+                else
+                   write(str2,'(i6)') ptr%data%i16(ptr%offset+i)
+                   str2=adjustl(str2)
+                endif
+                if(i==0) then
+                   str=trim(str)//trim(str2)
+                else
+                   str=trim(str)//'.'//trim(str2)
+                endif
+             enddo
+             str=trim(str)//')'
+          else if(pm_fast_vkind(ptr)==pm_int) then
+             call pm_name_string(context,&
+                  int(ptr%data%i(ptr%offset),pm_p),str2)
+             str=trim(str2)//'::'
+             call pm_name_string(context,&
+                  int(ptr%data%i(ptr%offset+1),pm_p),str2)
+             str=trim(str)//trim(str2)
+          else
+             str='?type'
+          endif
+       else
+          str='???'
+       endif
+    else if(n<0) then
+       str='(-ve)'
+    else
+       str='EOF'
+    endif
+  contains
+    include 'fvkind.inc'
+    include 'fesize.inc'
+  end subroutine pm_name_string
+
+  ! Returns name as a string
+  function pm_name_as_string(context,m) result(str)
+    type(pm_context),pointer:: context
+    integer(pm_p):: m
+    character(len=300):: str
+    call pm_name_string(context,m,str)
+  end function pm_name_as_string
 
 end module pm_lib
