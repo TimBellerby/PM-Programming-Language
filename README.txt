@@ -16,5 +16,5 @@ The code is not quite ready to start playing with yet - unless you
 
 are very into compiler/interpreter design. A full working release
 
-of version 0.1 is planned before the end on Feb 2015.
+of version 0.1 is planned soon.
 
