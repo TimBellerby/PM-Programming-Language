@@ -1,18 +1,18 @@
 #
-#PM (Parallel Models) Programming Language
+# PM (Parallel Models) Programming Language
 #
-#Released under the MIT License (MIT)
+# Released under the MIT License (MIT)
 #
-#Copyright (c) Tim Bellerby, 2015
+# Copyright (c) Tim Bellerby, 2016
 #
-#Permission is hereby granted, free of charge, to any person obtaining a copy
+# Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-#The above copyright notice and this permission notice shall be included in
+# The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -23,8 +23,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 FC=gfortran
-FFLAGS=-g   # -fbounds-check
-PMCODE= kinds.o memory.o lib.o types.o parser.o linker.o sysdefs.o codegen.o infer.o backend.o vm.o main.o
+FFLAGS=-g  -fbounds-check -fcheck=mem
+PMCODE= kinds.o memory.o lib.o types.o parser.o linker.o sysdefs.o codegen.o infer.o backend.o array.o vm.o main.o
 
 all : pm.exe
 
@@ -40,7 +40,7 @@ memory.o : memory.f90 kinds.o
 lib.o : lib.f90 kinds.o memory.o
 	$(FC) $(FFLAGS) -c $<
 
-types.o : types.f90 lib.o kinds.o memory.o
+types.o : types.f90 parser.o lib.o kinds.o memory.o
 	$(FC) $(FFLAGS) -c $<
 
 parser.o : parser.f90 lib.o kinds.o memory.o
@@ -49,7 +49,7 @@ parser.o : parser.f90 lib.o kinds.o memory.o
 linker.o : linker.f90  parser.o lib.o kinds.o memory.o
 	$(FC) $(FFLAGS) -c $<
 
-sysdefs.o : sysdefs.f90 lib.o kinds.o memory.o
+sysdefs.o : sysdefs.f90 parser.o lib.o kinds.o memory.o
 	$(FC) $(FFLAGS) -c $<
 
 codegen.o : codegen.f90 parser.o sysdefs.o types.o lib.o kinds.o memory.o
@@ -58,12 +58,15 @@ codegen.o : codegen.f90 parser.o sysdefs.o types.o lib.o kinds.o memory.o
 infer.o : infer.f90 codegen.o parser.o sysdefs.o types.o lib.o kinds.o memory.o
 	$(FC) $(FFLAGS) -c $<
 
-backend.o : backend.f90 infer.o codegen.o parser.o sysdefs.o types.o lib.o kinds.o memory.o
+array.o : array.f90 sysdefs.o types.o lib.o kinds.o memory.o
 	$(FC) $(FFLAGS) -c $<
 
-vm.o : vm.f90 sysdefs.o types.o lib.o kinds.o memory.o
+backend.o : backend.f90 array.o infer.o codegen.o parser.o sysdefs.o types.o lib.o kinds.o memory.o
 	$(FC) $(FFLAGS) -c $<
 
-main.o : main.f90 vm.o backend.o infer.o codegen.o linker.o parser.o sysdefs.o types.o lib.o kinds.o memory.o
+vm.o : vm.f90 array.o sysdefs.o types.o lib.o kinds.o memory.o
+	$(FC) $(FFLAGS) -c $<
+
+main.o : main.f90 vm.o array.o backend.o infer.o codegen.o linker.o parser.o sysdefs.o types.o lib.o kinds.o memory.o
 	$(FC) $(FFLAGS) -c $<
 
