@@ -1,18 +1,18 @@
 !
-!PM (Parallel Models) Programming Language
+! PM (Parallel Models) Programming Language
 !
-!Released under the MIT License (MIT)
+! Released under the MIT License (MIT)
 !
-!Copyright (c) Tim Bellerby, 2015
+! Copyright (c) Tim Bellerby, 2016
 !
-!Permission is hereby granted, free of charge, to any person obtaining a copy
+! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
 ! in the Software without restriction, including without limitation the rights
 ! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 ! copies of the Software, and to permit persons to whom the Software is
 ! furnished to do so, subject to the following conditions:
 !
-!The above copyright notice and this permission notice shall be included in
+! The above copyright notice and this permission notice shall be included in
 ! all copies or substantial portions of the Software.
 !
 ! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -31,34 +31,45 @@ module pm_vm
   use pm_lib
   use pm_types
   use pm_sysdefs
+  use pm_array
   implicit none
 
   integer,parameter:: shrink_thresh=4
-contains
 
+  integer,parameter:: vm_ok=0
+  integer,parameter:: vm_error=1
+  integer,parameter:: vm_break=2
+  integer,parameter:: vm_stepout=3
+  integer,parameter:: vm_resume=4
+
+contains
+  
+  ! *************************************
+  ! Run main interpreter loop
+  ! *************************************
   recursive function pm_run(context,funcin,stackin,pcin,&
-       op,op2,args,num_args,sptr,svec) result(errno)
+       op,op2,args,num_args) result(errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: funcin,stackin,pcin
     integer(pm_i16),intent(in):: op,op2
     integer,intent(in):: num_args
     type(pm_ptr),dimension(num_args),intent(in):: args
-    type(pm_ptr),intent(out):: sptr,svec
     integer:: errno
     type(pm_ptr),target,dimension(pm_max_args):: arg
     integer,target:: nargs
-    type(pm_ptr),target:: stack
-    type(pm_ptr):: func,pc,newstack,newfunc,newpc,ve,v,w,gbl
+    type(pm_ptr),target:: stack,newve
+    type(pm_ptr):: func,pc,newstack,newfunc,newpc,ve,p,v,w
     integer(pm_i16):: opcode,opcode2,opcode3,oparg,t1,t2
-    integer:: i,n
-    integer(pm_ln):: esize,j,jj,k
-    logical:: convert_out,flip,ok
-    integer(pm_p):: stacksize,line,modl
+    integer:: i,ii,n
+    integer(pm_ln):: j,jj,k,kk,m,esize
+
+    logical:: flip,ok
+    integer(pm_p):: stacksize
     type(pm_reg),pointer:: reg
     character(len=200):: mess
     nargs=0
     reg=>pm_register(context,'vm args',&
-         stack,array=arg,array_size=nargs)
+         stack,newve,array=arg,array_size=nargs)
     opcode=op
     opcode2=op2
     if(num_args>0) arg(1:num_args)=args(1:num_args)
@@ -74,12 +85,22 @@ contains
     opcode=pc%data%i16(pc%offset)
     opcode2=pc%data%i16(pc%offset+1_pm_p)
     opcode3=pc%data%i16(pc%offset+2_pm_p)
-    n=iand(opcode3,127) ! Number arguments
+    n=iand(opcode3,pm_max_stack)  ! Number arguments
+    !stack%data%ptr(stack%offset)%offset=&
+    !     opcode3/(pm_max_stack+1) ! Stack top
     if(pm_debug_level>3) then
        write(*,*) 'DECODING',opcode,&
-            op_names(opcode),opcode2,opcode3,stack%offset
+            op_names(opcode),opcode2,n,opcode3/(pm_max_stack+1),'pc=',pc%offset
     endif
-    do i=1,n
+    oparg=pc%data%i16(pc%offset+3_pm_p)
+    arg(1)=stack%data%ptr(stack%offset+oparg)
+    ve=arg(1)%data%ptr(arg(1)%offset+1)
+    esize=ve%data%ln(ve%offset)
+    ve=arg(1)%data%ptr(arg(1)%offset)
+    if(pm_debug_level>3) then
+       write(*,*)arg(1)%data%vkind,ve%data%vkind,esize
+    endif
+    do i=2,n
        oparg=pc%data%i16(pc%offset+i+2_pm_p)
        if(pm_debug_level>3) write(*,*) 'OPARG=', oparg
        if(oparg>=0) then
@@ -90,22 +111,39 @@ contains
        else if(oparg>=-int(pm_max_stack,pm_i16)) then
           arg(i)%data=>stack%data
           arg(i)%offset=stack%offset-oparg
-          !stack%data%ptr(stack%offset-oparg)=pm_null_obj
           if(pm_debug_level>3) &
                write(*,*) i,'STACKREF',-oparg,arg(i)%data%esize,&
                arg(i)%data%hash,stack%offset,arg(i)%offset
        else
-          arg(i)=func%data%ptr(func%offset-oparg-pm_max_stack)
-          if(pm_debug_level>3) write(*,*) i,'CONST',oparg
+          w=func%data%ptr(func%offset-oparg-pm_max_stack)
+          ii=pm_fast_vkind(w)
+          if(ii==pm_null) then
+             arg(i)=w
+          elseif(ii==pm_string) then
+             arg(i)=make_string_vector(context,w,esize)
+          else
+             arg(i)=pm_new(context,ii,esize+1)
+             call pm_fill_vect(context,arg(i),w)
+          endif
        endif
     enddo
+
     nargs=n
     pc%offset=pc%offset+n+3_pm_p
+    ! Empty ve
+    if(pm_fast_vkind(ve)==pm_tiny_int) then
+       if(opcode==op_jmp_empty_ve) then
+          pc%offset=pc%offset+opcode2
+       elseif(opcode>=op_and_jmp_none.and.opcode<=op_andnot_jmp_any) then
+          call set_arg(2,arg(1))
+       endif
+       goto 10
+    endif
 
     20 continue
     if(pm_debug_level>3) then
        write(*,*) 'RUNNING',opcode,&
-            op_names(opcode),opcode2,opcode3
+            op_names(opcode),opcode2,opcode3,'pc=',pc%offset
     endif
     select case(opcode)
     case(op_call)
@@ -116,25 +154,9 @@ contains
        call poly_call_lookup(context,&
             func%data%ptr(func%offset+opcode2),arg,nargs,&
             opcode,opcode2)
-       if(opcode==op_call) then
-          newfunc=context%funcs%data%ptr(&
-            context%funcs%offset+opcode2)
-          goto 30
-       else
-          goto 20
-       endif
-    case(op_poly_call_vect)
-       stack%data%ptr(stack%offset)%offset=opcode3/128
-       call vect_poly_call(context,&
-            func%data%ptr(func%offset+opcode2),&
-            arg,nargs,opcode,opcode2,sptr,svec)
        if(opcode==-1) then
           ! All done
           goto 10
-       elseif(opcode==-2) then
-          ! Stalled
-          errno=-1
-          return
        elseif(opcode==op_call) then
           newfunc=context%funcs%data%ptr(&
             context%funcs%offset+opcode2)
@@ -142,6 +164,14 @@ contains
        else
           goto 20
        endif
+    case(op_var_call)
+       call var_call
+       opcode=v%data%ptr(v%offset)%offset
+       opcode2=v%data%ptr(v%offset+1_pm_p)%offset
+       goto 20
+    case(op_lookup_error)
+       call runtime_error(context,'Could not find matching procedure')
+       goto 999
     case(op_vcall)
        v=arg(nargs)
        do i=0,pm_fast_esize(v)
@@ -151,325 +181,715 @@ contains
        opcode=pc%data%i16(pc%offset)
        opcode2=pc%data%i16(pc%offset+1_pm_p)
        opcode3=pc%data%i16(pc%offset+2_pm_p)
-       pc%offset=pc%offset+3_pm_p
+       pc%offset=pc%offset+4_pm_p
        goto 20
     case(op_return)
        if(nargs>0) then
-          do i=1,nargs
+          do i=2,nargs
              v=stack%data%ptr(stack%offset+pm_stack_locals+i-1)
              v%data%ptr(v%offset)=arg(i)
           enddo
        endif
-       pc=stack%data%ptr(stack%offset+1)
-       func=stack%data%ptr(stack%offset+3)
-       stack=stack%data%ptr(stack%offset+2)
+       pc=stack%data%ptr(stack%offset+pm_stack_pc)
+       func=stack%data%ptr(stack%offset+pm_stack_func)
+       stack=stack%data%ptr(stack%offset+pm_stack_oldstack)
        if(pm_fast_isnull(pc)) then
           errno=0
           goto 888
        endif
     case(op_jmp)
        pc%offset=pc%offset+opcode2
-    case(op_jmp_true)
-       if(arg(1)%data%l(arg(1)%offset)) &
-            pc%offset=pc%offset+opcode2
-    case(op_jmp_false)
-       if(.not.arg(1)%data%l(arg(1)%offset)) &
-            pc%offset=pc%offset+opcode2
     case(op_and_jmp_none:op_andnot_jmp_any)
        flip=opcode==op_andnot_jmp_none.or.opcode==op_andnot_jmp_any
-       ve=arg(2)%data%ptr(arg(2)%offset)
-       esize=pm_fast_esize(ve)
-       if(pm_fast_vkind(ve)==pm_long) then
+       if(pm_fast_isnull(ve)) then
+          ! No active mask - logical vector becomes new mask
+          newve=pm_new(context,pm_logical,esize)
+          if(flip) then
+             newve%data%l(newve%offset:newve%offset+esize)=.not. &
+                  arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
+          else
+             newve%data%l(newve%offset:newve%offset+esize)= &
+                  arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
+          endif
+          k=count(newve%data%l(newve%offset:newve%offset+esize))
+          if(k>0.and.esize+1>=k*shrink_thresh) then
+             newve=shrink_ve(context,newve,esize,k)
+          endif
+       elseif(pm_fast_vkind(ve)==pm_int) then
           ! Vector engine is using a list of indices 
           ! - subset active cells
           jj=0
-          do j=1,esize
+          do j=0,pm_fast_esize(ve)
              k=ve%data%ln(ve%offset+j)
              if(arg(3)%data%l(arg(3)%offset+k).neqv.flip) jj=jj+1
           enddo
-          stack%data%ptr(stack%offset)%offset=opcode3/128
-          arg(1)%data%ptr(arg(1)%offset)=&
-               pm_new(context,pm_long,jj+1_pm_ln)
-          arg(1)=arg(1)%data%ptr(arg(1)%offset)
-          arg(1)%data%ln(arg(1)%offset)=ve%data%ln(ve%offset)
-          jj=1
-          do j=1,esize
-             k=ve%data%ln(ve%offset+j)
-             if(arg(3)%data%l(arg(3)%offset+k).neqv.flip) then
-                arg(1)%data%ln(arg(1)%offset+jj)=k
-                jj=jj+1
-             endif
-          enddo
+          if(jj>0) then
+             newve=pm_new(context,pm_int,int(jj,pm_ln))
+             k=0
+             do j=0,pm_fast_esize(ve)
+                jj=ve%data%ln(ve%offset+j)
+                if(arg(3)%data%l(arg(3)%offset+jj).neqv.flip) then
+                   newve%data%ln(newve%offset+k)=jj
+                   k=k+1
+                endif
+             enddo
+          else
+             k=0
+          endif
        else
           ! Calculate new vector of active cell flags
-          stack%data%ptr(stack%offset)%offset=opcode3/128
-          arg(1)%data%ptr(arg(1)%offset)=pm_new(context,&
-               pm_logical,esize+1_pm_ln)
-          arg(4)=arg(1)%data%ptr(arg(1)%offset)
+          newve=pm_new(context,pm_logical,esize+1)
           k=0
           do j=0,esize
              ok=ve%data%l(ve%offset+j).and.&
                   (arg(3)%data%l(arg(3)%offset+j).neqv.flip)
-             arg(4)%data%l(arg(4)%offset+j)=ok
+             newve%data%l(newve%offset+j)=ok
              if(ok) k=k+1
           enddo
           ! If only a small number of cells active in vector, 
-          ! change to using an index list
-          if(k>0.and.esize>k*shrink_thresh) &
-               arg(1)%data%ptr(arg(1)%offset)=&
-               pm_shrink(context,arg(4),k)
+          ! change to index list
+          if(k>0.and.esize+1>=k*shrink_thresh) then
+             newve=shrink_ve(context,newve,esize,k)
+          endif
        endif
+       ! Empty ve
+       if(k==0) newve=pm_fast_tinyint(context,0_pm_p)
+       ! New vector engine structure
+       ve=pm_fast_newnc(context,pm_pointer,2)
+       ve%data%ptr(ve%offset)=newve
+       ve%data%ptr(ve%offset+1)=arg(1)%data%ptr(arg(1)%offset+1)
+       call set_arg(2,ve)
        if(opcode<op_and_jmp_any) then
-             ! .. _jmp_none
+          ! .. _jmp_none
           if(k==0) pc%offset=pc%offset+opcode2
        else
           ! .. _jmp_any
           if(k>0) pc%offset=pc%offset+opcode2
        endif
-    case(op_loop_start)
-       if(arg(2)%data%ln(arg(2)%offset)<=0) then
-          pc%offset=pc%offset+opcode2
-       else
-          v=pm_fast_newnc(context,pm_long,1_pm_p)
-          arg(1)%data%ptr(arg(1)%offset)=v
-          v%data%ln(v%offset)=1
-       endif
-    case(op_loop_end)
-       arg(1)%data%ln(arg(1)%offset)=arg(1)%data%ln(arg(1)%offset)+1
-       if(arg(1)%data%ln(arg(1)%offset)<=arg(2)%data%ln(arg(2)%offset)) &
-            pc%offset=pc%offset+opcode2
-       if(pm_debug_level>3) &
-            write(*,*) '#', arg(1)%data%ln(arg(1)%offset),arg(2)%data%ln(arg(2)%offset)
+    case(op_jmp_any_ve)
+       do i=1,nargs
+          if(pm_fast_vkind(arg(i)%data%ptr(arg(i)%offset))/=pm_tiny_int) then
+             pc%offset=pc%offset+opcode2
+             exit
+          endif
+       enddo
+    case(op_jmp_empty_ve)
+       continue
     case(op_par_loop)
-       stack%data%ptr(stack%offset+opcode2)=pm_null_obj
-       call par_loop(context,func,stack,pc,arg,nargs)
+       errno=par_loop(context,func,stack,pc,arg,nargs,esize)
+       if(errno/=0) goto 888
     case(op_par_loop_end)
        errno=0
        goto 888
+    case(op_clone_ve)
+       stack%data%ptr(stack%offset+opcode2)=arg(1)
+    case(op_makekeys)
+       v=pm_dict_new(context,8_pm_ln)
+       if(.not.pm_fast_isnull(arg(3))) then
+          ok=pm_dict_merge(context,v,arg(3),.true.)
+       endif
+       call set_arg(2,v)
+       do i=4,nargs,2
+          call pm_dict_set(context,v,arg(i),arg(i+1),.true.,.true.,ok,m)
+       enddo
+    case(op_delkeys)
+       v=pm_dict_new(context,8_pm_ln)
+       call set_arg(2,v)
+       delkey: do j=1,pm_dict_size(context,arg(2))
+          w=pm_dict_key(context,arg(3),int(j,pm_ln))
+          do i=4,nargs
+            if(w%offset==arg(i)%offset) cycle delkey 
+          enddo
+          call pm_dict_set(context,v,w,&
+               pm_dict_val(context,arg(3),int(j,pm_ln)),.true.,.true.,ok,m)
+       enddo delkey
+    case(op_checkkeys)
+       do i=2,nargs,2
+          if(.not.pm_fast_isnull(arg(i+1))) then
+             call runtime_error(context,&
+                  'Unexpected keyword argument: '//&
+                  trim(pm_name_as_string(context,arg(i)%offset)))
+             goto 999
+          endif
+       enddo
+    case(op_getvkey)
+       call set_arg(2,pm_dict_lookup(context,arg(3),arg(4)))
+    case(op_get_key)
+       v=stack%data%ptr(stack%offset+opcode2)
+       w=stack%data%ptr(stack%offset+opcode2+1)
+       if(v%data%l(v%offset)) then
+          if(pm_arg_type(w)/=pm_arg_type(arg(3))) then
+             call runtime_error(context,'Keyword argument has wrong type')
+             goto 999
+          endif
+          call set_arg(2,w)
+       else
+          call set_arg(2,arg(3))
+       endif   
+   case(op_get_key2)
+       v=stack%data%ptr(stack%offset+opcode2)
+       w=stack%data%ptr(stack%offset+opcode2+1)
+       call set_arg(2,v)
+       call set_arg(3,w)
+    case(op_default)
+       v=alloc_arg(int(opcode2),2)
     case(op_print)
-       write(*,*) arg(1)%data%s(arg(1)%offset:arg(1)%offset+pm_fast_esize(arg(1)))
+       ve=shrink_ve(context,ve,esize)
+       call vector_print_string(context,arg(2),ve)
     case(op_dump)
-       write(*,*) '== dump =='
-       call pm_dump_tree(context,6,arg(1),1)
-       write(*,*) '=========='
+       write(*,*) '====================== dump ======================'
+       call pm_dump_tree(context,6,arg(2),1)
+       write(*,*) '=================================================='
     case(op_concat)
-       arg(1)%data%ptr(arg(1)%offset)=pm_concat_string(context,arg(2),arg(3))
-    case(op_setref)
-       arg(1)%data%ptr(arg(1)%offset)=arg(2)
-    case(op_setref_vect)
-       if(pm_fast_vkind(arg(1))==pm_null) then
-          arg(2)%data%ptr(arg(2)%offset:arg(2)%offset+&
-               pm_fast_esize(arg(2)))=&
-               arg(3)%data%ptr(arg(3)%offset:arg(3)%offset+&
-               pm_fast_esize(arg(3)))
-       else if(pm_fast_vkind(arg(1))==pm_logical) then
-          esize=pm_fast_esize(arg(1))
-          where(arg(1)%data%l(arg(1)%offset:arg(1)%offset+esize))
-             arg(2)%data%ptr(arg(2)%offset:arg(2)%offset+&
-                  pm_fast_esize(arg(2)))=&
-                  arg(3)%data%ptr(arg(3)%offset:arg(3)%offset+&
-                  pm_fast_esize(arg(3)))
+       ve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_concat_string(context,ve,&
+            arg(3),arg(4)))
+    case(op_clone)
+       call set_arg(2,copy_vector(context,arg(3),ve))
+    case(op_assign)
+       call vector_assign(context,arg(2),arg(3),ve,esize)
+    case(op_struct)
+       v=pm_fast_newusr(context,pm_struct_type,int(nargs,pm_p))
+       call set_arg(2,v)
+       if(opcode2<0) opcode2=pm_arglist_type(context,&
+            pm_typ_is_struct,-opcode2,arg(3:),nargs-1)
+       v%data%ptr(v%offset+1_pm_p)=pm_fast_tinyint(context,int(opcode2,pm_p))
+       v%data%ptr(v%offset+2:v%offset+nargs-1)=arg(3:nargs)
+    case(op_rec)
+       v=pm_fast_newusr(context,pm_rec_type,int(nargs,pm_p))
+       call set_arg(2,v)
+       if(opcode2<0) opcode2=pm_arglist_type(context,&
+            pm_typ_is_rec,-opcode2,arg(3:),nargs-1)
+       v%data%ptr(v%offset+1_pm_p)=pm_fast_tinyint(context,int(opcode2,pm_p))
+       v%data%ptr(v%offset+2:v%offset+nargs-1)=arg(3:nargs)
+    case(op_check_logical)
+       if(pm_fast_vkind(arg(2))/=pm_logical) then
+          !!! Check poly kind
+          call runtime_error(context,&
+               'Logical expression did not yield a bool value')
+          goto 999
+       endif
+    case(op_check)
+       if(pm_fast_isnull(ve)) then
+          if(.not.all(arg(3)%data%l(arg(3)%offset:&
+               arg(3)%offset+esize))) then
+             ve=shrink_ve(context,ve,esize)
+             call vector_get_string(context,arg(2),ve,0_pm_ln,mess)
+             call runtime_error(context,mess)
+             goto 999
+          endif
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          if(any(ve%data%l(ve%offset:ve%offset+esize).and..not.&
+               arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize))) then
+             ve=shrink_ve(context,ve,esize)
+             call vector_get_string(context,arg(2),ve,0_pm_ln,mess)
+             call runtime_error(context,mess)
+             goto 999 
+          endif
+       else
+          if(.not.all(arg(3)%data%l(arg(3)%offset+&
+               ve%data%ln(ve%offset:&
+               ve%offset+pm_fast_esize(ve))))) then
+             ve=shrink_ve(context,ve,esize)
+             call vector_get_string(context,arg(2),ve,0_pm_ln,mess)
+             call runtime_error(context,mess)
+             goto 999 
+          endif
+       endif
+    case(op_elem)
+       call set_arg(2,&
+            arg(3)%data%ptr(arg(3)%offset+opcode2))
+    case(op_poly_elem)
+       i=pm_arg_type(arg(2))
+       if(i==pm_poly_type) then
+          ve=shrink_ve(context,ve,esize)
+          w=pm_fast_newusr(context,pm_poly_type,3_pm_p)
+          call set_arg(2,w)
+          v=arg(3)%data%ptr(arg(3)%offset+2_pm_p)
+          w%data%ptr(w%offset+2_pm_p)=v
+          w=pm_assign_new(context,w,1_pm_ln,pm_pointer,esize+1,.false.)
+          v=arg(3)%data%ptr(arg(3)%offset+1_pm_p)
+          i=0
+          do jj=0,pm_fast_esize(ve)
+             k=ve%data%ln(ve%offset+jj)
+             p=v%data%ptr(v%offset+k)
+             call pm_elem_offset(context,pm_arg_type(p),&
+                  opcode2,.false.,t1,t2)
+             if(i==0) then 
+                i=t2
+             elseif(i/=t2) then
+                i=-1
+             endif
+             if(t1<0) goto 996
+             w%data%ptr(w%offset+k)=p%data%ptr(p%offset+t1)
+          enddo
+          if(i>0) then
+             call set_arg(2,ptr_vec_get_type(context,w,ve,0_pm_ln,esize))
+          endif
+       elseif(i==pm_struct_type.or.i==pm_rec_type) then
+          call pm_elem_offset(context,int(pm_arg_type(arg(2)),pm_i16),&
+               opcode2,.false.,t1,t2)
+          if(t1<0) goto 996
+          call set_arg(2,arg(2)%data%ptr(arg(2)%offset+t1))
+       else
+          goto 996
+       endif
+    case(op_array)
+       call set_arg(2,make_array_dim(context,t1,&
+            arg(3),arg(4),arg(5),ve))
+    case(op_array_get_elem)
+       errno=0
+       call set_arg(2,array_index(context,arg(3),&
+            arg(4),ve,errno))
+       if(errno/=0) goto 997
+    case(op_array_set_elem)
+       errno=0
+       call array_set_index(context,arg(2),arg(3),arg(4),ve,errno)
+       if(errno/=0) goto 997
+    case(op_export_array)
+       errno=0
+       call array_export(context,arg(2),arg(3),arg(4),&
+            arg(1)%data%ptr(arg(1)%offset),errno)
+       if(errno/=0) goto 997
+    case(op_iota)
+       call set_arg(2,vector_iota(context,&
+            arg(3),arg(4),arg(5),arg(6),arg(7)%data%ptr(arg(7)%offset+1)))
+    case(op_import_val)
+       call set_arg(2,import_vector(context,&
+            arg(3),arg(1)%data%ptr(arg(1)%offset+1)))
+    case(op_export)
+       call set_arg(2,arg(3))  !!! Modify for multiple threads
+    case(op_extract)
+       
+    case(op_extractelm)
+       call set_arg(2,arg(3)%data%ptr(arg(3)%offset+pm_array_vect))
+    case(op_make_array)
+       call set_arg(2,make_array_from_vect(context,t1,&
+            arg(3),arg(4),arg(5),ve))
+    case(op_string_i)
+       ve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_make_string(context,&
+            ve,arg(3),fmt_i_width,fmt_i))
+    case(op_assign_i)
+       if(pm_fast_vkind(ve)==pm_null) then
+          arg(2)%data%i(arg(2)%offset:arg(2)%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             arg(2)%data%i(arg(2)%offset:arg(2)%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          forall(j=1:pm_fast_esize(arg(1)))
-             arg(2)%data%ptr(arg(1)%data%ln(arg(1)%offset+j)+&
-                  arg(2)%offset)=&
-                  arg(3)%data%ptr(arg(1)%data%ln(arg(1)%offset+j)+&
-                  arg(3)%offset)
+          forall(j=0:pm_fast_esize(ve))
+             arg(2)%data%i(arg(2)%offset+ve%data%ln(ve%offset+j))=&
+                  arg(3)%data%i(arg(3)%offset+ve%data%ln(ve%offset+j))
           end forall
        endif
-    case(op_struct,op_struct_vect)
-       v=pm_fast_newusr(context,int(opcode2,pm_p),int(nargs,pm_p))
-       arg(1)%data%ptr(arg(1)%offset)=v
-       v%data%ptr(v%offset+1:v%offset+nargs-1)=arg(2:nargs)
-    case(op_clone)
-       arg(1)%data%ptr(arg(1)%offset)=pm_deep_copy(context,arg(2))
-    case(op_array)
-       v=pm_fast_newusr(context,int(opcode2,pm_p),3_pm_p)
-       arg(1)%data%ptr(arg(1)%offset)=v
-       v%data%ptr(v%offset+1_pm_p)=pm_null_obj
-       v%data%ptr(v%offset+2_pm_p)=arg(4)
-       call pm_assign_new(context,v,1_pm_ln,pm_fast_vkind(arg(2)),&
-            arg(3)%data%ln(arg(3)%offset),.false.)
-       call pm_fill_vect(context,v%data%ptr(v%offset+1_pm_p),arg(2))
-    case(op_check)
-       if(pm_fast_vkind(arg(1))/=pm_logical) then
-          call runtime_error(context,'Check expression did not yield a bool value')
-          goto 999
-       endif
-       if(.not.arg(1)%data%l(arg(1)%offset)) then
-          call runtime_error(context,'Check expression failed to return a true value')
-          goto 999
-       endif
-    case(op_elem,op_elem_vect)
-       arg(1)%data%ptr(arg(1)%offset)=&
-            arg(2)%data%ptr(arg(2)%offset+opcode2)
-    case(op_poly_elem)
-       call pm_elem_offset(context,int(pm_fast_typeof(arg(2)),pm_i16),&
-            opcode2,.false.,t1,t2)
-       if(t1<0) then
-          call runtime_error(context,'No structure/record element: '//&
-               trim(pm_name_as_string(context,int(opcode2,pm_p))))
-          goto 999
-       endif
-       arg(1)%data%ptr(arg(1)%offset)=&
-            arg(2)%data%ptr(arg(2)%offset+opcode2)
-    case(op_set_elem,op_set_elem_vect)
-       arg(1)%data%ptr(arg(1)%offset+opcode2)=arg(2)
-    case(op_uminus_i)
-       if(opcode2>0) then
-          v=gbl%data%ptr(gbl%offset+opcode2)
-       else
-          v=pm_fast_newnc(context,pm_int,1_pm_p)
-       endif
-       arg(1)%data%ptr(arg(1)%offset)=v
-       v%data%i(v%offset)=-arg(2)%data%i(arg(2)%offset)
     case(op_add_i)
-       if(opcode2>0) then
-          v=gbl%data%ptr(gbl%offset+opcode2)
-       else
-          v=pm_fast_newnc(context,pm_int,1_pm_p)
-       endif
-       arg(1)%data%ptr(arg(1)%offset)=v
-       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)+ &
-            arg(3)%data%i(arg(3)%offset)
-    case(op_add_i_vect)
-       esize=pm_fast_esize(arg(3))
-       if(opcode2>0) then
-          arg(2)%data%ptr(arg(2)%offset)=arg(opcode2)
-       else
-          stack%data%ptr(stack%offset)%offset=opcode3/128
-          arg(2)%data%ptr(arg(2)%offset)=pm_new(context,pm_int,esize)
-       endif
-       arg(2)=arg(2)%data%ptr(arg(2)%offset)
-       if(pm_fast_vkind(arg(1))==pm_null) then
-          arg(2)%data%i(arg(2)%offset:arg(2)%offset+esize)=&
+       v=alloc_arg(pm_int,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%i(v%offset:v%offset+esize)=&
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
-       elseif(pm_fast_vkind(arg(1))==pm_logical) then
-          where(arg(1)%data%l(arg(1)%offset:arg(1)%offset+esize))
-             arg(2)%data%i(arg(2)%offset:arg(2)%offset+esize)=&
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%i(v%offset:v%offset+esize)=&
                   arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)+&
                   arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
           end where
        else
-          forall(j=1:pm_fast_esize(arg(1)))
-             arg(2)%data%i(arg(1)%data%ln(arg(1)%offset+j)+&
-                  arg(2)%offset)=&
-                  arg(3)%data%i(arg(1)%data%ln(arg(1)%offset+j)+&
+          forall(j=0:pm_fast_esize(ve))
+             v%data%i(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
                   arg(3)%offset)+&
-                  arg(4)%data%i(arg(1)%data%ln(arg(1)%offset+j)+&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
                   arg(4)%offset)
           end forall
        endif
     case(op_sub_i)
-       if(opcode2>0) then
-          v=gbl%data%ptr(gbl%offset+opcode2)
+       v=alloc_arg(pm_int,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%i(v%offset:v%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)-&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%i(v%offset:v%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)-&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+          end where
        else
-          v=pm_fast_newnc(context,pm_int,1_pm_p)
+          forall(j=0:pm_fast_esize(ve))
+             v%data%i(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)-&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
        endif
-       arg(1)%data%ptr(arg(1)%offset)=v
-       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)- &
-            arg(3)%data%i(arg(3)%offset)
     case(op_mult_i)
-       if(opcode2>0) then
-          v=gbl%data%ptr(gbl%offset+opcode2)
+       v=alloc_arg(pm_int,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%i(v%offset:v%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)*&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%i(v%offset:v%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)*&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+          end where
        else
-          v=pm_fast_newnc(context,pm_int,1_pm_p)
+          forall(j=0:pm_fast_esize(ve))
+             v%data%i(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)*&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
        endif
-       arg(1)%data%ptr(arg(1)%offset)=v
-       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)* &
-            arg(3)%data%i(arg(3)%offset)
-    case(op_div_i)
-       if(opcode2>0) then
-          v=gbl%data%ptr(gbl%offset+opcode2)
+   case(op_divide_i)
+       v=alloc_arg(pm_int,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%i(v%offset:v%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)/&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%i(v%offset:v%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)/&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+          end where
        else
-          v=pm_fast_newnc(context,pm_int,1_pm_p)
-       endif
-       arg(1)%data%ptr(arg(1)%offset)=v
-       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)/ &
-            arg(3)%data%i(arg(3)%offset)
-    case(op_mod_i)
-       if(opcode2>0) then
-          v=gbl%data%ptr(gbl%offset+opcode2)
-       else
-          v=pm_fast_newnc(context,pm_int,1_pm_p)
-       endif
-       arg(1)%data%ptr(arg(1)%offset)=v
-       v%data%i(v%offset)=mod(arg(2)%data%i(arg(2)%offset), &
-            arg(3)%data%i(arg(3)%offset))
-    case(op_pow_i)
-       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset)** &
-            arg(3)%data%i(arg(3)%offset)
-    case(op_divide_i)
-       if(arg(3)%data%i(arg(3)%offset)==0) then
-          call runtime_error(context,'Division by zero')
-          goto 999
-       endif
-       if(opcode2>0) then
-          v=gbl%data%ptr(gbl%offset+opcode2)
-       else
-          v=pm_fast_newnc(context,pm_int,1_pm_p)
-       endif
-       arg(1)%data%ptr(arg(1)%offset)=v
-       arg(1)%data%d(arg(1)%offset)=real(arg(2)%data%i(arg(2)%offset),pm_d)/ &
-            arg(3)%data%i(arg(3)%offset)
-    case(op_eq_i)
-       if(arg(2)%data%i(arg(2)%offset)==arg(3)%data%i(arg(3)%offset)) then
-          arg(1)%data%ptr(arg(1)%offset)=pm_true_obj
-       else
-          arg(1)%data%ptr(arg(1)%offset)=pm_false_obj
-       endif
-    case(op_ne_i)
-       if(arg(2)%data%i(arg(2)%offset)/=arg(3)%data%i(arg(3)%offset)) then
-          arg(1)%data%ptr(arg(1)%offset)=pm_true_obj
-       else
-          arg(1)%data%ptr(arg(1)%offset)=pm_false_obj
+          forall(j=0:pm_fast_esize(ve))
+             v%data%i(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)/&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
        endif
     case(op_gt_i)
-       if(arg(2)%data%i(arg(2)%offset)>arg(3)%data%i(arg(3)%offset)) then
-          arg(1)%data%ptr(arg(1)%offset)=pm_true_obj
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)>&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)>&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+          end where
        else
-          arg(1)%data%ptr(arg(1)%offset)=pm_false_obj
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)>&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
        endif
     case(op_ge_i)
-       if(arg(2)%data%i(arg(2)%offset)>=arg(3)%data%i(arg(3)%offset)) then
-          arg(1)%data%ptr(arg(1)%offset)=pm_true_obj
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)>=&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)>=&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+          end where
        else
-          arg(1)%data%ptr(arg(1)%offset)=pm_false_obj
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)>=&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
        endif
-    case(op_string_i)
-       write(mess,'(i10)') arg(2)%data%i(arg(2)%offset)
-       mess=adjustl(mess)
-       n=int(len_trim(mess))
-       v=pm_fast_newnc(context,pm_string,int(n,pm_p))
-       do i=1,n
-          v%data%s(v%offset+i-1)=mess(i:i)
-       enddo
-       arg(1)%data%ptr(arg(1)%offset)=v
-    case(op_get_elt_i)
-       if(opcode2>0) then
-          v=gbl%data%ptr(gbl%offset+opcode2)
+    case(op_long_i)
+       v=alloc_arg(pm_long,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%ln(v%offset:v%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%ln(v%offset:v%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
+          end where
        else
-          v=pm_fast_newnc(context,pm_int,1_pm_p)
+          forall(j=0:pm_fast_esize(ve))
+             v%data%ln(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)
+          end forall
        endif
-       arg(1)%data%ptr(arg(1)%offset)=v
-       arg(2)=arg(2)%data%ptr(arg(2)%offset+1_pm_p)
-       j=arg(3)%data%ln(arg(3)%offset)-1
-       if(j<0.or.j>pm_fast_esize(arg(2))) then
-          if(pm_debug_level>1) write(*,*) '##',j,pm_fast_esize(arg(2))
-          call runtime_error(context,'Index out of bounds')
-          goto 999
+
+    case(op_string_ln)
+       ve=shrink_ve(context,ve,esize)
+       call set_arg(2,&
+            vector_make_string(context,&
+            ve,arg(3),fmt_ln_width,fmt_ln))
+    case(op_assign_ln)
+       if(pm_fast_vkind(ve)==pm_null) then
+          arg(2)%data%ln(arg(2)%offset:arg(2)%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             arg(2)%data%ln(arg(2)%offset:arg(2)%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             arg(2)%data%ln(arg(2)%offset+ve%data%ln(ve%offset+j))=&
+                  arg(3)%data%ln(arg(3)%offset+ve%data%ln(ve%offset+j))
+          end forall
        endif
-       v%data%i(v%offset)=arg(2)%data%i(arg(2)%offset+j)
-    case(op_set_elt_i)
-       v=arg(1)%data%ptr(arg(1)%offset+1_pm_p)
-       j=arg(3)%data%ln(arg(3)%offset)-1
-       if(j<0.or.j>pm_fast_esize(v)) then
-          call runtime_error(context,'Index out of bounds')
-          goto 999
+   case(op_add_ln)
+       v=alloc_arg(pm_long,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%ln(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)+&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%ln(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)+&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%ln(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)+&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
        endif
-       v%data%i(v%offset+j)=arg(2)%data%i(arg(2)%offset)
+    case(op_sub_ln)
+       v=alloc_arg(pm_long,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%ln(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)-&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%ln(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)-&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%ln(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)-&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+    case(op_mult_ln)
+       v=alloc_arg(pm_long,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%ln(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)*&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%ln(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)*&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%ln(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)*&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+   case(op_divide_ln)
+       v=alloc_arg(pm_long,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%ln(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)/&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%ln(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)/&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%ln(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)/&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+    case(op_gt_ln)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)>&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)>&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)>&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+    case(op_ge_ln)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)>=&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)>=&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)>=&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+    case(op_int_ln)
+       v=alloc_arg(pm_int,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%i(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%i(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%i(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)
+          end forall
+       endif
+
+   case(op_string_l)
+       ve=shrink_ve(context,ve,esize)
+       call set_arg(2,&
+            vector_make_string(context,&
+            ve,arg(3),fmt_l_width,fmt_l))
+    case(op_assign_l)
+       if(pm_fast_vkind(ve)==pm_null) then
+          arg(2)%data%l(arg(2)%offset:arg(2)%offset+esize)=&
+               arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             arg(2)%data%l(arg(2)%offset:arg(2)%offset+esize)=&
+                  arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             arg(2)%data%l(arg(2)%offset+ve%data%ln(ve%offset+j))=&
+                  arg(3)%data%l(arg(3)%offset+ve%data%ln(ve%offset+j))
+          end forall
+       endif
+    case(op_and)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize).and.&
+               arg(4)%data%l(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize).and.&
+                  arg(4)%data%l(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%l(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset).and.&
+                  arg(4)%data%l(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+   case(op_or)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize).or.&
+               arg(4)%data%l(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize).or.&
+                  arg(4)%data%l(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%l(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset).or.&
+                  arg(4)%data%l(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+    case(op_not)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               .not.arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  .not.arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  .not.arg(3)%data%l(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)
+          end forall
+       endif
+
     case default
        write(*,*) 'Unknown opcode=',opcode
        write(*,*) op_names(opcode)
@@ -483,28 +903,27 @@ contains
     ! ***********************************
     ! This section implements a call
     !************************************
-    if(.not.pm_fast_isnull(stack)) &
-         stack%data%ptr(stack%offset)%offset=oparg/128 
     ! save current stack top
     newpc=newfunc%data%ptr(newfunc%offset)
     stacksize=newpc%data%i16(newpc%offset)
     i=newpc%data%i16(newpc%offset+1)
     newstack=pm_fast_new(context,pm_stack,stacksize)
     newstack%data%ptr(newstack%offset)=&
-         pm_fast_tinyint(context,int(stacksize,pm_p))
+         pm_fast_tinyint(context,int(stacksize-1,pm_p))
     newstack%data%ptr(newstack%offset+1)=pc
     newstack%data%ptr(newstack%offset+2)=stack
     newstack%data%ptr(newstack%offset+3)=func
     if(i<nargs) then
-       newstack%data%ptr(newstack%offset+4:newstack%offset+i+2)=&
-         arg(1:i-1)
-       newstack%data%ptr(newstack%offset)%offset=i+2
-       context%temp_obj1=pm_fast_newnc(context,pm_pointer,int(nargs-i+1,pm_p))
-       context%temp_obj1%data%ptr(context%temp_obj1%offset:&
-            context%temp_obj1%offset+nargs-i)=arg(i:nargs)
-       newstack%data%ptr(newstack%offset+i+3)=context%temp_obj1
+       if(pm_debug_level>3) write(*,*) 'TRIM ARG LIST>',i,nargs
+       newstack%data%ptr(newstack%offset+pm_stack_locals:&
+            newstack%offset+i+pm_stack_locals-1)=&
+            arg(1:i)
+       context%temp_obj1=newstack
+       v=pm_fast_newnc(context,pm_pointer,int(nargs-i,pm_p))
+       v%data%ptr(v%offset:v%offset+nargs-i-1)=arg(i+1:nargs)
+       newstack%data%ptr(newstack%offset+i+pm_stack_locals)=v
        context%temp_obj1=pm_null_obj
-       nargs=i
+       nargs=i+1
     else
        if(pm_debug_level>0) then
           if(i/=nargs) then
@@ -513,7 +932,8 @@ contains
           endif
        endif
        if(nargs>0) then
-          newstack%data%ptr(newstack%offset+4:newstack%offset+nargs+3)=&
+          newstack%data%ptr(newstack%offset+pm_stack_locals:&
+               newstack%offset+pm_stack_locals+nargs-1)=&
                arg(1:nargs)
        endif
     endif
@@ -532,13 +952,30 @@ contains
       
     goto 10
 
+996 continue
+
+    ! struct/rec operation error
+    call runtime_error(context,'Cannot access structure/record element: '//&
+               trim(pm_name_as_string(context,int(opcode2,pm_p))))
+    goto 999
+
+997 continue
+
+    ! Vector/array operation errors
+    select case(errno)
+    case(vector_type_error)
+       call runtime_error(context,'Type mismatch')
+    case(vector_size_error)
+       call runtime_error(context,'Size mismatch')
+    case(vector_slice_error)
+       call runtime_error(context,'Malformed slice')
+    case(vector_index_error)
+       call runtime_error(context,'Index out of range')
+    end select
+
 999 continue
 
-    ! Error return
-    call proc_line_module(func,&
-         int(pc%offset-func%data%ptr(func%offset)%offset)+1,line,modl)
-    call pm_name_string(context,modl,mess)
-    write(*,*) trim(mess),'  line:',line
+    call dump_stack(context,stack,func,pc)
 
 888 continue
 
@@ -557,229 +994,157 @@ contains
     include 'ftiny.inc'
     include 'ftypeof.inc'
 
+
+
+    subroutine set_arg(iarg,val)
+      integer,intent(in):: iarg
+      type(pm_ptr),intent(in):: val
+      arg(iarg)%data%ptr(arg(iarg)%offset)=val
+    end subroutine set_arg
+
+    function alloc_arg(vkind,iarg) result(ptr)
+      integer,intent(in):: vkind,iarg
+      type(pm_ptr):: ptr
+      ptr=pm_new(context,vkind,esize+1)
+      arg(iarg)%data%ptr(arg(iarg)%offset)=ptr
+    end function alloc_arg
+
+    function shrink_ve(context,mask,esize,n) result(ind)
+      type(pm_context),pointer:: context
+      type(pm_ptr),intent(in):: mask
+      integer(pm_ln),intent(in):: esize
+      integer,intent(in),optional:: n
+      type(pm_ptr):: ind
+      integer(pm_ln):: j,k
+      if(pm_fast_isnull(mask)) then
+         ind=pm_new(context,pm_long,esize+1)
+         do j=0,esize
+            ind%data%ln(ind%offset+j)=j
+         enddo
+      elseif(pm_fast_vkind(mask)==pm_long) then
+         ind=mask
+      else
+         if(present(n)) then
+            k=n
+         else
+            k=count(mask%data%l(mask%offset:mask%offset+esize))
+         endif
+         ind=pm_new(context,pm_long,k)
+         k=0
+         do j=0,esize
+            if(mask%data%l(mask%offset+j)) then
+               ind%data%ln(ind%offset+k)=j
+               k=k+1
+            endif
+         enddo
+      endif
+    end function shrink_ve
+
+    ! Handle passing keys/vkeys to a var call
+    subroutine var_call
+      type(pm_ptr):: vk_set,vk,key,keys,vals,val 
+      logical:: vkey
+      integer:: i,j,k,m
+      v=func%data%ptr(func%offset+opcode2)
+      v=pm_dict_lookup(context,v,arg(1))
+      i=v%data%ptr(v%offset+3_pm_p)%offset
+      if(i<0) then
+         vkey=.true.
+         i=-i
+      else
+         vkey=.false.
+      endif
+      ! Delete proc var param
+      do j=1,i
+         arg(j)=arg(j+1)
+      enddo
+      vk_set=v%data%ptr(v%offset+2_pm_p)
+      if(pm_fast_isnull(vk_set)) then
+         if(vkey) then
+            arg(i+1:nargs-1)=arg(i+2:nargs)
+            nargs=nargs-1
+         else
+            arg(i+1:nargs-2)=arg(i+3:nargs)
+            nargs=nargs-2
+         endif
+      else
+         if(vkey) then
+            vk=arg(i+2)
+            j=pm_set_size(context,vk_set)
+            arg(i+j+2:nargs+j+1)=arg(i+1:nargs)
+            nargs=nargs+j-1
+            if(pm_fast_isnull(vk)) then
+               do k=i+1,i+j+1
+                  arg(k)=pm_null_obj
+               enddo
+            else
+               arg(i+1:i+j)=pm_null_obj
+               arg(i+j+1)=pm_dict_new(context,8_pm_ln)
+               keys=pm_dict_keys(context,vk)
+               vals=pm_dict_vals(context,vk)
+               do k=0,pm_dict_size(context,vk)-1
+                  key=keys%data%ptr(keys%offset+k)
+                  m=pm_set_lookup(context,vk_set,key)
+                  if(m>0) then
+                     arg(i+m)=vals%data%ptr(vals%offset+k)
+                  else
+                     call pm_dict_set(context,arg(i+j+1),key,&
+                          vals%data%ptr(vals%offset+k),.true.,.true.,ok)
+                  endif
+               enddo
+            endif
+         else
+            vk=arg(i+2)
+            j=pm_set_size(context,vk_set)
+            arg(i+j+1:nargs+j-2)=arg(i+3:nargs)
+            nargs=nargs+j-2
+            if(pm_fast_isnull(vk)) then
+               do k=i+1,i+j
+                  arg(k)=pm_null_obj
+               enddo
+            else
+               keys=pm_set_keys(context,vk_set)
+               do k=i+1,i+j
+                  arg(k)=pm_dict_lookup(context,vk,&
+                       keys%data%ptr(keys%offset+k-i-1))
+               enddo
+            endif
+         endif
+      endif
+    end subroutine var_call
+
   end function pm_run
  
-  subroutine par_loop(context,func,stack,pc,arg,num_args) 
+  ! Parallel loop 
+  function par_loop(context,func,stack,pc,arg,num_args,old_esize) result(errno) 
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: func,stack,pc
     type(pm_ptr),dimension(num_args):: arg
     integer,intent(in):: num_args
-    type(pm_ptr):: newpc,v,sptr,svec
-    integer:: errno,i
+    integer(pm_ln),intent(in):: old_esize
+    integer:: errno
+    type(pm_ptr):: newpc,newve
+    integer(pm_ln):: n,m
     newpc=pc
-    newpc%offset=newpc%offset+3_pm_p
-    v=pm_fast_newnc(context,pm_long,1_pm_p)
-    arg(1)%data%ptr(arg(1)%offset)=v
-    v%data%ln(v%offset)=1
+    newpc%offset=newpc%offset+4_pm_p
+    arg(2)%data%ptr(arg(2)%offset)=pm_fast_newnc(context,pm_pointer,2)
+    newve=arg(2)%data%ptr(arg(2)%offset)
+    newve%data%ptr(newve%offset)=pm_null_obj
+    n=pm_fast_esize(arg(3))+1_pm_ln
+    m=sum(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+n-1_pm_ln))-1_pm_ln
+    newve=pm_assign_new(context,newve,1_pm_ln,pm_long,n+4_pm_ln,.false.)
+    newve%data%ln(newve%offset)=m
+    newve%data%ln(newve%offset+1)=0
+    newve%data%ln(newve%offset+2)=0
+    newve%data%ln(newve%offset+3)=m
+    newve%data%ln(newve%offset+4:newve%offset+3+n)=&
+         arg(3)%data%ln(arg(3)%offset:arg(3)%offset+n-1)
     errno=pm_run(context,func,stack,newpc,-1_pm_i16,0_pm_i16,&
-         arg,num_args,sptr,svec)
+         arg,num_args)
   contains
     include 'fesize.inc'
     include 'fnewnc.inc'
-  end subroutine par_loop
-
-  function pm_fork(context,proc,args,numargs) result(thread)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: proc
-    integer,intent(in):: numargs
-    type(pm_ptr),intent(in),dimension(numargs):: args
-    type(pm_ptr):: thread
-    integer(pm_p):: stacksize
-    type(pm_ptr):: func,pc,stack
-
-    ! Set up the initial stack
-    func=proc
-    pc=func%data%ptr(func%offset)
-    stacksize=pc%data%i16(pc%offset)
-    stack=pm_fast_new(context,pm_stack,stacksize)
-    stack%data%ptr(stack%offset+pm_stack_pc)=pm_null_obj
-    stack%data%ptr(stack%offset+pm_stack_oldstack)=pm_null_obj
-    stack%data%ptr(stack%offset+pm_stack_func)=pm_null_obj
-    stack%data%ptr(stack%offset+pm_stack_locals: &
-         stack%offset+pm_stack_locals+numargs-1)=args(1:numargs)
-    pc%offset=pc%offset+1_pm_p
-
-    ! Create thread and queue it
-    thread=pm_fast_new(context,pm_usr,6_pm_p)
-    thread%data%ptr(thread%offset+pm_thread_next)=&
-         context%threads_start
-    thread%data%ptr(thread%offset+pm_thread_last)=pm_null_obj
-    if(context%threads_start%data%vkind==pm_null) then
-       context%threads_start%data%ptr(context%threads_start%offset+2)&
-            =thread
-      endif
-    context%threads_start=thread
-    if(context%threads_end%data%vkind==pm_null) &
-         context%threads_end=thread
-    thread%data%ptr(thread%offset+pm_thread_func)=func
-    thread%data%ptr(thread%offset+pm_thread_pc)=pc
-    thread%data%ptr(thread%offset+pm_thread_stack)=stack
-    thread%data%ptr(thread%offset+pm_thread_inputs)=pm_null_obj
-  contains
-    include 'fnew.inc'
-  end function pm_fork
-
-  function pm_switch(context,func,stack,pc) result(ok)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(inout):: func,stack,pc
-    logical:: ok
-    type(pm_ptr):: thread
-    thread=context%running
-    thread%data%ptr(thread%offset+pm_thread_func)=func
-    thread%data%ptr(thread%offset+pm_thread_pc)=pc
-    thread%data%ptr(thread%offset+pm_thread_stack)=stack
-    thread%data%ptr(thread%offset+pm_thread_next)=context%wait_start
-    if(pm_fast_isnull(context%wait_start)) then
-       context%wait_end=thread
-    else
-       context%wait_start%data%ptr(context%wait_start%offset+&
-            pm_thread_last)=thread
-    endif
-    context%wait_start=thread
-    ok=pm_resume(context,func,stack,pc)
-  contains
-    include 'fisnull.inc'
-  end function  pm_switch
-
-  function pm_resume(context,func,stack,pc) result(ok)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(out):: func,stack,pc
-    logical:: ok
-    type(pm_ptr):: thread
-    thread=context%threads_start
-    if(thread%data%vkind==pm_null) then
-       ok=.false.
-    else
-       ! Take thread from front of dequeue
-       context%threads_start=thread%data%ptr(thread%offset+&
-            pm_thread_next)
-       if(context%threads_start%data%vkind/=pm_null) &
-            context%threads_start%data%ptr(&
-            context%threads_start%offset+pm_thread_last)=pm_null_obj
-       thread%data%ptr(thread%offset+pm_thread_next)=pm_null_obj
-       func=thread%data%ptr(thread%offset+pm_thread_func)
-       pc=thread%data%ptr(thread%offset+pm_thread_pc)
-       stack=thread%data%ptr(thread%offset+pm_thread_stack)
-       context%running=thread
-       ok=.true.
-    endif
-  end function pm_resume
-
-  function make_indices(context,args,num_args) result(errno)
-    type(pm_context),pointer:: context
-    type(pm_ptr),dimension(num_args):: args
-    integer,intent(in):: num_args
-    integer:: errno
-    type(pm_ptr):: p
-    integer:: i
-    integer(pm_ln):: j1,j2,j3,n,m
-    if(num_args<4.or.num_args>22.or.&
-         ((num_args-1)/3)*3/=num_args-1) then
-       call runtime_error(context,&
-            'Incorrect number of arguments')
-    endif
-    args(1)=pm_fast_newusr(context,pm_index_type,2_pm_p)
-    call pm_assign_new(context,args(1),1_pm_ln,pm_long,&
-         int(num_args+1,pm_ln),.false.)
-    p=args(1)%data%ptr(args(1)%offset+1_pm_p)
-    if(pm_fast_vkind(args(2))==pm_long) then
-       do i=2,num_args
-          p%data%ln(p%offset+i)=args(i)%data%ln(args(i)%offset)
-       enddo
-    else
-       do i=2,num_args
-          p%data%ln(p%offset+i)=args(i)%data%ln(args(i)%offset)
-       enddo
-    end if
-    n=1
-    m=1
-    do i=p%offset+2,p%offset+pm_fast_esize(p),3
-       j1=p%data%ln(i)
-       j2=p%data%ln(i+1)
-       j3=p%data%ln(i+2)
-       if(j1>j2.and.j3>=0.or.j1<j2.and.j3<=0) then
-          call runtime_error(context,&
-               'Sequence is incorrect')
-       endif
-       n=n*(j2-j1)/j3
-       m=m*(j2-j1)
-    enddo
-    p%data%ln(p%offset)=m
-    p%data%ln(p%offset+1_pm_p)=n
-  contains
-    include 'fnewusr.inc'
-    include 'fesize.inc'
-    include 'fvkind.inc'
-  end function make_indices
-
-
-  ! Calculate arr[x]=b
-  function set_elems_i(context,arr,x,b) result(errno)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: arr,x,b
-    integer:: errno
-    type(pm_ptr):: a,y
-    a=arr%data%ptr(arr%offset+1_pm_p)
-    y=arr%data%ptr(arr%offset+2_pm_p)
-    if(pm_fast_esize(y)/=pm_fast_esize(x)) then
-       call runtime_error(context,&
-            'Subscript dimensions do not match')
-       errno=-1
-       return
-    endif
-    if(x%data%ln(x%offset+1)/=y%data%ln(y%offset).or.&
-         x%data%ln(x%offset+1)/=pm_fast_esize(x)+1) then
-       call runtime_error(context,&
-            'Subscript number of elements does not match')
-    endif
-    select case(pm_fast_esize(x))
-    case(5)
-       call d1(a%data%i(a%offset:),&
-            b%data%i(b%offset:),&
-            y%data%ln(y%offset+3),&
-            y%data%ln(y%offset+4),&
-            x%data%ln(x%offset+3),&
-            x%data%ln(x%offset+4),&
-            x%data%ln(x%offset+5))
-    case(8)
-       call d2(a%data%i(a%offset:),&
-            b%data%i(b%offset:),&
-            y%data%ln(y%offset+3),&
-            y%data%ln(y%offset+4),&
-            y%data%ln(y%offset+6),&
-            y%data%ln(y%offset+7),&
-            x%data%ln(x%offset+3),&
-            x%data%ln(x%offset+4),&
-            x%data%ln(x%offset+5),&
-            x%data%ln(x%offset+6),&
-            x%data%ln(x%offset+7),&
-            x%data%ln(x%offset+8))
-    end select
-  contains
-    include 'fesize.inc'
-
-    subroutine d1(v,w,&
-      i1,i2,&
-      j1,j2,j3)
-      integer,dimension(i1:i2)::v
-      integer,dimension((j2-j1)/j3+1)::w
-      integer(pm_ln):: i1,i2
-      integer(pm_ln):: j1,j2,j3
-      v(j1:j2:j3)=w
-    end subroutine d1
-
-    subroutine d2(v,w,&
-      i1,i2,i3,i4,&
-      j1,j2,j3,j4,j5,j6)
-      integer,dimension(i1:i2,i3:i4)::v
-      integer,dimension((j2-j1)/j3+1,(j5-j4)/j6)::w
-      integer(pm_ln):: i1,i2,i3,i4
-      integer(pm_ln):: j1,j2,j3,j4,j5,j6
-      v(j1:j2:j3,j4:j5:j6)=w
-    end subroutine d2
-
-  end function set_elems_i
-
+  end function  par_loop
 
   ! Look up polymorphic call
   subroutine poly_call_lookup(context,polyfunc,args,nargs,op,op2)
@@ -789,9 +1154,12 @@ contains
     type(pm_ptr),dimension(nargs),intent(in):: args
     integer(pm_i16),intent(out):: op,op2
     integer(pm_i16):: tno
-    integer:: i
-    tno=pm_arglist_type(context,pm_typ_is_tuple,args,nargs)
-    do i=0,pm_fast_esize(polyfunc),3
+    integer:: i,st
+
+    st=polyfunc%data%i16(polyfunc%offset)
+    tno=pm_arglist_type(context,pm_typ_is_tuple,0_pm_i16,args(st:),nargs-st+1)
+    call dump_type(context,6,tno,2)
+    do i=1,pm_fast_esize(polyfunc),3
        if(pm_arglist_type_includes(context,&
             polyfunc%data%i16(polyfunc%offset+i),tno)) then
           op=polyfunc%data%i16(polyfunc%offset+i+1)
@@ -799,25 +1167,26 @@ contains
           return
        endif
     enddo
-    !!! op=op_lookup_error
+    op=op_lookup_error
   contains
     include 'fesize.inc'
   end subroutine poly_call_lookup
   
   ! Vectorised polymorphic call
-  subroutine vect_poly_call(context,polyfunc,args,nargs,&
-       op,op2,sptr,svec)
+  subroutine poly_call(context,polyfunc,args,nargs,&
+       op,op2,start,finish,sptr,svec)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: polyfunc
     integer,intent(in):: nargs
     type(pm_ptr),dimension(nargs),intent(inout):: args
     integer(pm_i16),intent(out):: op,op2
+    integer(pm_ln):: start,finish
     type(pm_ptr),intent(out):: sptr,svec
     integer,dimension(pm_max_args):: poly_arg
     integer(pm_i16),dimension(pm_max_args):: typ
     type(pm_ptr),dimension(pm_max_args):: xargs
     integer:: i,num_poly_args,na,istat
-    integer(pm_ln):: esize,j,n,npending
+    integer(pm_ln):: esize,j,n
     type(pm_ptr),target:: ivec,set,sptrs,svecs
     type(pm_ptr):: p,func,sp,sv
     type(pm_reg),pointer:: reg
@@ -837,8 +1206,8 @@ contains
        na=0
        reg=>pm_register(context,'poly call',&
             ivec,set,sptrs,svecs,array=xargs,array_size=na)
-       esize=pm_fast_esize(args(1))
-       ivec=pm_new(context,pm_long,esize)
+       esize=finish-start+1
+       ivec=pm_new(context,pm_long,esize+1)
        set=pm_set_new(context,16_pm_ln)
        do i=1,num_poly_args
           xargs(i)=args(poly_arg(i))%data%ptr(&
@@ -849,7 +1218,7 @@ contains
              typ(i)=pm_fast_typeof(xargs(i))
           enddo
           ivec%data%ln(ivec%offset+j)=&
-               pm_iset_add(context,set,typ,nargs)-1
+               pm_iset_add(context,set,typ,num_poly_args)-1
        enddo
        n=pm_set_size(context,set)
        xargs(1:nargs)=args(1:nargs)
@@ -860,7 +1229,6 @@ contains
              args(i)=pm_new(context,pm_pointer,n)
           endif
        enddo
-       npending=0
        do j=0,n-1
           do i=1,nargs
              if(pm_fast_vkind(xargs(i))/=pm_stack) &
@@ -869,41 +1237,24 @@ contains
           call poly_call_lookup(context,polyfunc,xargs,nargs,&
                opcode,opcode2)
           istat=pm_run(context,pm_null_obj,pm_null_obj,pm_null_obj,&
-               opcode,opcode2,xargs,nargs,sp,sv)
+               opcode,opcode2,xargs,nargs)
           if(istat==0) then
              do i=1,nargs
                 if(pm_fast_vkind(xargs(i))==pm_stack) then
-                   call pm_ptr_assign(context,args(i),j,xargs(i))
+                   call pm_ptr_assign(context,args(i),j,&
+                        xargs(i)%data%ptr(xargs(i)%offset))
                 endif
              enddo
-          else
-             if(npending==0) then
-                sptrs=pm_new(context,pm_usr,n+1)
-                sptrs%data%ptr(sptrs%offset)%offset=pm_poly_group_type
-                call pm_assign_new(context,sptrs,1_pm_ln,&
-                     pm_pointer,int(nargs,pm_ln),.false.)
-                p=sptrs%data%ptr(sptrs%offset+1_pm_p)
-                p%data%ptr(p%offset:p%offset+nargs-1)=args(1:nargs)
-                svecs=pm_new(context,pm_pointer,n)
-             endif
-             call pm_ptr_assign(context,sptrs,j+2,sp)
-             call pm_ptr_assign(context,svecs,j,sv)
-             npending=npending+1
           endif
        enddo
-       if(npending==0) then
-          ! All done - write back outputs
-          do i=1,nargs
-             if(pm_fast_vkind(xargs(i))==pm_stack) &
-                  xargs(i)%data%ptr(xargs(i)%offset)=&
+       ! All done - write back outputs
+       do i=1,nargs
+          if(pm_fast_vkind(xargs(i))==pm_stack) then
+             xargs(i)%data%ptr(xargs(i)%offset)=&
                   make_poly_vec(context,args(i),ivec)
-          enddo
-          op=-1
-       else
-          ! Make vector of message values from stalled processes
-          svec=make_poly_vec(context,svecs,ivec)
-          op=-2
-       endif
+          endif
+       enddo
+       op=-1
        call pm_delete_register(context,reg)
     endif
   contains
@@ -911,256 +1262,43 @@ contains
     include 'ftypeof.inc'
     include 'fesize.inc'
     include 'fnewusr.inc'
-  end subroutine  vect_poly_call
+  end subroutine  poly_call
 
-  ! Create a polymorphic vector from polymorphic call result
-  ! vals contains list of component vectors
-  ! subs contains list of which vector to use for each location
-  ! Vector elements are drawn in order from indicated vectors 
-  function make_poly_vec(context,vals,subs) result(polyvec)
+  function pm_arglist_type(context,tkind,tname,args,nargs) result(tno)
     type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: vals,subs
-    type(pm_ptr):: polyvec
-    integer(pm_ln):: i,j,k,esize,vsize
-    type(pm_ptr):: p,q,pv,dv,poly,n
-    type(pm_root),pointer:: root,root2
-    esize=pm_fast_esize(subs)
-    vsize=pm_fast_esize(vals)
-    poly=pm_fast_newusr(context,int(pm_poly_type,pm_p),3_pm_p)
-    root=>pm_add_root(context,poly)
-    pv=pm_new(context,pm_pointer,esize+1_pm_p)
-    poly%data%ptr(poly%offset+1_pm_p)=pv
-    dv=pm_new(context,pm_long,esize+1_pm_p)
-    poly%data%ptr(poly%offset+2_pm_p)=dv
-    root2=>pm_new_as_root(context,pm_long,pm_fast_esize(vals)+1_pm_ln)
-    n=root2%ptr
-    n%data%ln(n%offset:n%offset+vsize)=0_pm_ln
-    do i=0,esize
-       j=subs%data%ln(subs%offset+i)
-       p=vals%data%ptr(vals%offset+j)
-       k=n%data%ln(n%offset+j)
-       n%data%ln(n%offset+j)=k+1_pm_ln
-       if(pm_fast_typeof(p)==pm_poly_type) then
-          q=p%data%ptr(p%offset+2_pm_p)
-          k=q%data%ln(q%offset+k)
-          q=p%data%ptr(p%offset+1_pm_p)
-          p=q%data%ptr(q%offset+k)
-       endif
-       pv%data%ptr(pv%offset+i)=p
-       dv%data%ln(dv%offset)=k
-    enddo
-    call pm_delete_root(context,root)
-    call pm_delete_root(context,root2)
-  contains
-    include 'fesize.inc'
-    include 'ftypeof.inc'
-    include 'fnewusr.inc'
-  end function make_poly_vec
-
-  ! Separate nvec vectors by index numbers (0..vsize) in subs
-  subroutine separate_vecs(context,vecs,nvecs,subs,vsize)
-    type(pm_context),pointer:: context
-    integer,intent(in):: nvecs
-    type(pm_ptr),intent(inout),dimension(nvecs):: vecs
-    type(pm_ptr),intent(in)::subs
-    integer(pm_ln),intent(in):: vsize
-    integer(pm_ln):: i,j,k,esize
-    integer:: iv
-    integer(pm_i16),dimension(1):: key
-    type(pm_ptr),target:: pv,dv,vals,n
-    type(pm_ptr):: avec,dvec
-    type(pm_reg),pointer:: reg
-    reg=>pm_register(context,'separate poly',&
-         pv,dv,vals,n)
-    ! Count number of elts in each category
-    n=pm_new(context,pm_long,vsize+1_pm_ln)
-    n%data%ln(n%offset:n%offset+vsize-1_pm_ln)=0
-    do i=0,esize
-       j=subs%data%ln(subs%offset+i)
-       n%data%ln(n%offset+j)=n%data%ln(n%offset+j)+1
-    enddo
-    ! Work out starting point for each category
-    ! in re-arranged vector
-    j=0
-    do i=0,vsize-1
-       k=n%data%ln(n%offset+i)
-       n%data%ln(n%offset+i)=j
-       j=j+k
-    enddo
-    n%data%ln(n%offset+vsize)=esize+1
-    ! Re-arrange the vectors
-    pv=pm_new(context,pm_pointer,esize)
-    dv=pm_new(context,pm_pointer,esize)
-    do iv=1,nvecs
-       if(pm_fast_vkind(vecs(i))==pm_stack) cycle
-       if(pm_fast_typeof(vecs(i))==pm_poly_type) then
-          avec=vecs(iv)%data%ptr(vecs(iv)%offset+1_pm_p)
-          dvec=vecs(iv)%data%ptr(vecs(iv)%offset+2_pm_p)
-          do i=0,esize
-             j=subs%data%ln(subs%offset+i)
-             k=n%data%ln(n%offset+j)
-             pv%data%ptr(pv%offset+k)=&
-                  avec%data%ptr(avec%offset+i)
-             dv%data%ln(dv%offset+k)=&
-                  dvec%data%ln(dvec%offset+i)
-             n%data%ln(n%offset+j)=k+1
-          enddo
-       else
-          pv%data%ptr(pv%offset:pv%offset+esize)=vecs(iv)
-          do i=0,esize
-             j=subs%data%ln(subs%offset+i)
-             k=n%data%ln(n%offset+j)
-             dv%data%ln(dv%offset+k)=i
-             n%data%ln(n%offset+j)=k+1
-          enddo
-       endif
-       vals=pm_new(context,pm_pointer,vsize+1_pm_p)
-       do i=0,vsize-1
-          call pm_ptr_assign(context,vals,i,&
-               ptr_vec_get_type(context,pv,dv,&
-               n%data%ln(n%offset+i),&
-               n%data%ln(n%offset+i+1)-1_pm_ln))
-       enddo
-       vecs(iv)=vals
-    enddo
-    call pm_delete_register(context,reg)
-  contains
-    include 'fvkind.inc'
-    include 'ftypeof.inc'
-    include 'fesize.inc'
-  end subroutine separate_vecs
-
-  ! Separate poly vector into list of non-poly vectors
-  ! and a vector of subscripts into that list
-  subroutine separate_poly_vec(context,poly,xsubs,vects)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: poly
-    type(pm_ptr),intent(out):: xsubs,vects
-    integer(pm_ln):: i,j,k,vsize,esize
-    integer(pm_i16),dimension(1):: key
-    type(pm_ptr),target:: subs,set,pv,dv,vals,n
-    type(pm_ptr):: avec,dvec
-    type(pm_reg),pointer:: reg
-    reg=>pm_register(context,'separate poly',&
-         set,pv,dv,subs,vals,n)
-    avec=poly%data%ptr(poly%offset+1_pm_p)
-    dvec=poly%data%ptr(poly%offset+2_pm_p)
-    esize=pm_fast_esize(avec)
-    set=pm_set_new(context,8_pm_ln)
-    subs=pm_new(context,pm_long,esize+1_pm_ln)
-    do i=0,esize
-       key(1)=pm_fast_typeof(avec%data%ptr(avec%offset+i))
-       subs%data%ln(subs%offset+i)=pm_iset_add(context,set,key,1)
-    enddo
-    vsize=pm_set_size(context,set)-1_pm_ln
-    set=pm_null_obj
-    xsubs=subs
-    n=pm_new(context,pm_long,vsize+2_pm_ln)
-    do i=0,esize
-       j=subs%data%ln(subs%offset+i)
-       n%data%ln(n%offset+j)=n%data%ln(n%offset+j)+1
-    enddo
-    n%data%ln(n%offset+vsize+1_pm_ln)=esize+1
-    j=0
-    do i=0,vsize
-       k=n%data%ln(n%offset+i)
-       n%data%ln(n%offset+i)=j
-       j=j+k
-    enddo
-    pv=pm_new(context,pm_pointer,esize)
-    dv=pm_new(context,pm_pointer,esize)
-    do i=0,esize
-       j=subs%data%ln(subs%offset+i)
-       pv%data%ptr(pv%offset+k)=avec%data%ptr(avec%offset+i)
-       dv%data%ln(dv%offset+k)=dvec%data%ln(dvec%offset+i)
-       n%data%ln(n%offset+j)=n%data%ln(n%offset+j)+1_pm_ln
-    enddo
-    vals=pm_new(context,pm_pointer,vsize+1_pm_p)
-    do i=0,vsize
-       vals%data%ptr(vals%offset+i)=&
-            ptr_vec_get_type(context,pv,dv,&
-            n%data%ln(n%offset+i),n%data%ln(n%offset+i+1)-1_pm_ln)
-    enddo
-    vects=vals
-    call pm_delete_register(context,reg)
-  contains
-    include 'ftypeof.inc'
-    include 'fesize.inc'
-  end subroutine separate_poly_vec
-
-  recursive function ptr_vec_get_type(context,&
-       vec,disps,start,finish) result(outvec)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: vec,disps
-    integer(pm_ln):: start,finish
-    type(pm_ptr):: outvec
-    integer(pm_ln):: esize,j,k,n
-    integer:: vkind
-    type(pm_ptr):: p,pvec
-    type(pm_root),pointer:: root1,root2
-    p=vec%data%ptr(vec%offset)
-    vkind=pm_fast_vkind(p)
-    esize=finish-start
-    select case(vkind)
-    case(pm_int)
-       outvec=pm_new(context,pm_int,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%i(outvec%offset+j)=&
-               p%data%i(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_undef:pm_null,pm_pointer:pm_stack)
-       outvec=pm_new(context,pm_pointer,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%ptr(outvec%offset+j)=&
-               p%data%ptr(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_usr)
-       n=pm_fast_esize(vec%data%ptr(vec%offset))
-       root1=>pm_new_as_root(context,pm_pointer,n)
-       root2=>pm_new_as_root(context,pm_pointer,esize)
-       outvec=root1%ptr
-       pvec=root2%ptr
-       do j=1,n
-          do k=0,esize
-             p=vec%data%ptr(vec%offset+k+start)
-             pvec%data%ptr(pvec%offset+k)=p%data%ptr(p%offset+j)
-          enddo
-          call pm_ptr_assign(context,outvec,j,&
-               ptr_vec_get_type(context,pvec,disps,0_pm_ln,esize))
-       enddo
-       call pm_delete_root(context,root1)
-       call pm_delete_root(context,root2)
-    end select
-
-  contains
-    include 'fvkind.inc'
-    include 'fesize.inc'
-  end function  ptr_vec_get_type
-
-  function pm_arglist_type(context,tkind,args,nargs) result(tno)
-    type(pm_context),pointer:: context
-    integer(pm_i16),intent(in):: tkind
+    integer(pm_i16),intent(in):: tkind,tname
     type(pm_ptr),dimension(nargs),intent(in):: args
     integer,intent(in):: nargs
     integer(pm_i16):: tno
     integer(pm_i16),dimension(pm_max_args+2):: t
     integer:: i
     t(1)=tkind
-    t(2)=0
+    t(2)=tname
     do i=1,nargs
-       t(i+2)=pm_fast_typeof(args(i))
+       tno=pm_fast_typeof(args(i))
+       if(tno>=pm_struct_type.and.tno<=pm_array_type) then
+          tno=args(i)%data%ptr(args(i)%offset+1_pm_p)%offset
+       endif
+       t(i+2)=tno
     enddo
     tno=pm_ivect_lookup(context,context%tcache, &
-         t,nargs)
-    if(tno==0) tno=pm_idict_add(context,context%tcache,&
-         t,nargs,pm_null_obj)
+         t,nargs+2)
+    if(tno<=0) tno=pm_idict_add(context,context%tcache,&
+         t,nargs+2,pm_null_obj)
   contains
     include 'ftypeof.inc'
   end function pm_arglist_type
+
+  function pm_arg_type(arg) result(tno)
+    type(pm_ptr),intent(in):: arg
+    integer(pm_i16):: tno
+    tno=pm_fast_typeof(arg)
+    if(tno>=pm_struct_type.and.tno<=pm_array_type) then
+       tno=arg%data%ptr(arg%offset+1_pm_p)%offset
+    endif
+  contains
+    include 'ftypeof.inc'
+  end function pm_arg_type
 
   function pm_arglist_type_includes(context,supertype,subtype) &
        result(ok)
@@ -1172,8 +1310,40 @@ contains
 
   subroutine runtime_error(context,errmesg)
     type(pm_context),pointer:: context
-    character(len=*):: errmesg
+    character(len=*),intent(in):: errmesg
+    write(*,*)
     write(*,*) 'Runtime error: ',trim(errmesg)
   end subroutine runtime_error
+
+  subroutine dump_stack(context,dstack,dfunc,dpc)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: dstack,dfunc,dpc
+    type(pm_ptr):: stack,func,pc
+    integer(pm_p):: name
+    character(len=80):: mess
+    integer(pm_p):: line,modl
+    stack=dstack
+    func=dfunc
+    pc=dpc
+    write(*,*) '=========================Call trace ========================='
+    do while(.not.pm_fast_isnull(func))
+       call proc_line_module(func,&
+            int(pc%offset-func%data%ptr(func%offset)%offset)+1,line,modl)
+       name=proc_get_name(func)
+       if(name==sym_pm_system) then
+          mess='Program: '
+       else
+          mess=trim(pm_name_as_string(context,name))//' in: '
+       endif
+       call pm_name_string(context,modl,mess(len_trim(mess)+2:))
+       write(*,*) trim(mess),'  line',line
+       func=stack%data%ptr(stack%offset+pm_stack_func)
+       pc=stack%data%ptr(stack%offset+pm_stack_pc)
+       stack=stack%data%ptr(stack%offset+pm_stack_oldstack)
+    enddo
+    write(*,*) '============================================================='
+  contains
+    include 'fisnull.inc'
+  end subroutine dump_stack
 
 end module pm_vm

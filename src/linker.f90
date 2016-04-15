@@ -1,18 +1,18 @@
 !
-!PM (Parallel Models) Programming Language
+! PM (Parallel Models) Programming Language
 !
-!Released under the MIT License (MIT)
+! Released under the MIT License (MIT)
 !
-!Copyright (c) Tim Bellerby, 2015
+! Copyright (c) Tim Bellerby, 2016
 !
-!Permission is hereby granted, free of charge, to any person obtaining a copy
+! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
 ! in the Software without restriction, including without limitation the rights
 ! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 ! copies of the Software, and to permit persons to whom the Software is
 ! furnished to do so, subject to the following conditions:
 !
-!The above copyright notice and this permission notice shall be included in
+! The above copyright notice and this permission notice shall be included in
 ! all copies or substantial portions of the Software.
 !
 ! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -142,7 +142,7 @@ contains
     dict=modl%data%ptr(modl%offset+kind)
     lcl_dict=modl%data%ptr(modl%offset+kind+modl_local)
     idict=imodl%data%ptr(imodl%offset+kind)
-    if(kind==modl_param) then
+    if(kind==modl_param.or.kind==modl_default) then
        if(.not.pm_fast_isnull(pm_dict_lookup(context,dict,elem))) &
             call link_error(context,node,'Repeated definition:',elem)
        call pm_dict_set(context,&
@@ -159,7 +159,7 @@ contains
           call pm_dict_set(context,&
                lcl_dict,elem,val,.true.,.true.,changed)
        else
-          ! Merge proc lists
+          ! Merge proc or type lists
           call pm_ptr_assign(context,&
                old%data%ptr(old%offset+node_args+2),&
                int(proc_link,pm_ln),&

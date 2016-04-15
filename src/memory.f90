@@ -3,16 +3,16 @@
 !
 !Released under the MIT License (MIT)
 !
-!Copyright (c) Tim Bellerby, 2015
+!Copyright (c) Tim Bellerby, 2016
 !
-!Permission is hereby granted, free of charge, to any person obtaining a copy
+! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
 ! in the Software without restriction, including without limitation the rights
 ! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 ! copies of the Software, and to permit persons to whom the Software is
 ! furnished to do so, subject to the following conditions:
 !
-!The above copyright notice and this permission notice shall be included in
+! The above copyright notice and this permission notice shall be included in
 ! all copies or substantial portions of the Software.
 !
 ! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -29,10 +29,12 @@ module pm_memory
   private
 
   integer,parameter,public:: pm_debug_level=0
-  ! 0= basic checks - slows things down
-  ! 1= print short additional info
-  ! 2= print substantial additional info
-  ! 3= print & check everything
+  ! 1= basic checks - slows things down
+  ! 2= print short additional info
+  ! 3= print substantial additional info
+  ! 4= print & check everything
+
+  logical,parameter:: gc_xtra_debug=.false.
 
   ! Public routines
   public :: operator(.eq.)
@@ -42,12 +44,14 @@ module pm_memory
   public pm_init_gc, pm_spawn, pm_gc
   public pm_ptr_eq, pm_new, pm_new_multi,pm_new_small, pm_new_large
   public pm_assign_new, pm_expand, pm_ptr_assign
-  public pm_new_as_root,pm_get_ptr_as_root, pm_copy, pm_assign_copy
-  public pm_new_string, pm_concat_string, pm_strval, pm_fill_vect
+  public pm_new_as_root,pm_get_ptr_as_root, pm_copy, pm_copy_ptr, pm_assign_copy
+  public pm_new_string, pm_concat_string, pm_strval, pm_fill_vect, pm_copy_obj, pm_set_obj
   public pm_add_root, pm_delete_root
   public pm_numroot, pm_delete_numroot
   public pm_register, pm_delete_register 
-  public pm_verify_ptr, pm_dump_tree, pm_panic
+  public pm_verify_ptr, pm_dump_tree, pm_panic, pm_copy_val, pm_copy_val_to0
+  public pm_copy_val_from0,pm_copy_from_slots, pm_copy_to_slots, pm_copy_slots
+  public marked
 
   ! Data kinds supported (vkind parameter)
   integer(pm_p),public,parameter:: pm_undef=0
@@ -75,13 +79,13 @@ module pm_memory
   integer(pm_p),public,parameter:: pm_complex256=22
   integer(pm_p),public,parameter:: pm_logical=23
   integer(pm_p),public,parameter:: pm_packed_logical=24
-  integer(pm_p),public,parameter:: pm_string=25
-  integer(pm_p),public,parameter:: pm_ext=26
+  integer(pm_p),public,parameter:: pm_ext=25
+  integer(pm_p),public,parameter:: pm_string=26
   integer(pm_p),public,parameter:: pm_pointer=27
   integer(pm_p),public,parameter:: pm_stack=28
   integer(pm_p),public,parameter:: pm_usr=29
 
-  integer(pm_p),public,parameter:: pm_num_vkind=29
+  integer(pm_p),public,parameter:: pm_num_vkind=30
 
   ! Language Thread - offsets
   integer,public,parameter:: pm_thread_next=0
@@ -106,7 +110,7 @@ module pm_memory
   integer(pm_p),public,parameter:: pm_mark_size=128  
   ! pm_mark_size should be a power of 2
   integer,parameter:: block_size = pm_mark_size * word_bits
-  integer,public,parameter:: pm_large_obj_size = block_size/2
+  integer,public,parameter:: pm_large_obj_size =  block_size/2
   integer,public,parameter:: pm_default_free_cache_size=16*1024*block_size
   integer,parameter:: save_list_size = block_size/2
   integer,parameter:: stack_size = block_size*8
@@ -218,8 +222,6 @@ module pm_memory
      integer(pm_ln):: last_numroot, max_numroots, free_numroots
      integer(pm_ln):: hash
   end type pm_context
-
-
 
   type(pm_ptr),public:: pm_null_obj,pm_tinyint_obj,pm_name_obj
   type(pm_ptr),public:: pm_true_obj,pm_false_obj
@@ -463,7 +465,7 @@ contains
   end subroutine pm_ptr_assign
 
   ! Create new object and assign to slot in ptr object
-  subroutine pm_assign_new(context,obj,n,vkind,esize,clear)
+  function pm_assign_new(context,obj,n,vkind,esize,clear) result(new_obj)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
     integer(pm_ln),intent(in):: n
@@ -480,11 +482,15 @@ contains
     endif
     context%temp_obj1=obj
     new_obj=pm_new(context,vkind,esize)
-    obj%data%ptr(obj%offset+n)=new_obj
+    if(marked(obj)) then
+       call pm_ptr_assign(context,obj,n,new_obj)
+    else
+       obj%data%ptr(obj%offset+n)=new_obj
+    endif
     if(clear) call nullify_obj(new_obj,&
          0_pm_ln,esize-1)
     context%temp_obj1=pm_null_obj
-  end subroutine pm_assign_new
+  end function  pm_assign_new
 
   ! Expand object pointed to by given slot
   subroutine pm_expand(context,obj,n,newsize)
@@ -492,6 +498,7 @@ contains
     type(pm_ptr),intent(in):: obj
     integer(pm_ln),intent(in):: n,newsize
     integer i
+    type(pm_ptr):: p
     if(pm_debug_level>0) then
        call pm_verify_ptr(obj,'Expand: obj')
        if(n<0.or.n>obj%data%esize) &
@@ -503,10 +510,10 @@ contains
     if(pm_debug_level>0) then 
        call pm_verify_ptr(context%temp_obj2,'Expanding: slot')
     endif
-    call pm_assign_new(context,obj,n,&
+    p=pm_assign_new(context,obj,n,&
          context%temp_obj2%data%vkind, &
          newsize,.true.)
-    call copy_obj(context%temp_obj2,0_pm_ln,obj%data%ptr(obj%offset+n),0_pm_ln, &
+    call pm_copy_obj(context%temp_obj2,0_pm_ln,p,0_pm_ln, &
          context%temp_obj2%data%esize)
     call nullify_obj(obj%data%ptr(obj%offset+n), &
          context%temp_obj2%data%esize+1,newsize-1)
@@ -566,7 +573,7 @@ contains
           i=i+1_pm_ln
           ptr=pm_new_small(context,vkind,int(esize,pm_p))
           vect%data%ptr(vect%offset+j)=ptr
-          write(*,*) 'ALSO ALLOC',ptr%offset
+          if(gc_xtra_debug) write(*,*) 'ALSO ALLOC',ptr%offset
           if(is_marked) call mark(ptr)
        enddo
     else
@@ -602,7 +609,7 @@ contains
     logical:: ok
     integer:: i
     
-    !write(*,*) 'ALLOCATE>',vkind,esize
+    if(gc_xtra_debug) write(*,*) 'ALLOCATE>',vkind,esize
 
     if(pm_debug_level>0) then
        if(vkind<pm_null.or.vkind>pm_usr) &
@@ -638,21 +645,28 @@ contains
 
     ! Check if GC has run since last use of this slot   
     if(ptr%data%tick<context%tick) then
-        ! Restart scan from start of block
+       if(gc_xtra_debug) write(*,*) 'RESTART',esize,ptr%data%hash,ptr%offset
        ptr%data%tick=context%tick
-       ptr%offset=1-esize
+       ptr%offset=ptr%data%next_sweep
     endif
 
     ! Lazy sweep - find free slot
     call next_free()
+
     if(.not.ok) then
-       ! Failed - call GC
-       call pm_gc(context,.false.)
-       ! Restart sweep from start of current block
-       ptr%offset=1-esize
-       ptr%data%tick=context%tick
-       ! Try again
-       call next_free()
+
+       if(context%blocks_allocated>max_blocks) then
+          
+          ! Call GC and restart scan from start of this block
+          call pm_gc(context,.false.)
+          ptr%offset=1
+          ptr%data%tick=context%tick
+          
+          ! Try again
+          call next_free()
+
+       endif
+       
        if(.not.ok) then
           ! All full - allocate new block
           ptr%data=>new_block(context,vkind,int(esize,pm_ln))
@@ -665,13 +679,18 @@ contains
           nptr=ptr
           goto 10
        endif
+
     endif
 
     ! Found free object
     nptr=ptr
     
+    if(gc_xtra_debug) write(*,*) 'NEXT FREE'
+    
     ! Find following free location
+    ptr%offset=ptr%offset+esize
     call next_free()
+
     if(.not.ok) then
        ! No following loc - force gc next time
        ! allocation attempted for this slot
@@ -688,10 +707,11 @@ contains
     ptr%offset=ptr%offset+esize
     do 
        if(ptr%offset+esize>ptr%data%size+1) then
-          ptr%offset=ptr%data%size+1
           exit
        endif
        if(marked(ptr)) exit
+       if(gc_xtra_debug) &
+            write(0,*) 'FREE',ptr%offset,ptr%data%ptr(ptr%offset)%offset
        ptr%offset=ptr%offset+esize
     enddo
     ptr%data%next_sweep=ptr%offset
@@ -704,12 +724,12 @@ contains
     if(vkind>=pm_pointer) &
          nptr%data%ptr(nptr%offset:nptr%offset+esize-1)=pm_null_obj
  
+    if(gc_xtra_debug) write(0,*) 'all',nptr%offset,nptr%data%next_sweep
 
   contains
 
     ! Find next free location in circular chain of blocks
     subroutine next_free()
-      ptr%offset=ptr%offset+esize
       do
          if(ptr%offset+esize>ptr%data%size+1) then
             if(ptr%data%next%tick>=context%tick) then
@@ -721,6 +741,11 @@ contains
             ptr%data=>ptr%data%next
             ptr%offset=1
             ptr%data%tick=context%tick
+         endif
+         if(gc_xtra_debug) then
+            if(gc_xtra_debug) write(*,*) 'CHECK MARKED',ptr%data%hash,ptr%offset,marked(ptr)
+            if(ptr%data%vkind>=pm_pointer) &
+                 write(*,*) 'pting to',ptr%data%ptr(ptr%offset)%data%hash,ptr%data%ptr(ptr%offset)%offset
          endif
          if(.not.marked(ptr)) exit
          ptr%offset=ptr%offset+esize
@@ -820,10 +845,32 @@ contains
     else
        context%temp_obj1=obj
        ptr=pm_new(context,obj%data%vkind,obj%data%esize+1)
-       call copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,context%temp_obj1%data%esize)
+       call pm_copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,context%temp_obj1%data%esize)
        context%temp_obj1=pm_null_obj
     endif
   end function pm_copy
+
+
+  ! Shallow copy an ptr object (ptr,usr,stack)
+  function pm_copy_ptr(context,obj) result(ptr)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: obj
+    type(pm_ptr):: ptr
+    
+    if(pm_debug_level>0) then
+       call pm_verify_ptr(obj,'Copy ptr')
+    endif
+
+    if(obj%data%vkind<=pm_null) then
+       ptr=obj
+    else
+       context%temp_obj1=obj
+       ptr=pm_new(context,obj%data%vkind,obj%data%esize+1)
+       ptr%data%ptr(ptr%offset:ptr%offset+obj%data%esize)=&
+            obj%data%ptr(obj%offset:obj%offset+obj%data%esize)
+       context%temp_obj1=pm_null_obj
+    endif
+  end function pm_copy_ptr
 
   ! Shallow copy an object
   subroutine pm_assign_copy(context,obj2,n,obj)
@@ -843,7 +890,7 @@ contains
        context%temp_obj1=obj
        context%temp_obj2=obj2
        context%temp_obj3=pm_new(context,obj%data%vkind,obj%data%esize+1)
-       call copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,context%temp_obj1%data%esize)
+       call pm_copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,context%temp_obj1%data%esize)
        context%temp_obj2%data%ptr(context%temp_obj2%offset+n)=&
             context%temp_obj3
        context%temp_obj1=pm_null_obj
@@ -856,7 +903,7 @@ contains
   subroutine pm_fill_vect(context,ptr1,ptr2)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: ptr1,ptr2
-    call set_obj(ptr1,0_pm_ln,ptr1%data%esize,ptr2,0_pm_ln)
+    call pm_set_obj(ptr1,0_pm_ln,ptr1%data%esize,ptr2,0_pm_ln)
   end subroutine pm_fill_vect
 
   ! Dump a tree - used mainly for debugging
@@ -1114,7 +1161,6 @@ contains
        if(ptr%data%vkind==pm_pointer) then
           write(iunit,*) spaces(1:depth*2),'Pointer(',ptr%data%esize
        else if(ptr%data%vkind==pm_stack) then
-
           if(((ptr%offset-1)/(ptr%data%esize+1)*(ptr%data%esize+1)/=ptr%offset-1)) then
              write(iunit,*) spaces(1:depth*2),'Stackptr(',ptr%data%esize
              call pm_dump_tree(context,iunit,ptr%data%ptr(ptr%offset),&
@@ -1229,7 +1275,6 @@ contains
     type(pm_root),pointer:: root_obj
     type(pm_reg),pointer:: reg_obj
 
-
     if(pm_debug_level>1) write(*,*) '==GC started=='
 
     if(pm_debug_level>2) call pm_verify_heap(context)
@@ -1243,6 +1288,7 @@ contains
     call clear_large_obj_marks(context%new_large)
     
     if(major_cycle) then
+       if(pm_debug_level>1) write(*,*) 'Major cycle'
        ! Clear bitmaps
        do vk=pm_int,pm_num_vkind
           do esize=1,pm_large_obj_size
@@ -1581,6 +1627,7 @@ contains
           blk%ln=0 ! Must clear
        case(pm_pointer:pm_usr)
           allocate(blk%ptr(tsize),stat=status)
+          blk%ptr(1:tsize)=pm_null_obj
     end select
 
     if(status/=0) then
@@ -1612,6 +1659,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_block),pointer:: blk
     integer:: i
+    if(pm_debug_level>2) write(*,*) 'Free block'
     if(blk%size/block_size>context%free_cache_size/4) then
        deallocate(blk)
        return
@@ -1666,7 +1714,9 @@ contains
   subroutine mark(ptr)
     type(pm_ptr),intent(in)::ptr
     integer::m,n,o,s
-    
+
+    if(gc_xtra_debug) &
+         write(*,*) 'MARK',ptr%data%hash,ptr%offset
     if(ptr%data%vkind<=pm_null) then
        return
     elseif(ptr%data%vkind==pm_stack) then
@@ -1677,7 +1727,7 @@ contains
        o=ptr%offset
     endif
     n=(o-1)/pm_mark_size
-    m=iand(ptr%offset-1,pm_mark_size-1)+1
+    m=iand(o-1,pm_mark_size-1)+1
     ptr%data%marks(m)=ibset(ptr%data%marks(m),n)
   end subroutine  mark
   
@@ -1730,10 +1780,12 @@ contains
     do while(context%top>0)
        ptr2=pop()
        n=ptr2%data%esize
-       !write(*,*) 'MARKING FROM:',ptr2%data%vkind,ptr2%offset,n
+       if(gc_xtra_debug) &
+            write(*,*) 'MARKING FROM:',&
+            ptr2%data%vkind,ptr2%data%hash,ptr2%offset,n
        if(ptr2%offset<0) then
           ptr2%offset=-ptr2%offset
-          i=ptr%data%esize+1
+          i=ptr2%data%esize+1
           n=((ptr2%offset-1)/i)*i+i-ptr2%offset
        else
           n=ptr2%data%esize
@@ -1741,6 +1793,7 @@ contains
              ! First slot is type info - do not scan
              ptr2%offset=ptr2%offset+1
              n=n-1
+             if(gc_xtra_debug) write(*,*) 'MARK USER',n
           elseif(ptr2%data%vkind==pm_stack) then
              ! Stack structure
              ! Slot 0 offset contains stack use info = end of used slots
@@ -1749,10 +1802,10 @@ contains
              ! Slot 3 is FUNC not scanned
              ! Stack one below last new frame on the chain may be 
              ! dirty -- mark from it directly rather than pushing
-             write(*,*) 'RESET',ptr2%offset
+             if(gc_xtra_debug) write(*,*) 'RESET',ptr2%offset
              i=ptr2%data%esize+1
              ptr2%offset=((ptr2%offset-1)/i)*i+1
-             write(*,*) 'TO',ptr2%offset,'USING',ptr2%data%esize+1
+             if(gc_xtra_debug) write(*,*) 'TO',ptr2%offset,'USING',ptr2%data%esize+1
              ptr3=ptr2%data%ptr(ptr2%offset+pm_stack_oldstack)
              if(associated(ptr3%data%context,context)) then 
                 if(ptr3%data%vkind==pm_stack) then 
@@ -1763,9 +1816,11 @@ contains
                          ptr4=ptr3%data%ptr(ptr3%offset+i)
                          if(associated(ptr4%data%context,context)) then
                             if(.not.marked(ptr4)) then
-                               if(ptr%data%vkind>=pm_pointer) then
+                               if(ptr4%data%vkind>=pm_pointer) then
                                   call mark(ptr4)
                                   call push(ptr4)
+                               else
+                                  call mark(ptr4)
                                endif
                             endif
                          endif
@@ -1777,22 +1832,21 @@ contains
                    endif
                 endif
              endif
-             ! Ignore first four elements of stack
+             ! Ignore first elements of stack
              n=ptr2%data%esize-pm_stack_locals
-             !write(*,*) 'set N=',n
              ptr2%offset=ptr2%offset+pm_stack_locals
           endif
        endif
        if(n>max_push) then
           ptr3%data=>ptr2%data
-          ptr3%offset=-(ptr2%offset+max_push)
+          ptr3%offset=-(ptr2%offset+max_push+1)
           call push(ptr3)
           n=max_push
        endif
        do i=ptr2%offset,ptr2%offset+n
           ptr3=ptr2%data%ptr(i)
-          !write(*,*) 'SLOT',i
-          !write(*,*) 'Slot',i,ptr3%data%vkind,ptr3%offset,ptr2%offset,ptr2%offset+ptr2%data%esize
+          if(gc_xtra_debug) &
+               write(*,*) 'Mark from Slot',i-ptr2%offset,ptr3%data%vkind,ptr3%data%hash,ptr3%offset
           if(pm_debug_level>0) &
                   call pm_verify_ptr(ptr3,'in mark_from')
           if(associated(ptr3%data%context,context)) then
@@ -1800,9 +1854,12 @@ contains
                 if(.not.marked(ptr3)) then
                    call mark(ptr3)
                    call push(ptr3)
-                   !write(*,*) '  PUSH>',ptr3%offset,ptr%data%vkind
+                   if(gc_xtra_debug) &
+                        write(*,*) 'MARK+PUSH>',ptr3%data%vkind,ptr3%data%hash,ptr3%offset
                 endif
              else
+                if(gc_xtra_debug) &
+                     write(*,*) 'MARK>',ptr3%data%vkind,ptr3%data%hash,ptr3%offset
                 call mark(ptr3)
              endif
           endif
@@ -1814,6 +1871,10 @@ contains
     ! Push object onto mark stack
     subroutine push(ptr)
       type(pm_ptr):: ptr
+      if(pm_debug_level>0) then
+         if(ptr%data%vkind<pm_pointer) &
+              call pm_panic('push onto mark stack')
+      endif
       context%top=context%top+1
       if(context%top>stack_size) then
          context%overflow=.true.
@@ -1846,7 +1907,6 @@ contains
     enddo
   end subroutine mark_threads_from
 
-
   ! Clear bit maps for blocks on given list
   subroutine clear_bitmaps(list)
     type(pm_block),pointer:: list,blk
@@ -1854,6 +1914,7 @@ contains
     do 
        blk%marks=0
        blk%tick=0
+       blk%next_sweep=1
        blk=>blk%next
        if(associated(blk,list)) exit
     enddo
@@ -1955,7 +2016,7 @@ contains
   end subroutine free_empty_blocks
  
   ! Copy object information
-  subroutine copy_obj(ptr,start,ptr2,start2,esize)
+  subroutine pm_copy_obj(ptr,start,ptr2,start2,esize)
     type(pm_ptr)::ptr,ptr2
     integer(pm_ln),intent(in):: start,start2,esize
     if(pm_debug_level>0) then
@@ -2028,8 +2089,9 @@ contains
        ptr2%data%ptr(ptr2%offset+start2:ptr2%offset+esize)= &
             ptr%data%ptr(ptr%offset+start:ptr%offset+esize)
     end select
-  end subroutine copy_obj
+  end subroutine pm_copy_obj
 
+  ! Zero or nullify an object between loc1 and loc2
   subroutine nullify_obj(ptr,loc1,loc2)
     type(pm_ptr):: ptr
     integer(pm_ln):: loc1,loc2
@@ -2086,12 +2148,12 @@ contains
     end select
   end subroutine nullify_obj
 
-  subroutine set_obj(ptr,loc1,loc2,ptr2,loc3)
+  subroutine pm_set_obj(ptr,loc1,loc2,ptr2,loc3)
     type(pm_ptr):: ptr,ptr2
     integer(pm_ln):: loc1,loc2,loc3
     if(pm_debug_level>0) then
-       call pm_verify_ptr(ptr,'set_obj1')
-       call pm_verify_ptr(ptr,'set_obj2')
+       call pm_verify_ptr(ptr,'pm_set_obj1')
+       call pm_verify_ptr(ptr,'pm_set_obj2')
     endif
     select case(ptr%data%vkind)  
     case(pm_int)
@@ -2137,7 +2199,463 @@ contains
     case(pm_pointer:pm_usr)
        ptr%data%ptr(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%ptr(ptr2%offset+loc3)
     end select
-  end subroutine set_obj
+  end subroutine pm_set_obj
+
+  ! Copy a single value between objects of the same kind
+  subroutine pm_copy_val(context,ptr,loc1,ptr2,loc2)
+    type(pm_context),pointer:: context
+    type(pm_ptr):: ptr,ptr2
+    integer(pm_ln):: loc1,loc2
+    if(pm_debug_level>0) then
+       call pm_verify_ptr(ptr,'copy_val1')
+       call pm_verify_ptr(ptr,'copy_val2')
+    endif
+    select case(ptr%data%vkind)  
+    case(pm_int)
+       ptr%data%i(ptr%offset+loc1)= ptr2%data%i(ptr2%offset+loc2)
+    case(pm_long)
+       ptr%data%ln(ptr%offset+loc1)= ptr2%data%ln(ptr2%offset+loc2) 
+    case(pm_int8)
+       ptr%data%i8(ptr%offset+loc1)= ptr2%data%i8(ptr2%offset+loc2)
+    case(pm_int16)
+       ptr%data%i16(ptr%offset+loc1)= ptr2%data%i16(ptr2%offset+loc2)
+    case(pm_int32)
+       ptr%data%i32(ptr%offset+loc1)= ptr2%data%i32(ptr2%offset+loc2)
+    case(pm_int64)
+       ptr%data%i64(ptr%offset+loc1)= ptr2%data%i64(ptr2%offset+loc2)
+    case(pm_int128)
+       ptr%data%i128(ptr%offset+loc1)= ptr2%data%i128(ptr2%offset+loc2)
+    case(pm_single)
+       ptr%data%r(ptr%offset+loc1)= ptr2%data%r(ptr2%offset+loc2)
+    case(pm_double)
+       ptr%data%d(ptr%offset+loc1)= ptr2%data%d(ptr2%offset+loc2)
+    case(pm_real32)
+       ptr%data%r32(ptr%offset+loc1)= ptr2%data%r32(ptr2%offset+loc2)
+    case(pm_real64)
+       ptr%data%r64(ptr%offset+loc1)= ptr2%data%r64(ptr2%offset+loc2)
+    case(pm_real128)
+       ptr%data%r128(ptr%offset+loc1)= ptr2%data%r128(ptr2%offset+loc2)
+    case(pm_single_complex)
+       ptr%data%c(ptr%offset+loc1)= ptr2%data%c(ptr2%offset+loc2)
+    case(pm_double_complex)
+       ptr%data%dc(ptr%offset+loc1) = ptr2%data%dc(ptr2%offset+loc2)
+    case(pm_complex64)
+       ptr%data%c64(ptr%offset+loc1)= ptr2%data%c64(ptr2%offset+loc2)          
+    case(pm_complex128)
+       ptr%data%c128(ptr%offset+loc1)= ptr2%data%c128(ptr2%offset+loc2)
+    case(pm_complex256)
+       ptr%data%c256(ptr%offset+loc1)= ptr2%data%c256(ptr2%offset+loc2)
+    case(pm_logical)
+       ptr%data%l(ptr%offset+loc1)= ptr2%data%l(ptr2%offset+loc2)
+    case(pm_packed_logical)
+       ptr%data%pl(ptr%offset+loc1)= ptr2%data%pl(ptr2%offset+loc2)
+    case(pm_string)
+       ptr%data%s(ptr%offset+loc1)= ptr2%data%s(ptr2%offset+loc2)
+    case(pm_pointer:pm_usr)
+       ptr%data%ptr(ptr%offset+loc1)= ptr2%data%ptr(ptr2%offset+loc2)
+    end select
+  end subroutine pm_copy_val
+
+  ! Copy a single value between objects of the same kind
+  subroutine pm_copy_val_to0(context,ptr,ptr2,loc)
+    type(pm_context),pointer:: context
+    type(pm_ptr):: ptr,ptr2
+    integer(pm_ln):: loc
+    if(pm_debug_level>0) then
+       call pm_verify_ptr(ptr,'set_obj1')
+       call pm_verify_ptr(ptr,'set_obj2')
+    endif
+    select case(ptr%data%vkind)  
+    case(pm_int)
+       ptr%data%i(ptr%offset)= ptr2%data%i(ptr2%offset+loc)
+    case(pm_long)
+       ptr%data%ln(ptr%offset)= ptr2%data%ln(ptr2%offset+loc) 
+    case(pm_int8)
+       ptr%data%i8(ptr%offset)= ptr2%data%i8(ptr2%offset+loc)
+    case(pm_int16)
+       ptr%data%i16(ptr%offset)= ptr2%data%i16(ptr2%offset+loc)
+    case(pm_int32)
+       ptr%data%i32(ptr%offset)= ptr2%data%i32(ptr2%offset+loc)
+    case(pm_int64)
+       ptr%data%i64(ptr%offset)= ptr2%data%i64(ptr2%offset+loc)
+    case(pm_int128)
+       ptr%data%i128(ptr%offset)= ptr2%data%i128(ptr2%offset+loc)
+    case(pm_single)
+       ptr%data%r(ptr%offset)= ptr2%data%r(ptr2%offset+loc)
+    case(pm_double)
+       ptr%data%d(ptr%offset)= ptr2%data%d(ptr2%offset+loc)
+    case(pm_real32)
+       ptr%data%r32(ptr%offset)= ptr2%data%r32(ptr2%offset+loc)
+    case(pm_real64)
+       ptr%data%r64(ptr%offset)= ptr2%data%r64(ptr2%offset+loc)
+    case(pm_real128)
+       ptr%data%r128(ptr%offset)= ptr2%data%r128(ptr2%offset+loc)
+    case(pm_single_complex)
+       ptr%data%c(ptr%offset)= ptr2%data%c(ptr2%offset+loc)
+    case(pm_double_complex)
+       ptr%data%dc(ptr%offset) = ptr2%data%dc(ptr2%offset+loc)
+    case(pm_complex64)
+       ptr%data%c64(ptr%offset)= ptr2%data%c64(ptr2%offset+loc)          
+    case(pm_complex128)
+       ptr%data%c128(ptr%offset)= ptr2%data%c128(ptr2%offset+loc)
+    case(pm_complex256)
+       ptr%data%c256(ptr%offset)= ptr2%data%c256(ptr2%offset+loc)
+    case(pm_logical)
+       ptr%data%l(ptr%offset)= ptr2%data%l(ptr2%offset+loc)
+    case(pm_packed_logical)
+       ptr%data%pl(ptr%offset)= ptr2%data%pl(ptr2%offset+loc)
+    case(pm_string)
+       ptr%data%s(ptr%offset)= ptr2%data%s(ptr2%offset+loc)
+    case(pm_pointer:pm_usr)
+       ptr%data%ptr(ptr%offset)= ptr2%data%ptr(ptr2%offset+loc)
+    end select
+  end subroutine pm_copy_val_to0
+
+ ! Copy a single value between objects of the same kind
+  subroutine pm_copy_val_from0(context,ptr,ptr2,loc)
+    type(pm_context),pointer:: context
+    type(pm_ptr):: ptr,ptr2
+    integer(pm_ln):: loc
+    if(pm_debug_level>0) then
+       call pm_verify_ptr(ptr,'set_obj1')
+       call pm_verify_ptr(ptr,'set_obj2')
+    endif
+    select case(ptr%data%vkind)  
+    case(pm_int)
+       ptr%data%i(ptr%offset+loc)= ptr2%data%i(ptr2%offset)
+    case(pm_long)
+       ptr%data%ln(ptr%offset+loc)= ptr2%data%ln(ptr2%offset) 
+    case(pm_int8)
+       ptr%data%i8(ptr%offset+loc)= ptr2%data%i8(ptr2%offset)
+    case(pm_int16)
+       ptr%data%i16(ptr%offset+loc)= ptr2%data%i16(ptr2%offset)
+    case(pm_int32)
+       ptr%data%i32(ptr%offset+loc)= ptr2%data%i32(ptr2%offset)
+    case(pm_int64)
+       ptr%data%i64(ptr%offset+loc)= ptr2%data%i64(ptr2%offset)
+    case(pm_int128)
+       ptr%data%i128(ptr%offset+loc)= ptr2%data%i128(ptr2%offset)
+    case(pm_single)
+       ptr%data%r(ptr%offset+loc)= ptr2%data%r(ptr2%offset)
+    case(pm_double)
+       ptr%data%d(ptr%offset+loc)= ptr2%data%d(ptr2%offset)
+    case(pm_real32)
+       ptr%data%r32(ptr%offset+loc)= ptr2%data%r32(ptr2%offset)
+    case(pm_real64)
+       ptr%data%r64(ptr%offset+loc)= ptr2%data%r64(ptr2%offset)
+    case(pm_real128)
+       ptr%data%r128(ptr%offset+loc)= ptr2%data%r128(ptr2%offset)
+    case(pm_single_complex)
+       ptr%data%c(ptr%offset+loc)= ptr2%data%c(ptr2%offset)
+    case(pm_double_complex)
+       ptr%data%dc(ptr%offset+loc) = ptr2%data%dc(ptr2%offset)
+    case(pm_complex64)
+       ptr%data%c64(ptr%offset+loc)= ptr2%data%c64(ptr2%offset)          
+    case(pm_complex128)
+       ptr%data%c128(ptr%offset+loc)= ptr2%data%c128(ptr2%offset)
+    case(pm_complex256)
+       ptr%data%c256(ptr%offset+loc)= ptr2%data%c256(ptr2%offset)
+    case(pm_logical)
+       ptr%data%l(ptr%offset+loc)= ptr2%data%l(ptr2%offset)
+    case(pm_packed_logical)
+       ptr%data%pl(ptr%offset+loc)= ptr2%data%pl(ptr2%offset)
+    case(pm_string)
+       ptr%data%s(ptr%offset+loc)= ptr2%data%s(ptr2%offset)
+    case(pm_pointer:pm_usr)
+       ptr%data%ptr(ptr%offset+loc)= ptr2%data%ptr(ptr2%offset)
+    end select
+  end subroutine pm_copy_val_from0
+
+ ! Copy a single value between objects of the same kind
+  subroutine pm_copy_from_slots(context,ptr,ptr2,loc,nloc)
+    type(pm_context),pointer:: context
+    type(pm_ptr):: ptr,ptr2
+    integer(pm_ln),intent(in),dimension(0:nloc):: loc
+    integer(pm_ln),intent(in):: nloc
+    integer(pm_ln):: i
+    if(pm_debug_level>0) then
+       call pm_verify_ptr(ptr,'copy_from_slots1')
+       call pm_verify_ptr(ptr,'copy_from_slots2')
+    endif
+    select case(ptr%data%vkind)  
+    case(pm_int)
+       do i=0,nloc
+          ptr%data%i(ptr%offset+i)= ptr2%data%i(ptr2%offset+loc(i))
+       enddo
+    case(pm_long)
+       do i=0,nloc
+          ptr%data%ln(ptr%offset+i)= ptr2%data%ln(ptr2%offset+loc(i))
+       enddo
+    case(pm_int8)
+       do i=0,nloc
+          ptr%data%i8(ptr%offset+i)= ptr2%data%i8(ptr2%offset+loc(i))
+       enddo
+    case(pm_int16)
+       do i=0,nloc
+          ptr%data%i16(ptr%offset+i)= ptr2%data%i16(ptr2%offset+loc(i))
+       enddo
+    case(pm_int32)
+       do i=0,nloc
+          ptr%data%i32(ptr%offset+i)= ptr2%data%i32(ptr2%offset+loc(i))
+       enddo
+    case(pm_int64)
+       do i=0,nloc
+          ptr%data%i64(ptr%offset+i)= ptr2%data%i64(ptr2%offset+loc(i))
+       enddo
+    case(pm_int128)
+       do i=0,nloc
+          ptr%data%i128(ptr%offset+i)= ptr2%data%i128(ptr2%offset+loc(i))
+       enddo
+    case(pm_single)
+       do i=0,nloc
+          ptr%data%r(ptr%offset+i)= ptr2%data%r(ptr2%offset+loc(i))
+       enddo
+    case(pm_double)
+       do i=0,nloc
+          ptr%data%d(ptr%offset+i)= ptr2%data%d(ptr2%offset+loc(i))
+       enddo
+    case(pm_real32)
+       do i=0,nloc
+          ptr%data%r32(ptr%offset+i)= ptr2%data%r32(ptr2%offset+loc(i))
+       enddo
+    case(pm_real64)
+       do i=0,nloc
+          ptr%data%r64(ptr%offset+i)= ptr2%data%r64(ptr2%offset+loc(i))
+       enddo
+    case(pm_real128)
+       do i=0,nloc
+          ptr%data%r128(ptr%offset+i)= ptr2%data%r128(ptr2%offset+loc(i))
+       enddo
+    case(pm_single_complex)
+       do i=0,nloc
+          ptr%data%c(ptr%offset+i)= ptr2%data%c(ptr2%offset+loc(i))
+       enddo
+    case(pm_double_complex)
+       do i=0,nloc
+          ptr%data%dc(ptr%offset+i) = ptr2%data%dc(ptr2%offset+loc(i))
+       enddo
+    case(pm_complex64)
+       do i=0,nloc
+          ptr%data%c64(ptr%offset+i)= ptr2%data%c64(ptr2%offset+loc(i))
+       enddo
+    case(pm_complex128)
+       do i=0,nloc
+          ptr%data%c128(ptr%offset+i)= ptr2%data%c128(ptr2%offset+loc(i))
+       enddo
+    case(pm_complex256)
+       do i=0,nloc
+          ptr%data%c256(ptr%offset+i)= ptr2%data%c256(ptr2%offset+loc(i))
+       enddo
+    case(pm_logical)
+       do i=0,nloc
+          ptr%data%l(ptr%offset+i)= ptr2%data%l(ptr2%offset+loc(i))
+       enddo
+    case(pm_packed_logical)
+       do i=0,nloc
+          ptr%data%pl(ptr%offset+i)= ptr2%data%pl(ptr2%offset+loc(i))
+       enddo
+    case(pm_string)
+       do i=0,nloc
+          ptr%data%s(ptr%offset+i)= ptr2%data%s(ptr2%offset+loc(i))
+       enddo
+    case(pm_pointer:pm_usr)
+       ptr%data%ptr(ptr%offset+i)= ptr2%data%ptr(ptr2%offset+loc(i))
+    end select
+  end subroutine pm_copy_from_slots
+
+   ! Copy a single value between objects of the same kind
+  subroutine pm_copy_to_slots(context,ptr,ptr2,loc,nloc)
+    type(pm_context),pointer:: context
+    type(pm_ptr):: ptr,ptr2
+    integer(pm_ln),intent(in),dimension(0:nloc):: loc
+    integer(pm_ln),intent(in):: nloc
+    integer(pm_ln):: i
+    if(pm_debug_level>0) then
+       call pm_verify_ptr(ptr,'copy_to_slots1')
+       call pm_verify_ptr(ptr,'copy_to_slots2')
+    endif
+    select case(ptr%data%vkind)  
+    case(pm_int)
+       do i=0,nloc
+          ptr%data%i(ptr%offset+loc(i))= ptr2%data%i(ptr2%offset+i)
+       enddo
+    case(pm_long)
+       do i=0,nloc
+          ptr%data%ln(ptr%offset+loc(i))= ptr2%data%ln(ptr2%offset+i)
+       enddo
+    case(pm_int8)
+       do i=0,nloc
+          ptr%data%i8(ptr%offset+loc(i))= ptr2%data%i8(ptr2%offset+i)
+       enddo
+    case(pm_int16)
+       do i=0,nloc
+          ptr%data%i16(ptr%offset+loc(i))= ptr2%data%i16(ptr2%offset+i)
+       enddo
+    case(pm_int32)
+       do i=0,nloc
+          ptr%data%i32(ptr%offset+loc(i))= ptr2%data%i32(ptr2%offset+i)
+       enddo
+    case(pm_int64)
+       do i=0,nloc
+          ptr%data%i64(ptr%offset+loc(i))= ptr2%data%i64(ptr2%offset+i)
+       enddo
+    case(pm_int128)
+       do i=0,nloc
+          ptr%data%i128(ptr%offset+loc(i))= ptr2%data%i128(ptr2%offset+i)
+       enddo
+    case(pm_single)
+       do i=0,nloc
+          ptr%data%r(ptr%offset+loc(i))= ptr2%data%r(ptr2%offset+i)
+       enddo
+    case(pm_double)
+       do i=0,nloc
+          ptr%data%d(ptr%offset+loc(i))= ptr2%data%d(ptr2%offset+i)
+       enddo
+    case(pm_real32)
+       do i=0,nloc
+          ptr%data%r32(ptr%offset+loc(i))= ptr2%data%r32(ptr2%offset+i)
+       enddo
+    case(pm_real64)
+       do i=0,nloc
+          ptr%data%r64(ptr%offset+loc(i))= ptr2%data%r64(ptr2%offset+i)
+       enddo
+    case(pm_real128)
+       do i=0,nloc
+          ptr%data%r128(ptr%offset+loc(i))= ptr2%data%r128(ptr2%offset+i)
+       enddo
+    case(pm_single_complex)
+       do i=0,nloc
+          ptr%data%c(ptr%offset+loc(i))= ptr2%data%c(ptr2%offset+i)
+       enddo
+    case(pm_double_complex)
+       do i=0,nloc
+          ptr%data%dc(ptr%offset+loc(i)) = ptr2%data%dc(ptr2%offset+i)
+       enddo
+    case(pm_complex64)
+       do i=0,nloc
+          ptr%data%c64(ptr%offset+loc(i))= ptr2%data%c64(ptr2%offset+i)
+       enddo
+    case(pm_complex128)
+       do i=0,nloc
+          ptr%data%c128(ptr%offset+loc(i))= ptr2%data%c128(ptr2%offset+i)
+       enddo
+    case(pm_complex256)
+       do i=0,nloc
+          ptr%data%c256(ptr%offset+loc(i))= ptr2%data%c256(ptr2%offset+i)
+       enddo
+    case(pm_logical)
+       do i=0,nloc
+          ptr%data%l(ptr%offset+loc(i))= ptr2%data%l(ptr2%offset+i)
+       enddo
+    case(pm_packed_logical)
+       do i=0,nloc
+          ptr%data%pl(ptr%offset+loc(i))= ptr2%data%pl(ptr2%offset+i)
+       enddo
+    case(pm_string)
+       do i=0,nloc
+          ptr%data%s(ptr%offset+loc(i))= ptr2%data%s(ptr2%offset+i)
+       enddo
+    case(pm_pointer:pm_usr)
+       ptr%data%ptr(ptr%offset+loc(i))= ptr2%data%ptr(ptr2%offset+i)
+    end select
+  end subroutine pm_copy_to_slots
+
+   ! Copy a single value between objects of the same kind
+  subroutine pm_copy_slots(context,ptr,ptr2,loc,loc2,nloc)
+    type(pm_context),pointer:: context
+    type(pm_ptr):: ptr,ptr2
+    integer(pm_ln),intent(in),dimension(0:nloc):: loc,loc2
+    integer(pm_ln),intent(in):: nloc
+    integer(pm_ln):: i
+    if(pm_debug_level>0) then
+       call pm_verify_ptr(ptr,'copy_slots1')
+       call pm_verify_ptr(ptr,'copy_slots2')
+    endif
+    select case(ptr%data%vkind)  
+    case(pm_int)
+       do i=0,nloc
+          ptr%data%i(ptr%offset+loc(i))= ptr2%data%i(ptr2%offset+loc2(i))
+       enddo
+    case(pm_long)
+       do i=0,nloc
+          ptr%data%ln(ptr%offset+loc(i))= ptr2%data%ln(ptr2%offset+loc2(i))
+       enddo
+    case(pm_int8)
+       do i=0,nloc
+          ptr%data%i8(ptr%offset+loc(i))= ptr2%data%i8(ptr2%offset+loc2(i))
+       enddo
+    case(pm_int16)
+       do i=0,nloc
+          ptr%data%i16(ptr%offset+loc(i))= ptr2%data%i16(ptr2%offset+loc2(i))
+       enddo
+    case(pm_int32)
+       do i=0,nloc
+          ptr%data%i32(ptr%offset+loc(i))= ptr2%data%i32(ptr2%offset+loc2(i))
+       enddo
+    case(pm_int64)
+       do i=0,nloc
+          ptr%data%i64(ptr%offset+loc(i))= ptr2%data%i64(ptr2%offset+loc2(i))
+       enddo
+    case(pm_int128)
+       do i=0,nloc
+          ptr%data%i128(ptr%offset+loc(i))= ptr2%data%i128(ptr2%offset+loc2(i))
+       enddo
+    case(pm_single)
+       do i=0,nloc
+          ptr%data%r(ptr%offset+loc(i))= ptr2%data%r(ptr2%offset+loc2(i))
+       enddo
+    case(pm_double)
+       do i=0,nloc
+          ptr%data%d(ptr%offset+loc(i))= ptr2%data%d(ptr2%offset+loc2(i))
+       enddo
+    case(pm_real32)
+       do i=0,nloc
+          ptr%data%r32(ptr%offset+loc(i))= ptr2%data%r32(ptr2%offset+loc2(i))
+       enddo
+    case(pm_real64)
+       do i=0,nloc
+          ptr%data%r64(ptr%offset+loc(i))= ptr2%data%r64(ptr2%offset+loc2(i))
+       enddo
+    case(pm_real128)
+       do i=0,nloc
+          ptr%data%r128(ptr%offset+loc(i))= ptr2%data%r128(ptr2%offset+loc2(i))
+       enddo
+    case(pm_single_complex)
+       do i=0,nloc
+          ptr%data%c(ptr%offset+loc(i))= ptr2%data%c(ptr2%offset+loc2(i))
+       enddo
+    case(pm_double_complex)
+       do i=0,nloc
+          ptr%data%dc(ptr%offset+loc(i)) = ptr2%data%dc(ptr2%offset+loc2(i))
+       enddo
+    case(pm_complex64)
+       do i=0,nloc
+          ptr%data%c64(ptr%offset+loc(i))= ptr2%data%c64(ptr2%offset+loc2(i))
+       enddo
+    case(pm_complex128)
+       do i=0,nloc
+          ptr%data%c128(ptr%offset+loc(i))= ptr2%data%c128(ptr2%offset+loc2(i))
+       enddo
+    case(pm_complex256)
+       do i=0,nloc
+          ptr%data%c256(ptr%offset+loc(i))= ptr2%data%c256(ptr2%offset+loc2(i))
+       enddo
+    case(pm_logical)
+       do i=0,nloc
+          ptr%data%l(ptr%offset+loc(i))= ptr2%data%l(ptr2%offset+loc2(i))
+       enddo
+    case(pm_packed_logical)
+       do i=0,nloc
+          ptr%data%pl(ptr%offset+loc(i))= ptr2%data%pl(ptr2%offset+loc2(i))
+       enddo
+    case(pm_string)
+       do i=0,nloc
+          ptr%data%s(ptr%offset+loc(i))= ptr2%data%s(ptr2%offset+loc2(i))
+       enddo
+    case(pm_pointer:pm_usr)
+       ptr%data%ptr(ptr%offset+loc(i))= ptr2%data%ptr(ptr2%offset+loc2(i))
+    end select
+  end subroutine pm_copy_slots
 
   subroutine pm_finalize(context,ext)
     type(pm_context),pointer:: context

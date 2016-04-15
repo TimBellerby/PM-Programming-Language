@@ -33,13 +33,12 @@ module pm_lib
   public:: pm_dict_keys,pm_dict_vals,pm_dict_key,&
        pm_dict_val,pm_dict_set_val,pm_dict_size
   public:: pm_set_new, pm_set_lookup, pm_set_add, &
-       pm_set_keys,pm_set_key,pm_set_size
+       pm_set_keys,pm_set_key,pm_set_size,pm_set_merge
   public:: pm_ivect_lookup,pm_iset_add,pm_idict_add
   public:: pm_obj_set_new, pm_obj_set_lookup, pm_obj_set_add, &
        pm_obj_set_keys,pm_obj_set_key,pm_obj_set_size,pm_obj_set_from
   public:: pm_deep_copy
-  public:: pm_intern
-  public:: pm_mask_indices,pm_shrink
+  public:: pm_intern,pm_intern_val
   public:: pm_name_val, pm_name_string, pm_name_as_string
   
   integer(pm_p),public,parameter:: pm_first_libtype=pm_usr+1
@@ -47,14 +46,16 @@ module pm_lib
   integer(pm_p),public,parameter:: pm_dict_type = pm_first_libtype+1
   integer(pm_p),public,parameter:: pm_set_type = pm_first_libtype+2
   integer(pm_p),public,parameter:: pm_obj_set_type = pm_first_libtype+3
-  integer(pm_p),public,parameter:: pm_poly_type=pm_first_libtype+4
-  integer(pm_p),public,parameter:: pm_poly_group_type=pm_first_libtype+5
-  integer(pm_p),public,parameter:: pm_index_type=pm_first_libtype+6
-  integer(pm_p),public,parameter:: pm_last_libtype=pm_index_type
+  integer(pm_p),public,parameter:: pm_string_type=pm_first_libtype+4
+  integer(pm_p),public,parameter:: pm_poly_type=pm_first_libtype+5
+  integer(pm_p),public,parameter:: pm_struct_type=pm_first_libtype+6
+  integer(pm_p),public,parameter:: pm_rec_type=pm_first_libtype+7
+  integer(pm_p),public,parameter:: pm_polyref_type=pm_first_libtype+8
+  integer(pm_p),public,parameter:: pm_array_type=pm_first_libtype+9
+
+  integer(pm_p),public,parameter:: pm_last_libtype=pm_array_type
   
   integer,parameter:: max_count=1000
-
-  integer,parameter:: poly_frac=4
 
 contains
 
@@ -63,23 +64,25 @@ contains
     type(pm_context),pointer:: context
     integer(pm_ln),intent(in):: initsize
     type(pm_ptr):: ptr
+    type(pm_ptr):: p
     if(pm_debug_level>0) then
        if(initsize<0) call pm_panic('New dictionary size')
     endif
     ptr=pm_fast_newusr(context,pm_dict_type,4_pm_p)
     call hash_new_table(context,ptr,initsize,0_pm_ln)
-    call pm_assign_new(context,ptr,2_pm_ln, &
+    p=pm_assign_new(context,ptr,2_pm_ln, &
          pm_pointer,initsize,.true.)
-    call pm_assign_new(context,ptr,3_pm_ln, &
+    p=pm_assign_new(context,ptr,3_pm_ln, &
          pm_pointer,initsize,.true.)
   contains
     include 'fnewusr.inc'
   end function pm_dict_new
 
   ! Lookup value in dictionary object
-  function pm_dict_lookup(context,obj,key) result(ptr)
+  function pm_dict_lookup(context,obj,key,n_out) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj,key
+    integer,intent(out),optional:: n_out
     type(pm_ptr):: ptr
     integer(pm_ln):: h,n
     if(pm_debug_level>0) then
@@ -96,10 +99,10 @@ contains
     else
        ptr=pm_null_obj
     endif
+    if(present(n_out)) n=n_out
   end function pm_dict_lookup
 
-  
-  ! Set value ib dictionary object (optionally add / overwrite)
+  ! Set value in dictionary object (optionally add / overwrite)
   subroutine pm_dict_set(context,obj,key,val,addit,overwrt,ok,m)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
@@ -130,7 +133,7 @@ contains
        endif
        n=hash_add(context,obj,h)
        ptr=obj%data%ptr(obj%offset+2)
-       ptr%data%ptr(ptr%offset+n-1)=key
+       call pm_ptr_assign(context,ptr,n-1,key)
     else
        if(.not.overwrt) then
           ok=.false.
@@ -139,7 +142,7 @@ contains
     endif
     if(present(m)) m=n
     ptr=obj%data%ptr(obj%offset+3)
-    ptr%data%ptr(ptr%offset+n-1)=val
+    call pm_ptr_assign(context,ptr,n-1,val)
   end subroutine  pm_dict_set
 
   ! Merge two dictionary objects
@@ -223,7 +226,7 @@ contains
     ptr=ptr%data%ptr(ptr%offset+n-1)
   end function pm_dict_key
 
-  ! Dictionary object values
+  ! Dictionary object value
   function pm_dict_val(context,obj,n) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
@@ -254,7 +257,6 @@ contains
     endif
     ptr=obj%data%ptr(obj%offset+3)
     call pm_ptr_assign(context,ptr,n-1_pm_ln,val)
-    ptr%data%ptr(ptr%offset+n-1)=val
   end subroutine pm_dict_set_val
 
   ! Dictionary object size
@@ -276,10 +278,10 @@ contains
     type(pm_context),pointer:: context
     integer(pm_ln),intent(in):: initsize
     type(pm_ptr):: ptr
-    type(pm_ptr):: ptr2
+    type(pm_ptr):: p
     ptr=pm_fast_newusr(context,pm_set_type,3_pm_p)
     call hash_new_table(context,ptr,initsize,0_pm_ln)
-    call pm_assign_new(context,ptr,2_pm_ln, &
+    p=pm_assign_new(context,ptr,2_pm_ln, &
          pm_pointer,initsize,.true.)
   contains
     include 'fnewusr.inc'
@@ -322,7 +324,7 @@ contains
        endif
        n=hash_add(context,obj,h)
        ptr=obj%data%ptr(obj%offset+2)
-       ptr%data%ptr(ptr%offset+n-1)=key
+       call pm_ptr_assign(context,ptr,n-1,key)
     endif
   end function pm_set_add
 
@@ -541,12 +543,13 @@ contains
     type(pm_context),pointer:: context
     integer(pm_ln),intent(in):: initsize
     type(pm_ptr):: ptr
+    type(pm_ptr):: p
     if(pm_debug_level>0) then
        if(initsize<0) call pm_panic('New obj dictionary size')
     endif
     ptr=pm_fast_newusr(context,pm_obj_set_type,3_pm_p)
     call hash_new_table(context,ptr,initsize,0_pm_ln)
-    call pm_assign_new(context,ptr,2_pm_ln, &
+    p=pm_assign_new(context,ptr,2_pm_ln, &
          pm_pointer,initsize,.true.)
   contains
     include 'fnewusr.inc'
@@ -586,12 +589,11 @@ contains
     if(hash_full(obj)) then
        newsize=resize(context,obj)
        call pm_expand(context,obj,2_pm_ln,newsize)
-       call pm_expand(context,obj,3_pm_ln,newsize)
     endif
     h=pm_obj_hash(context,key)
     n=hash_add(context,obj,h)
     ptr=obj%data%ptr(obj%offset+2_pm_p)
-    ptr%data%ptr(ptr%offset+n-1_pm_ln)=key
+    call pm_ptr_assign(context,ptr,n-1_pm_ln,key)
   end function pm_obj_set_add
 
   ! Size of a set object
@@ -720,9 +722,8 @@ contains
     type(pm_ptr):: hashtab
     integer(pm_ln),intent(in):: initsize,initkp
     type(pm_ptr):: ptr
-    call pm_assign_new(context,hashtab,1_pm_ln, &
+    ptr=pm_assign_new(context,hashtab,1_pm_ln, &
          pm_long,initsize*3+3,.true.)
-    ptr=hashtab%data%ptr(hashtab%offset+1)
     ptr%data%ln(ptr%offset)=initkp
     ptr%data%ln(ptr%offset+1)=3
     ptr%data%ln(ptr%offset+2)=initsize-1
@@ -1228,76 +1229,34 @@ contains
     type(pm_root),pointer:: root
     type(pm_ptr):: string
     string=pm_new_string(context,str)
-    root=>pm_add_root(context,string)
     n=pm_set_lookup(context,context%names,string)
     if(n==0) then
+       root=>pm_add_root(context,string)
        n=pm_set_add(context,context%names,string)
+       call pm_delete_root(context,root)
     endif
   end function pm_intern
 
-  function pm_mask_indices(context,ind,mask) result(ind2)
+  ! Intern a value
+  function pm_intern_val(context,val) result(n)
     type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: ind,mask
-    type(pm_ptr):: ind2
-    integer(pm_ln):: k,j,esize
-    esize=pm_fast_esize(ind)
-    k=0
-    do j=1,esize
-       if(mask%data%l(ind%data%ln(j)+mask%offset)) k=k+1
-    enddo
-    ind2=pm_new(context,pm_long,k+1_pm_ln)
-    k=1
-    ind2%data%ln(ind2%offset)=ind%data%ln(ind%offset)
-    do j=1,esize
-       if(mask%data%l(ind%data%ln(j)+mask%offset)) then
-          ind2%data%ln(ind2%offset+k)=ind%data%ln(j)
-          k=k+1
-       endif
-    enddo
-  contains
-    include 'fesize.inc'
-  end function pm_mask_indices
-
-  function pm_shrink(context,mask,n) result(ind)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: mask
-    integer(pm_ln),optional,intent(in):: n
-    type(pm_ptr):: ind
-    integer(pm_ln):: j,k,esize
-    esize=pm_fast_esize(mask)
-    if(pm_fast_vkind(mask)==pm_long) then
-       ind=mask
-       return
+    type(pm_ptr),intent(in):: val
+    integer(pm_p):: n
+    n=pm_set_lookup(context,context%names,val)
+    if(n==0) then
+       n=pm_set_add(context,context%names,val)
     endif
-    if(present(n)) then
-       k=n
-    else
-       k=count(mask%data%l(mask%offset:mask%offset+esize))
-    endif
-    ind=pm_new(context,pm_long,k+1_pm_p)
-    ind%data%ln(ind%offset)=esize
-    k=1
-    do j=0,esize
-       if(mask%data%l(mask%offset+j)) then
-          ind%data%ln(ind%offset+k)=j
-          k=k+1
-       endif
-    enddo
-  contains
-    include 'fvkind.inc'
-    include 'fesize.inc'
-  end function pm_shrink
-
+  end function pm_intern_val
+  
   ! Get name value
   function pm_name_val(context,m) result(val)
     type(pm_context),pointer:: context
     integer(pm_p):: m
     type(pm_ptr):: val
-    integer:: n
     type(pm_ptr):: keys
     keys=pm_set_keys(context,context%names)
     if(pm_debug_level>0) then
-       if(m<0.or.m>pm_fast_esize(keys)) &
+       if(m<1.or.m>pm_fast_esize(keys)) &
             call pm_panic('name_val')
     endif
     val=keys%data%ptr(keys%offset+m-1)
@@ -1338,6 +1297,12 @@ contains
                 endif
              enddo
              str=trim(str)//')'
+!!$             if(marked(ptr)) then
+!!$                str=trim(str)//')T'
+!!$             else
+!!$                str=trim(str)//')F'
+!!$             endif
+            
           else if(pm_fast_vkind(ptr)==pm_int) then
              call pm_name_string(context,&
                   int(ptr%data%i(ptr%offset),pm_p),str2)
@@ -1366,6 +1331,7 @@ contains
     type(pm_context),pointer:: context
     integer(pm_p):: m
     character(len=300):: str
+    str=''
     call pm_name_string(context,m,str)
   end function pm_name_as_string
 

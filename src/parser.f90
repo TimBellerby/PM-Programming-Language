@@ -1,18 +1,18 @@
 !
-!PM (Parallel Models) Programming Language
+! PM (Parallel Models) Programming Language
 !
-!Released under the MIT License (MIT)
+! Released under the MIT License (MIT)
 !
-!Copyright (c) Tim Bellerby, 2015
+! Copyright (c) Tim Bellerby, 2016
 !
-!Permission is hereby granted, free of charge, to any person obtaining a copy
+! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
 ! in the Software without restriction, including without limitation the rights
 ! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 ! copies of the Software, and to permit persons to whom the Software is
 ! furnished to do so, subject to the following conditions:
 !
-!The above copyright notice and this permission notice shall be included in
+! The above copyright notice and this permission notice shall be included in
 ! all copies or substantial portions of the Software.
 !
 ! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -23,7 +23,7 @@
 ! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ! THE SOFTWARE.
 
-! Parser
+! Lexical analysis and Parser
 ! Builds a parse tree from input text
 module pm_parser
   use pm_kinds
@@ -31,22 +31,43 @@ module pm_parser
   use pm_lib
   implicit none
 
+  ! Print out lots of parser debugging info
+  logical,parameter:: parser_xtra_debug=.false.
+
+  ! Check if memory manager attempts to reuse a node
+  ! (this should not happen so is one test of gc)
+  logical,parameter:: check_node_reuse=.false.
+
   integer,parameter:: pm_max_args=32
-
-  integer,parameter:: node_symbol=0
-  integer,parameter:: node_modl=1
-  integer,parameter:: node_lineno=2
-  integer,parameter:: node_args=3
-
+  
+  ! Offsets into module objects
   integer,parameter:: modl_name=1
   integer,parameter:: modl_link=2
   integer,parameter:: modl_stmts=3
   integer,parameter:: modl_include=4
   integer,parameter:: modl_proc=5
   integer,parameter:: modl_type=6
-  integer,parameter:: modl_param=7
-  integer,parameter:: modl_local=3
+  integer,parameter:: modl_default=7
+  integer,parameter:: modl_param=8
+  integer,parameter:: modl_local=4
 
+  ! Offsets into parser node objects of various kinds
+  integer,parameter:: node_magic=0
+  integer,parameter:: node_symbol=1
+  integer,parameter:: node_modl=2
+  integer,parameter:: node_lineno=3
+  integer,parameter:: node_args=4
+
+  ! Type parse nodes
+  integer,parameter:: typ_name=node_args
+  integer,parameter:: typ_number=node_args+1
+  integer,parameter:: typ_module=node_args+2
+  integer,parameter:: typ_params=node_args+3
+  integer,parameter:: typ_link=node_args+4
+  integer,parameter:: typ_includes=node_args+5
+  integer,parameter:: typ_num_args=6
+
+  ! Proc parse nodes
   integer,parameter:: proc_name=node_args
   integer,parameter:: proc_link=node_args+1
   integer,parameter:: proc_module=node_args+2
@@ -54,34 +75,34 @@ module pm_parser
   integer,parameter:: proc_params=node_args+4
   integer,parameter:: proc_keys=node_args+5
   integer,parameter:: proc_amplocs=node_args+6
-  integer,parameter:: proc_coded_params=node_args+7
-  integer,parameter:: proc_numret=node_args+8
+  integer,parameter:: proc_numloop=node_args+7
+  integer,parameter:: proc_coded_params=node_args+8
+  integer,parameter:: proc_numret=node_args+9
 
-  ! Alternative final sections
-  integer,parameter:: proc_check=node_args+9
-  integer,parameter:: proc_result=node_args+10
-  integer,parameter:: proc_stmts=node_args+11
-  integer,parameter:: proc_code_tree=node_args+12
-  integer,parameter:: proc_num_args=13
+  ! Alternative final sections for 'proc' parse nodes
+  
+  !   - user functions
+  integer,parameter:: proc_reduce=node_args+10
+  integer,parameter:: proc_check=node_args+11
+  integer,parameter:: proc_result=node_args+12
+  integer,parameter:: proc_stmts=node_args+13
+  integer,parameter:: proc_code_tree=node_args+14
+  integer,parameter:: proc_num_args=15
 
-  integer,parameter:: proc_rettypes=node_args+9
-  integer,parameter:: proc_retas=node_args+10
-  integer,parameter:: proc_opcode=node_args+11
-  integer,parameter:: proc_opcode2=node_args+12
-  integer,parameter:: proc_data=node_args+13
-  integer,parameter:: proc_coded_builtin=node_args+14
-  integer,parameter:: sysproc_num_args=15
+  !   - built in functions
+  integer,parameter:: proc_rettypes=node_args+10
+  integer,parameter:: proc_retas=node_args+11
+  integer,parameter:: proc_opcode=node_args+12
+  integer,parameter:: proc_opcode2=node_args+13
+  integer,parameter:: proc_data=node_args+14
+  integer,parameter:: proc_coded_builtin=node_args+15
+  integer,parameter:: sysproc_num_args=16
 
+  ! Flags for proc objects
   integer,parameter:: proc_is_reduce=1
   integer,parameter:: proc_is_loop_proc=2
-
-  integer,parameter:: typ_name=node_args
-  integer,parameter:: typ_number=node_args+1
-  integer,parameter:: typ_link=node_args+2
-  integer,parameter:: typ_module=node_args+3
-  integer,parameter:: typ_params=node_args+4
-  integer,parameter:: typ_includes=node_args+5
-  integer,parameter:: typ_num_args=6
+  integer,parameter:: proc_has_vkeys=4
+  integer,parameter:: proc_is_var=8
 
   ! ============================================================
   ! These constants represent keywords, other symbols and 
@@ -112,28 +133,21 @@ module pm_parser
   integer,parameter:: sym_query = 18
   integer,parameter:: sym_arrow = 19
   integer,parameter:: sym_hash = 20
-  integer,parameter:: sym_string = 21
-  integer,parameter:: sym_number = 22
+  integer,parameter:: sym_pct = 21
+  integer,parameter:: sym_string = 22
+  integer,parameter:: sym_number = 23
 
   ! Node types not directly associated with a symbol
   integer,parameter:: node0 = sym_number
   integer,parameter:: sym_iter = node0 + 1
   integer,parameter:: sym_list = node0 + 2
-  integer,parameter:: sym_call = node0 + 3
-  integer,parameter:: sym_loop_call = node0 + 4
-  integer,parameter:: sym_square_at = node0 + 5
-  integer,parameter:: sym_brace_at = node0 + 6
-  integer,parameter:: sym_global_at = node0 + 7
-  integer,parameter:: sym_dotref = node0 + 8
-  integer,parameter:: sym_subseq = node0 + 9
-  integer,parameter:: sym_openeq = node0 + 10
-  ! Order of next three is significant
-  integer,parameter:: sym_set_dot = node0 + 11  
-  integer,parameter:: sym_set_dot_index = node0 + 12
-  integer,parameter:: sym_set_dot_open_index = node0 + 13
+  integer,parameter:: sym_square_at = node0 + 3
+  integer,parameter:: sym_brace_at = node0 + 4
+  integer,parameter:: sym_reduce_at = node0 + 5
+  integer,parameter:: sym_dotref = node0 + 6
 
   ! Operators
-  integer,parameter:: sym1 = sym_set_dot_open_index
+  integer,parameter:: sym1 = sym_dotref
   integer,parameter:: sym_open = sym1 + 1
   integer,parameter:: first_opr = sym_open
   integer,parameter:: sym_close = sym1 + 2
@@ -168,16 +182,14 @@ module pm_parser
   integer,parameter:: sym_in = first_key + 1
   integer,parameter:: sym_and = first_key + 2
   integer,parameter:: sym_or = first_key + 3
-  integer,parameter:: sym_div = first_key + 4
-  integer,parameter:: sym_mod = first_key + 5
-  integer,parameter:: sym_prod = first_key + 6
-  integer,parameter:: sym_dim = first_key + 7
-  integer,parameter:: sym_by = first_key + 8
-  integer,parameter:: sym_includes = first_key + 9
-  integer,parameter:: last_binary = sym_includes
+  integer,parameter:: sym_dim = first_key + 4
+  integer,parameter:: sym_by = first_key + 5
+  integer,parameter:: sym_includes = first_key + 6
+  integer,parameter:: sym_mod = first_key + 7
+  integer,parameter:: last_binary = sym_mod
 
   ! Unary operators 
-  integer,parameter:: sym_not = first_key + 10
+  integer,parameter:: sym_not = first_key + 8
   integer,parameter:: last_opr = sym_not
   integer,parameter:: last_unary = sym_not
 
@@ -197,28 +209,22 @@ module pm_parser
   integer,parameter:: sym_from = last_opr + 13
   integer,parameter:: sym_follow = last_opr + 14
   integer,parameter:: sym_any = last_opr + 15
-  integer,parameter:: sym_array = last_opr + 16
+  integer,parameter:: sym_conc = last_opr + 16
+  integer,parameter:: last_expr = sym_conc
 
-  integer,parameter:: last_expr = sym_array
-
-  integer,parameter:: sym_default = last_expr + 1
-  integer,parameter:: sym_do = last_expr + 2
-  integer,parameter:: sym_seq = last_expr + 3
-  integer,parameter:: sym_then = last_expr + 4
-  integer,parameter:: sym_loop = last_expr + 5
-  integer,parameter:: sym_par_loop = last_expr + 6
-  integer,parameter:: sym_find = last_expr + 7
-  integer,parameter:: sym_par_find = last_expr + 8
-  integer,parameter:: sym_where = last_expr + 9
-
-  integer,parameter:: sym_when = last_expr + 10       
-  integer,parameter:: sym_is = last_expr + 11
-  integer,parameter:: sym_with = last_expr + 12   
-  integer,parameter:: sym_also = last_expr + 13
-  integer,parameter:: sym_render = last_expr + 14    
-  integer,parameter:: sym_over = last_expr + 15       
-  integer,parameter:: sym_of = last_expr + 16         
-  integer,parameter:: last_key = sym_of
+  integer,parameter:: sym_reduce = last_expr + 1
+  integer,parameter:: sym_seq = last_expr + 2
+  integer,parameter:: sym_then = last_expr + 3
+  integer,parameter:: sym_loop = last_expr + 4
+  integer,parameter:: sym_par_loop = last_expr + 5
+  integer,parameter:: sym_conc_loop = last_expr + 6
+  integer,parameter:: sym_where = last_expr + 7
+  integer,parameter:: sym_when = last_expr + 8     
+  integer,parameter:: sym_is = last_expr + 9
+  integer,parameter:: sym_with = last_expr + 10   
+  integer,parameter:: sym_local = last_expr + 11  
+  integer,parameter:: sym_invar = last_expr + 12
+  integer,parameter:: last_key = sym_invar
 
   ! Declaration keywords
   integer,parameter:: sym_use = last_key + 1
@@ -226,9 +232,12 @@ module pm_parser
   integer,parameter:: sym_proc = last_key + 2
   integer,parameter:: sym_param = last_key + 3
   integer,parameter:: sym_type = last_key + 4
-  integer,parameter:: last_decl = sym_type
+  integer,parameter:: sym_default = last_key + 5
+  integer,parameter:: sym_render = last_key + 6
+  integer,parameter:: last_decl = sym_render
 
-  ! Statement keywords
+  ! Statement keywords 
+  ! -- anything that can follow the end of a statement
   integer,parameter:: sym_case = last_decl + 1
   integer,parameter:: first_stmt = sym_case
   integer,parameter:: sym_check = last_decl + 2
@@ -238,28 +247,35 @@ module pm_parser
   integer,parameter:: sym_elseif = last_decl + 6 
   integer,parameter:: sym_enddebug = last_decl + 7 
   integer,parameter:: sym_enddo = last_decl + 8
-  integer,parameter:: sym_endfind = last_decl + 9
-  integer,parameter:: sym_endif = last_decl + 10
-  integer,parameter:: sym_endlet = last_decl + 11   !!!
-  integer,parameter:: sym_endfor = last_decl + 12
-  integer,parameter:: sym_endproc = last_decl + 13
-  integer,parameter:: sym_endselect = last_decl + 14
-  integer,parameter:: sym_endtype = last_decl + 15
-  integer,parameter:: sym_endwhile = last_decl + 16
-  integer,parameter:: sym_for = last_decl + 17
-  integer,parameter:: sym_found= last_decl + 18
+  integer,parameter:: sym_endif = last_decl + 9
+  integer,parameter:: sym_endfor = last_decl + 10
+  integer,parameter:: sym_endproc = last_decl + 11
+  integer,parameter:: sym_endselect = last_decl + 12
+  integer,parameter:: sym_endtype = last_decl + 13
+  integer,parameter:: sym_endwhile = last_decl + 14
+  integer,parameter:: sym_for = last_decl + 15
+  integer,parameter:: sym_find= last_decl + 16
+  integer,parameter:: sym_par_find = last_decl + 17
+  integer,parameter:: sym_conc_find = last_decl + 18
   integer,parameter:: sym_if = last_decl + 19
-  integer,parameter:: sym_let = last_decl + 20
-  integer,parameter:: sym_repeat = last_decl + 21 
-  integer,parameter:: sym_result = last_decl + 22
-  integer,parameter:: sym_select = last_decl + 23
-  integer,parameter:: sym_until = last_decl + 24
-  integer,parameter:: sym_using = last_decl + 25
-  integer,parameter:: sym_otherwise = last_decl + 26
-  integer,parameter:: sym_var = last_decl + 27        
-  integer,parameter:: sym_while = last_decl + 28
-  integer,parameter:: last_stmt = sym_while 
-  integer,parameter:: num_sym = last_stmt
+  integer,parameter:: sym_repeat = last_decl + 20 
+  integer,parameter:: sym_result = last_decl + 21
+  integer,parameter:: sym_select = last_decl + 22
+  integer,parameter:: sym_until = last_decl + 23
+  integer,parameter:: sym_using = last_decl + 24
+  integer,parameter:: sym_otherwise = last_decl + 25
+  integer,parameter:: sym_sync = last_decl + 26        
+  integer,parameter:: sym_while = last_decl + 27
+  integer,parameter:: sym_build = last_decl + 28
+  integer,parameter:: sym_also = last_decl + 29
+  integer,parameter:: sym_do = last_decl + 30
+  integer,parameter:: last_stmt = sym_do
+  integer,parameter:: num_sym = sym_do
+  integer,parameter:: sym_array = num_sym + 1
+  integer,parameter:: sym_dom = num_sym + 2
+  integer,parameter:: sym_tuple = num_sym + 3
+  integer,parameter:: sym_poly = num_sym + 4
+  integer,parameter:: last_parser_hook = num_sym + 4
   
   integer,parameter:: max_string=100
   integer,parameter:: max_line=1001
@@ -267,7 +283,7 @@ module pm_parser
   integer,parameter:: max_errors=20
   character(len=1),parameter:: eof_char=achar(0)
 
-  ! Priority for binary operators
+  ! Priority for operators (-ve is right associative)
   integer,parameter,dimension(sym_open:last_opr):: priority= (/ &
        15, &  !sym_open
        15, &  !sym_close
@@ -295,52 +311,47 @@ module pm_parser
        -6, &  !sym_in
        8,&    !sym_and 
        9,&    !sym_or 
-       4,&    !sym_div 
-       4,&    !sym_mod
-       4,&    !sym_prod 
        13,&   !sym_dim 
        -11,&  !sym_by 
        -6,&   !sym_includes
+       4,&    !sym_mod
        7   &  !sym_not
        /)
 
   ! Names of symbols
   character(len=12),parameter,dimension(0:num_sym):: &
        sym_names  = (/ 'EOF         ','$           ','at          ',&
-       ';           ','(/          ','/)          ','(:          ',&
-       ':)          ',':           ','...         ',':=          ',&
+       ';           ','(/          ','/)          ','(%          ',&
+       '%)          ',':           ','...         ',':=          ',&
        ',           ','.           ','=           ','_           ',&
        ':/          ','&           ','::          ','?           ',&
-       '->          ','hash        ','<string>    ','<number>    ',&
-       '<iter>      ','<list>      ','<call>      ','<loop-call> ',&
-       '<square-at> ','<brace-at>  ','<global-at> ','<dotref>    ',&
-       '(//)=       ','(::)=       ','.=          ','(//).=      ',&
-       '.(::)=      ','(           ',&
-       ')           ','unary *     ','unary -     ','//          ',&
-       '?=          ','==          ','/=          ','>=          ',&
-       '>           ','<=          ','<           ','+           ',&
-       '-           ','*           ','/           ','**          ',&
-       '..          ','<..         ','..<         ','<..<        ',&
-       '=>          ','://         ',&
-       'in          ','and         ','or          ','div         ',&
-       'mod         ','prod        ','dim         ','by          ',&
-       'includes    ','not         ','opt         ','null        ',&
-       'key         ','arg         ','argc        ','true        ',&
-       'false       ','low         ','high        ','step        ',&
-       'struct      ','rec         ','from        ','follow      ',&
-       'any         ','array       ','default     ','do          ',&
-       'seq         ','then        ','loop        ','par-loop    ',&
-       'find        ','par-find    ','where       ',&
-       'when        ','is          ','with        ','also        ',&
-       'render      ','over        ','of          ','include     ',&
-       'proc        ','param       ','type        ','case        ',&
-       'check       ','const       ','debug       ','else        ',&
-       'elseif      ','enddebug    ','enddo       ','endfind     ',&
-       'endif       ','endlet      ','endfor      ','endproc     ',&
-       'endselect   ','endtype     ','endwhile    ',&
-       'for         ','found       ','if          ','let         ',&
-       'repeat      ','result      ','select      ','until       ',&
-       'using       ','otherwise   ','var         ','while       '&
+       '->          ','hash        ','%           ','<string>    ',&
+       '<number>    ','<iter>      ','<list>      ',&
+       '<square-at> ','<brace-at>  ','<reduce-at> ','<dotref>    ',&
+       '(           ',')           ','unary *     ','unary -     ',&
+       '//          ','?=          ','==          ','/=          ',&
+       '>=          ','>           ','<=          ','<           ',&
+       '+           ','-           ','*           ','/           ',&
+       '**          ','..          ','<..         ','..<         ',&
+       '<..<        ','=>          ','://         ','in          ',&
+       'and         ','or          ','dim         ','by          ',&
+       'includes    ','mod         ','not         ','opt         ',&
+       'null        ','key         ','arg         ','argc        ',&
+       'true        ','false       ','low         ','high        ',&
+       'step        ','struct      ','rec         ','from        ',&
+       'follow      ','any         ','conc        ','reduce      ',&
+       'seq         ','then        ','<loop>      ','<par-loop>  ',&
+       '<conc-loop> ','where       ','when        ','is          ',&
+       'with        ','local       ','invar       ','use         ',&
+       'proc        ','param       ','type        ','default     ',&
+       'render      ','case        ','check       ','const       ',&
+       'debug       ','else        ','elseif      ','enddebug    ',&
+       'enddo       ','endif       ','endfor      ','endproc     ',&
+       'endselect   ','endtype     ','endwhile    ','for         ',&
+       'find        ','<par-find>  ','<conc-find> ',&
+       'if          ','repeat      ','result      ','select      ',&
+       'until       ','using       ','otherwise   ','sync        ',&
+       'while       ','build       ','also        ','do          '&
        /)
 
   ! Parser state
@@ -351,18 +362,17 @@ module pm_parser
      integer:: ls,lineno
      logical:: newline,atstart
      integer:: n, nsym, last, iunit
-     type(pm_ptr):: temp,temp2
+     type(pm_ptr):: temp, lexval
      integer:: sym, pushback
      integer,dimension(max_parse_stack):: stack
      integer:: top
      type(pm_ptr),dimension(max_parse_stack):: vstack
+     integer(pm_i16),dimension(max_parse_stack):: vline
      integer:: vtop
      integer:: error_count
      type(pm_reg),pointer:: reg
   end type parse_state
   
-  logical,parameter:: parser_xtra_debug=.false.
-
 contains
 
   ! Start a module declaration with the given name
@@ -375,40 +385,51 @@ contains
   end subroutine dcl_module
 
   ! Declare an internally implemented procedure 
-  subroutine dcl_proc(parser,def,opcode,opcode2,pdata,flags)
+  subroutine dcl_proc(parser,def,opcode,opcode2,line,flags)
     type(parse_state),intent(inout):: parser
     character(len=*),intent(in):: def
     integer(pm_i16),intent(in):: opcode,opcode2
-    type(pm_ptr),intent(in):: pdata
+    integer,intent(inout):: line
     integer,intent(in):: flags
-    if(parser_xtra_debug) &
-         write(*,*) 'Parse intrinsic def:',trim(def)
+
     call parse_from_string(parser,def)
-    if(builtin(parser,opcode,opcode2,pdata,flags)) &
+    parser%lineno=line
+    if(pm_debug_level>1) &
+         write(*,*) 'Parse intrinsic def(',line,') ',trim(def)
+    line=line+1
+    if(builtin(parser,opcode,opcode2,pm_null_obj,flags)) &
          call pm_panic('bad intrinsic module')
   end subroutine dcl_proc
 
   ! Declare an internally implemented procedure 
-  subroutine dcl_uproc(parser,def)
+  subroutine dcl_uproc(parser,def,line)
     type(parse_state),intent(inout):: parser
     character(len=*),intent(in):: def
-    if(parser_xtra_debug) &
-         write(*,*) 'Parse sysem user proc def:',trim(def)
+    integer,intent(inout):: line
     call parse_from_string(parser,def)
+    parser%lineno=line
+    if(pm_debug_level>1) &
+         write(*,*) 'Parse sysem user proc def (',line,'):',trim(def)
+    write(45,*) line,'proc:',trim(def)
+    line=line+1
     if(proc(parser)) &
          call pm_panic('bad intrinsic module')
   end subroutine dcl_uproc
 
   ! Declare a type
-  subroutine dcl_type(parser,def)
+  subroutine dcl_type(parser,def,line)
     type(parse_state),intent(inout):: parser
     character(len=*),intent(in):: def
-    type(pm_ptr):: pdata
+    integer,intent(inout):: line
     call parse_from_string(parser,def)
+    parser%lineno=line
+    if(pm_debug_level>1) &
+         write(*,*) 'Parse sysem user type def (',line,'):',trim(def)
+    write(45,*)line,'type:',trim(def)
+    line=line+1
     if(dectype(parser)) &
          call pm_panic('bad intrinsic type')
   end subroutine dcl_type
-
 
   ! Start parsing PM code from a string
   subroutine parse_from_string(parser,str)
@@ -445,7 +466,7 @@ contains
     parser%vtop=max_parse_stack
     parser%reg=>pm_register(context,'parser',&
          parser%modl,parser%modls,parser%modl_dict,&
-         parser%temp,parser%sysmodl, &
+         parser%temp,parser%sysmodl,parser%lexval, &
          array=parser%vstack, &
          array_size=parser%vtop)
     parser%context%names=pm_set_new(context,128_pm_ln)
@@ -466,6 +487,26 @@ contains
           call pm_panic('panic forming key table')
        endif
     enddo
+    parser%temp=pm_new_string(context,'array')
+    if(pm_set_add(context,parser%context%names,parser%temp)&
+         /=sym_array) then
+       call pm_panic('panic forming key table -- array')
+    endif
+    parser%temp=pm_new_string(context,'dom')
+    if(pm_set_add(context,parser%context%names,parser%temp)&
+         /=sym_dom) then
+       call pm_panic('panic forming key table -- dom')
+    endif
+    parser%temp=pm_new_string(context,'tuple')
+    if(pm_set_add(context,parser%context%names,parser%temp)&
+         /=sym_tuple) then
+       call pm_panic('panic forming key table -- tuple')
+    endif
+    parser%temp=pm_new_string(context,'poly')
+    if(pm_set_add(context,parser%context%names,parser%temp)&
+         /=sym_poly) then
+       call pm_panic('panic forming key table -- poly')
+    endif
   end subroutine init_parser
 
   ! Terminate the PM parser
@@ -572,7 +613,7 @@ contains
        if(peekchar()=='/') then
           c=getchar()
           sym=sym_open_square
-       else if(peekchar()==':') then
+       else if(peekchar()=='%') then
           c=getchar()
           sym=sym_open_brace
        else
@@ -621,9 +662,6 @@ contains
           else
              sym=sym_bar
           endif
-       else if(peekchar()==')') then
-          c=getchar()
-          sym=sym_close_brace
        else if(peekchar()==':') then
           c=getchar()
           sym=sym_dcolon
@@ -656,11 +694,16 @@ contains
        endif
     case('%') 
        if(peekchar()=='%') then
+          c=getchar()
           sym=sym_at
        elseif(peekchar()==':') then
+          c=getchar()
           sym=sym_hash
+       elseif(peekchar()==')') then
+          c=getchar()
+          sym=sym_close_brace
        else
-          sym=sym_query
+          sym=sym_pct
        endif
     case('.')
        if(peekchar()=='.') then
@@ -692,7 +735,7 @@ contains
        enddo
        val=pm_new_string(parser%context,buffer(1:n))
        sym=sym_string
-       call push_val(parser,val)
+       parser%lexval=val
     case('&')
        sym=sym_amp
     case('$')
@@ -709,7 +752,7 @@ contains
        sym=sym_open_brace
     case('}')
        sym=sym_close_brace  
-    case('|')
+    case('|')       
        if(peekchar()=='|') then
           sym=sym_dbar
           c=getchar()
@@ -1016,7 +1059,7 @@ contains
        endif
        if(ios/=0) call parse_error(parser, &
             'Numeric constant out of range')
-       call push_val(parser,val)
+       parser%lexval=val
        sym=sym_number
      end subroutine numeric
 
@@ -1092,22 +1135,80 @@ contains
   ! Most parsing routines return true on failure
   ! *****************************************************************
 
-  ! Argument lists for procedure calls
-  recursive function arglist(parser) result(iserr)
+  ! Make a simple call node (no keys or &args)
+  ! Name and args must be on stack
+  subroutine simple_call(parser,nargs,nloop)
     type(parse_state),intent(inout):: parser
+    integer,intent(in):: nargs, nloop
+    call make_node(parser,sym_list,nargs)
+    call push_null_val(parser)      ! keys
+    call push_null_val(parser)      ! amps
+    call push_num_val(parser,nloop) ! num loop args
+    call make_node(parser,sym_open,5)    
+  end subroutine simple_call
+
+  ! Procedure call (scanner on token *after* name)
+  recursive function proccall(parser,name) result(iserr)
+    type(parse_state),intent(inout):: parser
+    integer,intent(in):: name
     logical:: iserr
-    integer m,n,base,sym
+    iserr=.true.
+    if(parser%sym==sym_pct) then
+       call push_sym(parser,sym_pct)
+       call push_sym(parser,name)
+       call name_vector(parser,parser%top-2)
+       call scan(parser)
+       if(arglist(parser,sym_pct,.true.)) return
+    elseif(parser%sym==sym_dcolon) then
+       call push_sym(parser,sym_dcolon)
+       call push_sym(parser,name)
+       call name_vector(parser,parser%top-2)
+       call scan(parser)
+       if(parser%sym==sym_open) then
+          if(arglist(parser,sym_dcolon,.true.)) return
+       else
+          if(expect_name(parser)) return
+          call simple_call(parser,1,1)
+       endif
+       if(parser%sym==sym_at) then
+          call scan(parser)
+          if(expect(parser,sym_open_brace)) return
+          if(sexprlist(parser)) return
+          if(expect(parser,sym_close_brace)) return
+          call make_node(parser,sym_reduce_at,2)
+       endif
+    else
+       if(parser%sym/=sym_open) then
+          call parse_error(parser,'Expected procedure call')
+       endif
+       call push_sym_val(parser,name)
+       if(arglist(parser,sym_open,.false.)) return
+    endif
+    iserr=.false.
+  end function proccall
+
+  ! Argument lists for procedure calls
+  recursive function arglist(parser,clsym,is_loop) result(iserr)
+    type(parse_state),intent(inout):: parser
+    integer,intent(in):: clsym
+    logical,intent(in):: is_loop
+    logical:: iserr
+    integer m,n,nloop,base,sym
     type(pm_ptr):: temp
+    logical:: loop_par
+    loop_par=is_loop
     iserr=.true.
     m=0
     n=0
+    nloop=0
     base=parser%top
     call scan(parser)
     if(parser%sym==sym_close) then
-       call push_null_val(parser)
-       call push_null_val(parser)
-       call push_null_val(parser)
-       call make_node(parser,sym_call,4)
+       call push_null_val(parser) !args
+       call push_null_val(parser) !keys
+       call push_null_val(parser) !amps
+       call push_null_val(parser) !num loop args
+       call make_node(parser,clsym,5)
        call scan(parser)
        iserr=.false.
        return
@@ -1130,33 +1231,49 @@ contains
        elseif(parser%sym==sym_key) then
           call make_node(parser,sym_list,m)
           exit
+       else if(parser%sym==sym_arg) then
+          if(loop_par) then
+             call parse_error(parser,&
+                  '"arg..." must follow ":" in loop parameter list')
+          endif
+          call scan(parser)
+          if(parser%sym==sym_dotdotdot) then
+             call push_sym_val(parser,sym_arg)
+             call make_node(parser,sym_dotdotdot,m+1)
+             call scan(parser)
+             exit
+          else
+             call push_back(parser,sym_arg)
+          endif
        else
           if(check_name(parser,sym)) then
              if(parser%sym==sym_assign) then
                 call make_node(parser,sym_list,m)
-                call scan(parser)
                 call push_sym_val(parser,sym)
+                call scan(parser)
                 if(expr(parser)) return
                 n=1
                 exit
              else
                 call push_back(parser,sym)
              endif   
-          else if(parser%sym==sym_arg) then
-             call scan(parser)
-             if(parser%sym==sym_dotdotdot) then
-                call push_sym_val(parser,sym_arg)
-                call make_node(parser,sym_dotdotdot,m+1)
-                call scan(parser)
-                exit
-             else
-                call push_back(parser,sym_arg)
-             endif
           endif
-          if(expr(parser)) return
+          if(loop_par) then
+             if(expect_name(parser)) return
+             if(parser%sym/=sym_close.and.&
+                  parser%sym/=sym_semi.and.parser%sym/=sym_comma) then
+                call parse_error(parser,'Loop argument must be single variable name')
+                return
+             endif
+             nloop=nloop+1
+          else
+             if(expr(parser)) return
+          endif
           m=m+1
        endif
-       if(parser%sym/=sym_comma) then
+       if(loop_par.and.parser%sym==sym_semi) then
+          loop_par=.false.
+       elseif(parser%sym/=sym_comma) then
           call make_node(parser,sym_list,m)
           exit
        endif
@@ -1186,7 +1303,8 @@ contains
     else
        call push_null_val(parser)
     endif
-    call make_node(parser,sym_call,4)
+    call push_num_val(parser,nloop)
+    call make_node(parser,clsym,5)
     if(expect(parser,sym_close)) return
     iserr=.false.
   end function arglist
@@ -1301,20 +1419,19 @@ contains
     logical:: iserr
     integer:: m
     iserr=.true.
-    m=0
+    m=1
     call scan(parser)
     if(expr(parser)) return
-    if(expect(parser,sym_follow))  return
     do
+       if(expect(parser,sym_follow))  return
+       if(exprlist(parser)) return
+       if(expect(parser,sym_when)) return
+       if(expr(parser)) return
        if(parser%sym==sym_comma) then
-          call parse_error(parser,'Expected .name,[..] or {..}')
-          return
+          call scan(parser)
+       else
+          exit
        endif
-       call push_null_val(parser)
-       if(qual(parser)) return
-       m=m+1
-       if(parser%sym/=sym_comma) exit
-       call scan(parser)
     enddo
     call make_node(parser,sym_follow,m)
     iserr=.false.
@@ -1359,51 +1476,43 @@ contains
           call scan(parser)
        endif
     endif
-    if(sym/=sym_close.and.parser%sym==sym_of) then
-       call scan(parser)
-       if(typ(parser)) return
-       call make_node(parser,sym_of,2)
-    endif
-    if(sym==sym_close_square.and.parser%sym==sym_over) then
-       call scan(parser)
-       if(term(parser)) return
-       call make_node(parser,sym_over,2)
-    endif
     iserr=.false.
   end function array_former
 
   ! Operator symbols within proc 
-  recursive function op(parser) result(iserr)
+  recursive function op(parser,sym) result(iserr)
     type(parse_state):: parser
+    integer,intent(out):: sym
     logical:: iserr
-    integer:: name
     iserr=.true.
     select case (parser%sym)
     case(first_unary:last_opr,sym_assign,sym_hi,sym_lo,sym_step)
-       call push_sym_val(parser,parser%sym)
+       sym=parser%sym
        call scan(parser)
     case(sym_open_square)
        call scan(parser)
        if(expect(parser,sym_close_square)) return
-       if(parser%sym==sym_assign) then
-          call push_sym_val(parser,sym_subseq)
-          call scan(parser)
-       else
-          call push_sym_val(parser,sym_open_square)
-       endif
+       sym=sym_open_square
     case(sym_open_brace)
-       call push_sym_val(parser,sym_open_brace)
        call scan(parser)
        if(expect(parser,sym_close_brace)) return
-       if(parser%sym==sym_assign) then
-          call push_sym_val(parser,sym_openeq)
+       sym=sym_open_brace
+    case(sym_at)
+       call scan(parser)
+       if(parser%sym==sym_open_square) then
           call scan(parser)
+          if(expect(parser,sym_close_square)) return
+          sym=sym_square_at
+       else if(parser%sym==sym_open_brace) then
+          call scan(parser)
+          if(expect(parser,sym_close_brace)) return
+          sym=sym_brace_at
        else
-          call push_sym_val(parser,sym_open_brace)
+          sym=sym_at
        endif
     case default
-       if(.not.is_name(parser)) then
-          call parse_error(parser,'Malformed "proc"')
+       if(.not.check_name(parser,sym)) then
+          call parse_error(parser,'Malformed "proc" identifier')
           return
        endif
     end select
@@ -1507,28 +1616,24 @@ contains
        call make_node(parser,sym_arg,1)
        if(expect(parser,sym_close_square)) return
     case(sym_number,sym_string)
-       call scan(parser)   
+       call push_val(parser,parser%lexval)
+       call scan(parser)
     case(sym_proc)
        call scan(parser)
-       if(parser%sym==sym_at) then
-          call scan(parser)
-          if(.not.check_name(parser,name)) return
-          call push_sym(parser,sym_at)
-          call push_sym(parser,name)
-          call name_vector(parser,parser%top-2)
-       else
-          if(op(parser)) return
-       endif
-       if(parser%sym==sym_open) then
-          if(arglist(parser)) return
+       if(op(parser,name)) return
+       if(parser%sym==sym_open.or.parser%sym==sym_dcolon&
+            .or.parser%sym==sym_pct) then
+          if(proccall(parser,name)) return
        else
           call make_node(parser,sym_proc,1)
        endif
     case(sym_hi,sym_lo,sym_step)
-       call push_sym_val(parser,parser%sym)
        call scan(parser)
-       if(parser%sym==sym_open) then
-          if(arglist(parser)) return
+       if(parser%sym==sym_open.or.parser%sym==sym_dcolon&
+            .or.parser%sym==sym_pct) then
+          if(proccall(parser,sym)) return
+       else
+          call push_sym_val(parser,sym)
        endif
     case(sym_true,sym_false,sym_null,sym_argc) 
        call push_sym_val(parser,parser%sym)
@@ -1537,19 +1642,35 @@ contains
     case(sym_dollar)
        call scan(parser)
        if(expect_name(parser)) return
-       call make_node(parser,sym_dollar,1)
+       call make_node(parser,sym,1)
+    case(sym_at)
+       call scan(parser)
+       if(expect_name(parser)) return
+       if(parser%sym==sym_open_square) then
+          call scan(parser)
+          if(sexprlist(parser)) return
+          call make_node(parser,sym_square_at,2)
+          if(expect(parser,sym_close_square)) return
+       else if(parser%sym==sym_open_brace) then
+          call scan(parser)
+          if(sexprlist(parser)) return
+          call make_node(parser,sym_brace_at,2)
+          if(expect(parser,sym_close_brace)) return
+       else
+          call make_node(parser,sym_at,1)
+       endif
     case default
        if(check_name(parser,name)) then
-          if(parser%sym==sym_open) then
+          if(parser%sym==sym_open.or.parser%sym==sym_dcolon&
+               .or.parser%sym==sym_pct) then
+             if(proccall(parser,name)) return
+          elseif(parser%sym==sym_at) then
              call push_sym_val(parser,name)
-             if(arglist(parser)) return
-          else if(parser%sym==sym_dcolon) then
              call scan(parser)
-             call push_sym(parser,sym_dcolon)
-             call push_sym(parser,name)
-             call name_vector(parser,parser%top-2)
-             if(term(parser)) return
-             call make_node(parser,sym_dcolon,2)
+             if(expect(parser,sym_open_brace)) return
+             if(sexprlist(parser)) return
+             if(expect(parser,sym_close_brace)) return
+             call make_node(parser,sym_at,2)
           else
              call push_sym_val(parser,name)
           endif
@@ -1568,42 +1689,38 @@ contains
   recursive function expr(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
-    integer:: base,nesting,s,sym
-    logical:: row
+    integer:: base,nesting,s,sym,ntuple
     iserr=.true.
     base=parser%top
     nesting=0        
     do
-       do while(unary(parser%sym).or.&
-            parser%sym==sym_minus.or.parser%sym==sym_mult)
+       do 
           if(parser%sym==sym_minus) then
              parser%sym=sym_uminus
           else if(parser%sym==sym_mult) then
              parser%sym=sym_ustar
+          elseif(parser%sym/=sym_not) then
+             exit
           endif
           call push()
           call scan(parser)
        enddo
+
        do while(parser%sym==sym_open) 
           call push()
           call scan(parser)
           nesting=nesting+1
        enddo
-       if(parser%sym==sym_at) then
-          if(loop_call()) return
-       else
-          if(term(parser)) goto 999
-          if(parser%sym==sym_at) then
-             call scan(parser)
-             if(term(parser)) goto 999
-             call make_node(parser,sym_at,2)
-          endif
-       endif
+
+       if(term(parser)) goto 999
+
        do while(nesting>0.and.parser%sym==sym_close)
           if(popto(sym_close)) goto 999
           nesting=nesting-1
           call scan(parser)
+          if(qual(parser)) return
        enddo
+
        if(binary(parser%sym)) then
           s=parser%sym
           call scan(parser)
@@ -1616,49 +1733,34 @@ contains
                 else
                    s=sym_ltdotdot
                 endif
-             else if(parser%sym==sym_dotdotdot) then
-                call push_back(parser,sym_lt)
-                exit
              endif
-          else if(s==sym_dotdot.and.parser%sym==sym_lt) then
-             call scan(parser)
-             s=sym_dotdotlt
+          else if(s==sym_dotdot)then
+             if(parser%sym==sym_lt) then
+                call scan(parser)
+                s=sym_dotdotlt
+             else
+                s=sym_dotdot
+             endif
           endif
           if(popto(s)) goto 999
           call push_s(s)
        else if(nesting>0) then
-          if(parser%sym==sym_bar) then
-             if(popto(sym_plus)) goto 999
-             if(top()/=sym_in) then
-                call parse_error(parser,&
-                     'Expecting "in" expression before "bar"')
-                return
-             endif
-             s=pop()
-             if(popto(sym_open)) goto 999
-             call scan(parser)
-             if(expr(parser)) goto 999
-             call make_node(parser,sym_close,3)
+          if(popto(sym_open)) goto 999
+          if(parser%sym==sym_comma) then
+             call push_sym_val(parser,sym_tuple)
+             call swap_vals(parser)
+             ntuple=1
+             do 
+                call scan(parser)
+                if(expr(parser)) goto 999
+                ntuple=ntuple+1
+                if(parser%sym/=sym_comma) exit
+             enddo
+             call simple_call(parser,ntuple,0)
              if(expect(parser,sym_close)) return
           else
-             if(popto(sym_open)) goto 999
-             if(parser%sym==sym_comma) then
-                call scan(parser)
-                row=.false.
-             else if(parser%sym==sym_semi) then
-                call scan(parser)
-                row=.true.
-             else if(parser%sym==sym_colon) then
-                if(generator(parser,sym_close)) goto 999
-                exit
-             else if(parser%atstart) then
-                row=.true.
-             else
-                call parse_error(parser,'Too many "(" in expression')
-                goto 999
-             endif
-             if(matrix_former(parser,sym_close,row,.not.row)) &
-                  goto 999
+             call parse_error(parser,'Too many "(" in expression')
+             goto 999
           endif
           nesting=nesting-1
           if(binary(parser%sym)) then
@@ -1682,7 +1784,7 @@ contains
     return
 
  999 continue
-    call skip_to_next_statement(parser,.true.)
+    call skip_past_error(parser,.true.)
 
   contains
 
@@ -1759,50 +1861,6 @@ contains
       isbin = sym>=first_binary .and. sym<=last_binary
     end function binary
 
-    ! Is sym a unary operator?
-    function unary(sym) result(isun)
-      integer:: sym
-      logical:: isun
-      isun= sym>=first_unary .and. sym<=last_unary .and. .not. binary(sym)
-    end function unary
-    
-    ! Unary "at" expressions
-    function loop_call() result(is_err)
-      logical:: is_err
-      is_err=.true.
-      call scan(parser)
-      if(check_name(parser,sym)) then
-         if(parser%sym==sym_open) then
-            call push_sym(parser,sym_at)
-            call push_sym(parser,sym)
-            call name_vector(parser,parser%top-2)
-            if(arglist(parser)) return
-            call make_node(parser,sym_loop_call,1)
-            is_err=.false.
-         else
-            call push_sym_val(parser,sym)
-         endif
-      else
-         if(expect(parser,sym_open)) return
-         if(expr(parser)) return
-         if(expect(parser,sym_close)) return
-      endif
-      if(parser%sym==sym_open_square) then
-         call scan(parser)
-         if(sexprlist(parser)) return
-         call make_node(parser,sym_square_at,2)
-         if(expect(parser,sym_close_square)) return
-      else if(parser%sym==sym_open_brace) then
-         call scan(parser)
-         if(sexprlist(parser)) return
-         call make_node(parser,sym_brace_at,2)
-         if(expect(parser,sym_close_brace)) return
-      else
-         call make_node(parser,sym_at,1)
-      endif
-      is_err=.false.
-    end function loop_call
-
   end function expr
 
   ! Comma separated list of expr
@@ -1829,33 +1887,27 @@ contains
     type(parse_state):: parser
     logical:: iserr
     integer:: s
+    type(pm_ptr):: junk
     iserr=.true.
     if(parser%sym==sym_dotdotdot) then
-       call scan(parser)
-       if(parser%sym==sym_lt) then
-          s=sym_dotdotlt
-          call scan(parser)
-       else
-          s=sym_dotdot
-       endif
        call push_sym_val(parser,sym_lo)
-       if(expr(parser)) return
-       call make_node(parser,s,2)
+       call scan(parser)
+       if(parser%sym==sym_comma.or.&
+            parser%sym==sym_close_brace.or.&
+            parser%sym==sym_close_square) then
+          junk=pop_val(parser)
+          call push_sym_val(parser,sym_dotdotdot)
+       else
+          if(expr(parser)) return
+          call make_node(parser,sym_dotdot,2)
+       endif
     else
        if(expr(parser)) return
-       if(parser%sym==sym_lt) then
-          s=sym_ltdotdot
+       if(parser%sym==sym_dotdotdot) then
+          call push_sym_val(parser,sym_hi)
+          call make_node(parser,sym_dotdot,2)
           call scan(parser)
-          if(expect(parser,sym_dotdotdot)) return
-       else if(parser%sym==sym_dotdotdot) then
-          s=sym_dotdot
-          call scan(parser)
-       else
-          iserr=.false.
-          return
        endif
-       call push_sym_val(parser,sym_hi)
-       call make_node(parser,s,2)
     endif
     iserr=.false.
   end function sexpr
@@ -1879,29 +1931,14 @@ contains
     iserr=.false.
   end function sexprlist
 
-  ! Assignment (=) definition (:=) or reference set (->)
+  ! Assignment (=) definition (:=) 
   recursive function assn(parser,sym) result(iserr)
     type(parse_state),intent(inout):: parser
     integer,intent(in):: sym
     logical:: iserr
-    integer:: n
+    integer:: n,name
     iserr=.true.
     n=0
-    if(is_name(parser)) then
-       if(parser%sym==sym_arrow) then
-          call scan(parser)
-          if(expect_name(parser)) return
-          if(qual(parser)) return
-          call make_node(parser,sym_arrow,2)
-          iserr=.false.
-          return
-       else
-          if(qual(parser)) return
-          n=1
-          if(parser%sym/=sym_comma) goto 10
-          call scan(parser)
-       endif
-    endif
     do 
        if(lhs()) return
        n=n+1
@@ -1909,15 +1946,14 @@ contains
        call scan(parser)
     enddo
  10 continue
-    if(n>1) call make_node(parser,sym_list,n)
-    if((sym==sym_assign.or.sym==sym_let).and.parser%sym==sym_define) then
+    if(sym==sym_assign.and.parser%sym==sym_define) then
        call scan(parser)
        if(rhs()) return
-       call make_node(parser,sym_define,2)
+       call make_node(parser,sym_define,n+1)
     else 
        if(expect(parser,sym_assign)) return
        if(rhs()) return
-       call make_node(parser,sym,2)
+       call make_node(parser,sym,n+1)
     endif
     iserr=.false.
     return
@@ -1928,7 +1964,7 @@ contains
       logical:: is_err
       is_err=.true.
       if(parser%sym==sym_underscore) then
-         call push_sym_val(parser,sym_underscore)
+         call make_node(parser,sym_underscore,0)
          call scan(parser)
       else if(is_name(parser)) then
          if(qual(parser)) return
@@ -1942,16 +1978,24 @@ contains
     function rhs() result(is_err)
       logical:: is_err
       is_err=.true.
-      if(n==1) then
+      if(parser%sym==sym_for) then
+         call push_null_val(parser)
+         if(for_loop(parser,n)) return
+      elseif(parser%sym==sym_using) then
+         if(using_clause(parser)) return
+         if(parser%sym/=sym_for) then
+            call parse_error(parser,&
+                 'Expected a "for" statement after ".. = using ..."')
+            return
+         endif
+         if(for_loop(parser,n)) return
+      elseif(n==1) then
          if(expr(parser)) return
       else
-         if(expect_name(parser)) return
-         if(parser%sym==sym_open) then
-            if(arglist(parser)) return
-         else if(parser%sym>=first_opr.and.parser%sym<=last_opr) then
-            call parse_error(parser,&
-                 'Only a call allowed in this context')
-            return
+         if(check_name(parser,name)) then
+            if(proccall(parser,name)) return
+         else
+            call parse_error(parser,'Expected procedure name')
          endif
       endif
       is_err=.false.
@@ -1984,12 +2028,24 @@ contains
     logical:: ignore_err
     if(parser%sym==sym_check) then
        call scan(parser)
+       if(parser%sym==sym_string) then
+          call scan(parser)
+          if(parser%sym/=sym_colon) then
+             call push_back(parser,parser%sym)
+             call push_null_val(parser)
+          else
+             call push_val(parser,parser%lexval)
+             call scan(parser)
+          endif
+       else
+          call push_null_val(parser)
+       endif
        ignore_err=exprlist(parser)
-       call make_node(parser,sym_check,2)
+       call make_node(parser,sym_check,3)
     endif
     do while(parser%sym==sym_where)
        call scan(parser)
-       if(assn_list(parser,sym_const)) exit
+       if(assn_list(parser,sym_where)) exit
        call make_node(parser,sym_where,2)
     enddo
   end subroutine subexp
@@ -2026,26 +2082,32 @@ contains
     do while(parser%sym==sym_case)
        call scan(parser)
        call xexprlist(parser)
-       if(expect(parser,sym_colon)) return
+       if(expect(parser,sym_do)) return
        call statement_list(parser)
-       n=n+1
+       n=n+2
     enddo
     if(n==0) then
        call parse_error(parser,'No "case" clauses in "select" statement')
        return
     endif
-    call make_node(parser,sym_select,n*2+1)
+    if(parser%sym==sym_otherwise) then
+       call scan(parser)
+       call statement_list(parser)
+    else
+       call push_null_val(parser)
+    endif
+    call make_node(parser,sym_select,n+2)
     if(expect(parser,sym_endselect)) return
     iserr=.false.
   end function sel_statement
 
-  recursive function for_loop(parser) result(iserr)
+  ! Iteratator clause
+  recursive function iter(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
-    integer:: i,m,loop,par
+    integer:: i,m
     iserr=.true.
-    call scan(parser)
-    if(expect_name(parser,'variable name in "for" loop')) return
+    if(expect_name(parser,'iteration variable')) return
     m=1
     if(parser%sym==sym_from) then
        if(from_follow(parser)) return
@@ -2063,45 +2125,94 @@ contains
        end do
     endif
     call make_node(parser,sym_iter,m*2)
+    iserr=.false.
+  end function iter
+
+  recursive function for_loop(parser,nret) result(iserr)
+    type(parse_state),intent(inout):: parser
+    integer,intent(in):: nret
+    logical:: iserr
+    integer:: m,loop,par
+    iserr=.true.
+
+    call scan(parser)
+    if(iter(parser)) return
     call subexp(parser)
+
     if(parser%sym==sym_seq) then
        call scan(parser)
        par=0
-       call push_null_val(parser)
+    elseif(parser%sym==sym_conc) then
+       call scan(parser)
+       par=2
     else
        par=1
-       if(parser%sym==sym_using) then
-          call scan(parser)
-          if(assn_list(parser,sym_using)) return
-       else
-          call push_null_val(parser)
-       endif
     endif
-    if(parser%sym==sym_find) then
-       call scan(parser)
-       call statement_list(parser)
-       if(parser%sym==sym_otherwise) then
-          call scan(parser)
-          call statement_list(parser)
-       else
-          call push_null_val(parser)
-       endif
-       call make_node(parser,sym_find+par,4)
-       if(expect(parser,sym_endfor)) return
+
+    if(parser%sym==sym_find.or.&
+         parser%sym==sym_build) then
+       call push_null_val(parser)
     else
        if(expect(parser,sym_do)) return
        call statement_list(parser)
-       call make_node(parser,sym_loop+par,3)
-       if(expect(parser,sym_endfor)) return
     endif
+
+    if(parser%sym==sym_find) then
+       call scan(parser)
+       call xexprlist(parser,m)
+       if(m/=nret) then
+          call parse_error(parser,'"find" returns incorrect number of values')
+         endif
+       if(expect(parser,sym_when)) return
+       call xexpr(parser)
+       if(expect(parser,sym_otherwise)) return
+       call xexprlist(parser,m)
+       if(m/=nret) &
+            call parse_error(parser,'"otherwise" returns incorrect number of values')
+       call make_node(parser,sym_find+par,6)
+    elseif(parser%sym==sym_build) then
+       if(par==0) &
+            call parse_error(parser,'cannot have "build" clause in sequential loop')
+       call scan(parser)
+       call xexprlist(parser,m)
+       if(m/=nret) &
+            call parse_error(parser,'"build" returns incorrect number of values')
+       call make_node(parser,sym_loop+par,4)
+    else
+       if(nret/=0) &
+            call parse_error(parser,'"build" clause required to return values')
+       call make_node(parser,sym_loop+par,3)
+    endif
+    if(expect(parser,sym_endfor)) return
     iserr=.false.
   end function for_loop
+
+  ! Using clause - leaves two items on stack
+  function using_clause(parser) result(iserr)
+    type(parse_state),intent(inout):: parser
+    logical:: iserr
+    integer:: n,i
+    iserr=.true.
+    call scan(parser)
+    n=0
+    do while(parser%sym>num_sym)
+       call push_sym_val(parser,parser%sym)
+       call scan(parser)
+       if(expect(parser,sym_assign)) return
+       if(expr(parser)) return
+       n=n+2
+       if(parser%sym/=sym_comma) exit
+       call scan(parser)
+    enddo
+    call make_node(parser,sym_list,n)
+    iserr=.false.
+  end function using_clause
 
   ! List of statements
   recursive subroutine statement_list(parser)
     type(parse_state),intent(inout):: parser
     logical:: ok
-    integer:: n,m,k,name
+    integer:: i,n,m,k,name
     k=0
     do
        select case(parser%sym)
@@ -2149,6 +2260,7 @@ contains
        case(sym_debug)
           call scan(parser)
           if(parser%sym==sym_string) then
+             call push_val(parser,parser%lexval)
              call scan(parser)
           else
              call push_null_val(parser)
@@ -2157,15 +2269,18 @@ contains
           call make_node(parser,sym_debug,2)
           if(expect(parser,sym_enddebug)) goto 999
        case(sym_for)
-          if(for_loop(parser)) goto 999
-       case(sym_let)
-          call scan(parser)
-          if(assn_list(parser,sym_let)) goto 999
-          call subexp(parser)
-       case(sym_found)
-          call scan(parser)
-          if(assn_list(parser,sym_found)) goto 999
-          call subexp(parser)
+          call push_null_val(parser) ! No using
+          if(for_loop(parser,0)) goto 999
+       case(sym_using)
+          if(using_clause(parser)) goto 999
+          if(parser%sym==sym_for) then
+             if(for_loop(parser,0)) goto 999
+          else
+             if(do_stmt()) goto 999
+          endif
+       case(sym_do)
+          call push_null_val(parser) ! No using
+          if(do_stmt()) goto 999
        case(sym_underscore)
           if(assn(parser,sym_assign)) goto 999
        case(sym_const)
@@ -2174,11 +2289,25 @@ contains
           call make_node(parser,sym_const,1)
        case(sym_result)
           exit
+       case(sym_sync)
+          n=0
+          do
+             call scan(parser)
+             if(expect_name(parser)) goto 999
+             n=n+1
+             if(parser%sym/=sym_comma) exit
+          enddo
+          call make_node(parser,sym_sync,n)
        case default
          if(check_name(parser,name)) then
-            if(parser%sym==sym_open) then
+            if(parser%sym==sym_colon) then
                call push_sym_val(parser,name)
-               if(arglist(parser)) goto 999
+               call make_node(parser,sym_colon,1)
+               call scan(parser)
+               k=k+1
+               cycle
+            elseif(parser%sym==sym_open.or.parser%sym==sym_pct) then
+               if(proccall(parser,name)) goto 999
                call subexp(parser)
             else
                call push_back(parser,name)
@@ -2194,6 +2323,7 @@ contains
             endif
          endif
        end select
+888    continue
        k=k+1
        if(parser%sym==sym_semi) then
           call scan(parser)
@@ -2207,9 +2337,36 @@ contains
        endif
        cycle
 999    continue
-       call skip_to_next_statement(parser,.false.)
+       call skip_past_error(parser,.false.)
     enddo
     call make_node(parser,sym_list,k)
+    
+  contains
+
+    function do_stmt() result(is_error)
+      logical:: is_error
+      integer:: n
+      is_error=.true.
+      if(parser%sym==sym_with) then
+         call scan(parser)
+         call statement_list(parser)
+      else
+         call push_null_val(parser)
+      endif
+      if(expect(parser,sym_do)) return
+      call statement_list(parser)
+      n=3
+      do while(parser%sym==sym_also)
+         call scan(parser)
+         if(expect(parser,sym_do)) return
+         call statement_list(parser)
+         n=n+1
+      enddo
+      call make_node(parser,sym_also,n)
+      if(expect(parser,sym_enddo)) return
+      is_error=.false.
+    end function do_stmt
+
   end subroutine statement_list
 
   ! Type
@@ -2232,7 +2389,8 @@ contains
           if(check_name(parser,name)) then
              call push_sym(parser,name)
           else
-             call parse_error(parser,'Expected stucture name')
+             call parse_error(parser,&
+                  'Expected stucture name')
           endif
           if(expect(parser,sym_open_brace)) return
        endif
@@ -2258,30 +2416,53 @@ contains
        call name_vector(parser,base)
        call make_node(parser,sym,2)
        if(expect(parser,sym_close_brace)) return
-    case(sym_any,sym_opt)
+    case(sym_opt)
        call scan(parser)
-       if(expect(parser,sym_open_brace)) return
-       if(parser%sym==sym_close_brace) then
-          call push_null_val(parser)
+       if(parser%sym==sym_open_brace) then
+          call scan(parser)
+          if(typ(parser)) return
+          if(expect(parser,sym_close_brace)) return
+       else
+          if(typ(parser)) return
+       endif
+       call make_node(parser,sym_opt,1)
+    case(sym_lt)
+       if(parser%sym==sym_gt) then
+          call make_node(parser,sym_any,0)
           call scan(parser)
        else
           if(typ(parser)) return
-          if(expect(parser,sym_close_brace)) return
+          if(expect(parser,sym_gt)) return
+       endif
+       base=parser%top
+       call push_sym(parser,sym_poly)
+       call push_sym(parser,11)
+       call name_vector(parser,base)
+       call make_node(parser,sym_type,2)
+    case(sym_hash)
+       call scan(parser)
+       if(expect(parser,sym_lt)) return
+       if(parser%sym==sym_gt) then
+          call make_node(parser,sym_any,0)
+          call scan(parser)
+       else
+          if(typ(parser)) return
+          if(expect(parser,sym_gt)) return
        endif
        call make_node(parser,sym_any,1)
-    case(sym_underscore)
+    case(sym_any)
        call make_node(parser,sym_any,0)
        call scan(parser)
     case(sym_open_square)
        call make_node(parser,sym_any,0)
     case default
        if(.not.check_name(parser,name)) then
-          if(parser%sym/=sym_seq) then
+          if(parser%sym/=sym_seq.and.parser%sym/=sym_null) then
              call parse_error(parser,'Expected type')
              return
           else
+             name=parser%sym
              call scan(parser)
-             name=sym_seq
           endif
        endif
        if(parser%sym==sym_open_brace) then
@@ -2297,14 +2478,33 @@ contains
           call make_node(parser,sym_type,1)
        endif
     end select
-    if(parser%sym==sym_open_square) then
-       if(opt_typ_list()) return
-       if(expect(parser,sym_close_square)) return
-       call make_node(parser,sym_open_square,2)
-    endif
+    do while(parser%sym==sym_hash.or.&
+         parser%sym==sym_open_square)
+       if(parser%sym==sym_hash) then
+          call scan(parser)
+          if(typ(parser)) return
+          call make_node(parser,sym_hash,2)
+       elseif(parser%sym==sym_open_square) then
+          if(opt_typ_list()) return
+          if(m==1.and.&
+               pm_fast_isnull(parser%vstack(parser%vtop))) then
+            parser%vstack(parser%vtop)=&
+                 pm_fast_name(parser%context,int(sym_dom,pm_p))
+            call make_node(parser,sym_type,1)
+          endif
+          base=parser%top
+          call push_sym(parser,sym_array)
+          call push_sym(parser,m+1)
+          call name_vector(parser,base)
+          call make_node(parser,sym_type,m+2)
+          if(expect(parser,sym_close_square)) return
+       endif
+    enddo
     iserr=.false.
 
   contains
+    include 'fname.inc'
+    include 'fisnull.inc'
 
     function opt_typ_list() result(is_err)
       logical:: is_err
@@ -2313,7 +2513,8 @@ contains
       do
          call scan(parser)
          if(parser%sym==sym_comma.or.&
-              parser%sym==sym_close_brace.or.parser%sym==sym_close_square) then
+              parser%sym==sym_close_brace.or.&
+              parser%sym==sym_close_square) then
             call push_null_val(parser)
          else
             if(typ(parser)) return
@@ -2326,20 +2527,30 @@ contains
   end function typ
   
   ! Parameter list for procedure declaration
-  recursive function param_list(parser) result(iserr)
+  recursive function param_list(parser,isloop,nloop,ampargs) result(iserr)
     type(parse_state),intent(inout):: parser
+    logical,intent(in):: isloop
+    integer,intent(out):: nloop
+    logical,intent(out):: ampargs
     logical:: iserr
-    integer:: m,n,base,sym,name
+    integer:: m,n,base,sym,name,numloop
     type(pm_ptr):: temp
+    logical:: loop_par
     base=parser%top
     iserr=.true.
+    nloop=0
+    ampargs=.false.
     m=0
     n=0
+    numloop=0
+    loop_par=isloop
     if(expect(parser,sym_open)) return
     if(parser%sym==sym_close) then
        call push_null_val(parser)
        call push_null_val(parser)
        call push_null_val(parser)
+       call push_num_val(parser,0)
+       numloop=0
        call scan(parser)
        iserr=.false.
        return
@@ -2348,10 +2559,20 @@ contains
        if(parser%sym==sym_arg) then
           call scan(parser)
           if(expect(parser,sym_dotdotdot)) return
+          if(loop_par) then
+             call parse_error(parser,&
+                  '"arg..." must follow ":" in loop procedure parameters') 
+          endif
           call push_sym_val(parser,sym_arg)
           if(parser%sym==sym_colon) then
              call scan(parser)
-             if(typ(parser)) return
+             if(isloop.and.parser%sym==sym_invar) then
+                call scan(parser)
+                if(typ(parser)) return
+                call make_node(parser,1,sym_invar)
+             else
+                if(typ(parser)) return
+             endif
           else
              call push_null_val(parser)
           endif
@@ -2390,23 +2611,35 @@ contains
        endif
        if(parser%sym==sym_colon) then
           call scan(parser)
-          if(typ(parser)) return
+          if(isloop.and.parser%sym==sym_invar) then
+             if(loop_par) &
+                  call parse_error(parser,'"invar" cannot be applied to loop parameter')
+             call scan(parser)
+             if(typ(parser)) return
+             call make_node(parser,sym_invar,1)
+          else
+             if(typ(parser)) return
+          endif
        else
           call push_null_val(parser)
        endif
-       if(parser%sym/=sym_comma) then
+       if(loop_par.and.parser%sym==sym_semi) then
+          loop_par=.false.
+          numloop=m
+       elseif(parser%sym/=sym_comma) then
           call make_node(parser,sym_list,m*2)
           exit
        endif
        call scan(parser)
     enddo
+    if(loop_par) numloop=m
     if(parser%sym==sym_comma) then
        do
           call scan(parser)
           if(parser%sym==sym_key) then
              call scan(parser)
              if(expect(parser,sym_dotdotdot)) return
-             call make_node(parser,sym_dotdotdot,n*2+1)
+             call make_node(parser,sym_dotdotdot,n*2)
              exit
           else
              if(expect_name(parser, &
@@ -2421,18 +2654,25 @@ contains
           endif
        enddo
     else
-       call push_null_val(parser)
+       if(n>0) then
+          call make_node(parser,sym_list,n*2)
+       else
+          call push_null_val(parser)
+       endif
     endif
     if(parser%top>base) then
        call name_vector(parser,base)
+       ampargs=.true.
     else
        call push_null_val(parser)
+       ampargs=.false.
     endif
+    call push_num_val(parser,numloop)
     if(expect(parser,sym_close)) return
+    nloop=numloop
     iserr=.false.
     return
   end function param_list
-
 
   ! Procedure declaration
   function proc(parser) result(iserr)
@@ -2440,33 +2680,37 @@ contains
     logical:: iserr
     type(pm_ptr):: ptr,p
     type(pm_reg),pointer:: reg
-    integer:: name,nret,base,flags
+    integer:: name,nret,base,flags,sbase,scount,nloop,sym,m
+    logical:: ampargs
     reg=>pm_register(parser%context,'proc',ptr)
     iserr=.true.
     nret=0
+    sbase=parser%vtop
+    scount=parser%error_count
     call scan(parser)
 10  continue
-    if(parser%sym==sym_at) then
-       call push_sym(parser,sym_at)
-       call scan(parser)
-       if(.not.check_name(parser,name)) goto 999
+    if(.not.check_name(parser,name)) then
+       if(op(parser,name)) goto 999
+    endif
+    if(parser%sym==sym_dcolon) then
+       call push_sym(parser,sym_dcolon)
        call push_sym(parser,name)
        call name_vector(parser,parser%top-2)
-    elseif(check_name(parser,name)) then
-       ptr=decl_entry(parser,name,modl_proc)
-       if(parser%sym==sym_dcolon) then
-          call push_sym(parser,sym_dcolon)
-          call push_sym(parser,name)
-          call name_vector(parser,parser%top-2)
-       else
-          call push_sym_val(parser,name)
-       endif
+       call scan(parser)
+       sym=sym_dcolon
+    elseif(parser%sym==sym_pct) then
+       call push_sym(parser,sym_pct)
+       call push_sym(parser,name)
+       call name_vector(parser,parser%top-2)
+       call scan(parser)
+       sym=sym_pct
     else
-       if(op(parser)) goto 999
-       p=top_val(parser)
-       name=p%offset
-       ptr=decl_entry(parser,name,modl_proc)
+       call push_sym_val(parser,name)
+       sym=sym_proc
     endif
+    p=top_val(parser)
+    name=p%offset
+    ptr=decl_entry(parser,name,modl_proc)
     base=parser%vtop
     call push_val(parser,top_val(parser))
     if(pm_fast_isnull(ptr)) then
@@ -2476,11 +2720,44 @@ contains
     endif
     call push_val(parser,parser%modl)
     call push_num_val(parser,-1) ! flags
-    if(param_list(parser)) goto 999
+    if(param_list(parser,sym/=sym_proc,nloop,ampargs)) goto 999
+    if(ampargs.and.sym==sym_dcolon) then
+       call parse_error(parser,'"::" procedure cannot have "&" parameters')
+    endif
     call push_num_val(parser,-777) ! coded params
     call push_num_val(parser,-777) ! nret
     flags=0
     nret=0
+    if(sym==sym_dcolon.and.parser%sym==sym_reduce) then
+       sym=sym_reduce
+       call scan(parser)
+       if(expect(parser,sym_open)) goto 999
+       m=0
+       do 
+          if(expect_name(parser)) goto 999
+          m=m+1
+          if(parser%sym/=sym_comma) exit
+       enddo
+       call make_node(parser,sym_list,m)
+       if(m/=nloop) then
+          call parse_error(parser,&
+               'Number of reduction variables does not match number of arguments')
+       endif
+       if(expect(parser,sym_close)) goto 999
+    elseif(parser%sym==sym_local) then
+       if(sym==sym_pct) then
+          sym=sym_local
+       elseif(sym==sym_dcolon) then
+          sym=sym_reduce_at
+       else
+          call parse_error(parser,&
+               '"local" in non-loop "proc" definition')
+       endif
+       call scan(parser)
+       call make_node(parser,sym_local,0)
+    else
+       call push_null_val(parser)
+    endif
     if(parser%sym==sym_check) then
        call push_null_val(parser)
        call subexp(parser)
@@ -2498,15 +2775,22 @@ contains
        call scan(parser)
        call statement_list(parser)
        if(parser%sym==sym_result) then
-          if(.not.pm_fast_isnull(parser%vstack(parser%vtop-1))) then
-             call parse_error(parser,&
-                  'Cannot have both "proc f(x)=.." and "result =" in proc')
+          if(parser%error_count==scount) then 
+             if(.not.pm_fast_isnull(parser%vstack(parser%vtop-1))) then
+                call parse_error(parser,&
+                     'Cannot have both "proc f(x)=.." and "result =" in proc')
+             endif
           endif
           call scan(parser)
           if(expect(parser,sym_assign)) goto 999
           call xexprlist(parser,nret)
+          if(parser%error_count>scount) then
+             parser%vtop=sbase
+             goto 999
+          endif
           ! Assign to proc_result slot
-          parser%vstack(parser%vtop-1)=pop_val(parser)
+          parser%vstack(parser%vtop-2)=parser%vstack(parser%vtop)
+          parser%vtop=parser%vtop-1
        endif
        if(expect(parser,sym_endproc)) goto 999
     else
@@ -2519,6 +2803,14 @@ contains
     ! Assign number of returns to proc_numret slot
     parser%vstack(parser%vtop-&
          proc_num_args-node_args+proc_numret+1)%offset=nret
+    if(sym==sym_reduce.and.nret/=nloop) then
+       call parse_error(parser,&
+            'Number of arguments not equal to number of returns in "reduce" procedure')
+    endif
+    if(parser%error_count>scount) then
+       parser%vtop=sbase
+       goto 999
+    endif
     if(pm_debug_level>0) then
        if(parser%vtop-base/=proc_num_args) then
           write(*,*) '========='
@@ -2530,7 +2822,12 @@ contains
           call pm_panic('parse proc')
        endif
     endif
-    call make_node(parser,sym_proc,proc_num_args)
+    call make_node(parser,sym,proc_num_args)
+    if(parser_xtra_debug) then
+       write(*,*) 'PROC DECL>----------------'
+       call dump_parse_tree(parser%context,44,top_val(parser),2)
+       write(*,*) 'PROC-DECL----------------'
+    endif
     if(pm_fast_isnull(ptr)) then
        call push_val(parser,top_val(parser))
        call push_null_val(parser)
@@ -2549,15 +2846,19 @@ contains
   end function proc
 
   ! Procedure signature (...)[]->(...)
-  recursive function proc_sig(parser) result(iserr)
+  recursive function proc_sig(parser,isloop) result(iserr)
     type(parse_state),intent(inout):: parser
+    logical,intent(in):: isloop
     logical:: iserr
-    integer:: m,n,base,name,sym
+    integer:: m,n,nloop,base,name,sym
     type(pm_ptr):: temp
+    logical:: loop_par
     base=parser%top
     iserr=.true.
     m=0
     n=0
+    nloop=0
+    loop_par=isloop
     if(expect(parser,sym_open)) return
     if(parser%sym==sym_eq) then
        call scan(parser)
@@ -2601,10 +2902,17 @@ contains
                 call push_null_val(parser)
              endif
           else if(parser%sym==sym_arg) then
+             call push_sym_val(parser,sym_arg)
              call scan(parser)
              if(expect(parser,sym_dotdotdot)) return
              if(expect(parser,sym_colon)) return
-             if(typ(parser)) return
+             if(parser%sym==sym_invar) then
+                call scan(parser)
+                if(typ(parser)) return
+                call make_node(parser,sym_invar,1)
+             else
+                if(typ(parser)) return
+             endif
              call make_node(parser,sym_dotdotdot,m*2)
              exit
           else if(parser%sym==sym_key) then
@@ -2613,18 +2921,30 @@ contains
           else
              call push_null_val(parser)
           endif
-          if(typ(parser)) return
+
+          if(parser%sym==sym_invar) then
+             call scan(parser)
+             if(typ(parser)) return
+             call make_node(parser,sym_invar,1)
+          else
+             if(typ(parser)) return
+          endif
+
           if(parser%sym==sym_dotdotdot) then
              call scan(parser)
              call make_node(parser,sym_dotdotdot,m*2)
              exit
           endif
-          if(parser%sym/=sym_comma) then
+          if(parser%sym==sym_semi) then
+             loop_par=.false.
+             nloop=m
+          elseif(parser%sym/=sym_comma) then
              call make_node(parser,sym_list,m*2)
              exit
           endif
           call scan(parser)
        enddo
+       if(loop_par) nloop=m
        do while(parser%sym==sym_comma)
           call scan(parser)
           if(parser%sym==sym_key) exit
@@ -2650,12 +2970,14 @@ contains
        endif
        if(expect(parser,sym_close)) return
     endif
+    call push_num_val(parser,nloop) ! nloop
     call push_num_val(parser,-1) ! Coded params
     if(parser%sym==sym_arrow) then
        call scan(parser)
        sym=parser%sym
        if(sym==sym_mult.or.sym==sym_assign.or.&
-            sym==sym_hash.or.sym==sym_gt.or.sym==sym_dim) then
+            sym==sym_hash.or.sym==sym_gt.or.&
+            sym==sym_dim.or.sym==sym_dot) then
           call scan(parser)
           if(exprlist(parser,m)) return
           parser%temp=pop_val(parser)
@@ -2668,6 +2990,10 @@ contains
           m=0
           do
              if(typ(parser)) return
+             if(parser%sym==sym_at) then
+                call make_node(parser,sym_at,1)
+                call scan(parser)
+             endif
              m=m+1
              if(parser%sym/=sym_comma) exit
              call scan(parser)
@@ -2697,31 +3023,30 @@ contains
     type(pm_ptr)::p
     type(pm_reg),pointer:: reg
     integer:: name
+    logical:: isloop
     reg=>pm_register(parser%context,'builtin',ptr)
     iserr=.true.
+    isloop=.false.
     call scan(parser)
 10  continue
-    if(parser%sym==sym_at) then
-       call push_sym(parser,sym_at)
-       call scan(parser)
-       if(.not.check_name(parser,name)) goto 999
+    if(.not.check_name(parser,name)) then
+       if(op(parser,name)) goto 999
+    endif
+    if(parser%sym==sym_dcolon) then
+       call push_sym(parser,sym_dcolon)
        call push_sym(parser,name)
        call name_vector(parser,parser%top-2)
-    elseif(check_name(parser,name)) then
-       ptr=decl_entry(parser,name,modl_proc)
-       if(parser%sym==sym_dcolon) then
-          call push_sym(parser,sym_dcolon)
-          call push_sym(parser,name)
-          call name_vector(parser,parser%top-2)
-       else
-          call push_sym_val(parser,name)
-       endif
+       isloop=.true.
+    elseif(parser%sym==sym_pct) then
+       call push_sym(parser,sym_pct)
+       call push_sym(parser,name)
+       call name_vector(parser,parser%top-2)
+       isloop=.true.
     else
-       if(op(parser)) goto 999
-       p=top_val(parser)
-       name=p%offset
-       ptr=decl_entry(parser,name,modl_proc)
+       call push_sym_val(parser,name)
     endif
+    ptr=top_val(parser)
+    ptr=decl_entry(parser,int(ptr%offset),modl_proc)
     call push_val(parser,top_val(parser))
     if(pm_fast_isnull(ptr)) then
        call push_null_val(parser)
@@ -2730,12 +3055,17 @@ contains
     endif
     call push_val(parser,parser%modl)
     call push_num_val(parser,flags)
-    if(proc_sig(parser)) return
+    if(proc_sig(parser,isloop)) return
     call push_num_val(parser,int(opcode))
     call push_num_val(parser,int(opcode2))
     call push_val(parser,pdata)
     call push_null_val(parser)
     call make_node(parser,sym_endproc,sysproc_num_args)
+    if(parser_xtra_debug) then
+       write(*,*) 'BUILTIN DECL>----------------'
+       call dump_parse_tree(parser%context,6,top_val(parser),2)
+       write(*,*) 'BI-DECL-------------'
+    endif
     if(pm_fast_isnull(ptr)) then
        call push_val(parser,top_val(parser))
        call push_null_val(parser)
@@ -2758,32 +3088,27 @@ contains
   function dectype(parser) result(iserr)
     type(parse_state):: parser
     logical:: iserr
-    integer:: sym,m,name,namein,base
+    integer:: sym,m,name,namein,base,serror
     type(pm_ptr),target:: ptr,ptrin
     type(pm_reg),pointer:: reg
     logical:: constr
+    serror=parser%error_count
     reg=>pm_register(parser%context,'dectype',ptr,ptrin)
     iserr=.true.
     constr=.false.
-    sym=sym_type
+    sym=sym_includes
     call scan(parser)
     if(.not.check_name(parser,name)) then
        if(parser%sym/=sym_seq) then
           call parse_error(parser,'Expected type name')
           goto 999
        else
+          name=parser%sym
           call scan(parser)
-          name=sym_seq
        endif
     endif
     call push_sym_val(parser,name)
-    ptr=decl_entry(parser,name,modl_type)
     call push_null_val(parser)        ! number
-    if(pm_fast_isnull(ptr)) then
-       call push_null_val(parser)
-    else
-       call push_val(parser,ptr%data%ptr(ptr%offset+1))  ! link
-    endif
     call push_val(parser,parser%modl) ! module
     if(parser%sym==sym_open_brace) then
        call scan(parser)
@@ -2812,6 +3137,12 @@ contains
     else
        call push_null_val(parser)
     endif
+    ptr=decl_entry(parser,name,modl_type)
+    if(pm_fast_isnull(ptr)) then
+       call push_null_val(parser)
+    else
+       call push_val(parser,ptr%data%ptr(ptr%offset+node_args+1))  ! link
+    endif
     if(parser%sym==sym_in) then
        do
           call scan(parser)
@@ -2838,8 +3169,6 @@ contains
        m=1
     else if(parser%sym==sym_also) then
        sym=sym_also
-       if(constr) call parse_error(parser,&
-            'Type constraints cannot be supplied in "also" declaration')
        call scan(parser)
        if(expect(parser,sym_includes)) goto 999
        if(typlist()) goto 999
@@ -2850,7 +3179,12 @@ contains
        call push_null_val(parser)
     endif
     call make_node(parser,sym,typ_num_args)
-    call add_decl(name,ptr)
+    if(parser_xtra_debug) then
+       write(*,*) 'TYPEDECL>----------------'
+       call dump_parse_tree(parser%context,44,top_val(parser),2)
+       write(*,*) 'END TYPEDECL-------------'
+    endif
+    if(parser%error_count==serror) call add_decl(name,ptr)
     iserr=.false.
  999 continue
     call pm_delete_register(parser%context,reg)
@@ -2863,13 +3197,14 @@ contains
       type(pm_ptr),intent(in):: p
       type(pm_ptr):: q
       if(pm_fast_isnull(p)) then
-         q=pop_val(parser)
+         q=top_val(parser)
          call push_sym_val(parser,nam)
          call push_val(parser,q)
          call push_val(parser,q)
          call push_null_val(parser)
          call make_node(parser,sym_type,4)
          call new_decl(parser,nam,modl_type,.false.)
+         q=pop_val(parser)
       else
          call pm_ptr_assign(parser%context,p,&
               int(node_args+1,pm_ln),top_val(parser))
@@ -2902,6 +3237,7 @@ contains
     integer:: dt
     type(pm_ptr):: old,p
     integer:: m,sym,name,base
+    integer:: serror
     call push_sym_val(parser,name_entry(parser,'PM system'))
     call push_val(parser,parser%sysmodl)
     call push_null_val(parser)
@@ -2946,6 +3282,9 @@ contains
              else if(sym==sym_param) then
                 call push_num_val(parser,modl_param)
                 call scan(parser)
+             else if(sym==sym_default) then
+                call push_num_val(parser,modl_default)
+                call scan(parser)
              else
                 if(sym==sym_proc) call scan(parser)
                 call push_num_val(parser,modl_proc)
@@ -2982,13 +3321,19 @@ contains
           if(proc(parser)) goto 999
        case(sym_type)
           if(dectype(parser)) goto 999
-       case(sym_param)
+       case(sym_param,sym_default)
           call scan(parser)
           if(check_name(parser,name)) goto 999
           if(expect(parser,sym_assign)) goto 999
+          serror=parser%error_count
           call xexpr(parser)
-          call make_node(parser,sym_param,2)
-          call new_decl(parser,name,modl_param,.false.)
+          if(parser%error_count>serror) goto 999
+          call make_node(parser,parser%sym,2)
+          if(parser%sym==sym_param) then
+             call new_decl(parser,name,modl_param,.false.)
+          else
+             call new_decl(parser,name,modl_default,.false.)
+          endif
        case default
           call statement_list(parser)
           if(parser%sym==sym_eof) then
@@ -2998,7 +3343,7 @@ contains
              endif
           else
              call parse_error(parser,'Malformed declaration or statement')
-             call skip_to_next_statement(parser,.false.)
+             call skip_past_error(parser,.false.)
              cycle
           endif
           exit
@@ -3017,7 +3362,7 @@ contains
   end subroutine decl
 
   ! Skip tokens until out of expr or statement
-  subroutine skip_to_next_statement(parser,expr)
+  subroutine skip_past_error(parser,expr)
     type(parse_state),intent(inout):: parser
     logical,intent(in):: expr
     if(parser_xtra_debug) write(*,*) 'Skipping',expr
@@ -3025,6 +3370,10 @@ contains
        if(expr) then
           do while(parser%sym/=sym_eof.and.(parser%sym>num_sym.or.&
                parser%sym<=last_expr))
+             if(parser%sym==sym_assign.or.parser%sym==sym_define) then
+                call push_back(parser,sym_dom)
+                exit
+             endif
              call scan(parser)
           enddo
        else
@@ -3040,7 +3389,7 @@ contains
        endif
     enddo
     if(parser_xtra_debug) write(*,*) 'Skipped'
-  end subroutine skip_to_next_statement
+  end subroutine skip_past_error
 
   ! Push onto value stack
   subroutine push_val(parser,val)
@@ -3052,6 +3401,7 @@ contains
        stop "Parser terminated"
     endif
     parser%vstack(parser%vtop)=val
+    parser%vline(parser%vtop)=parser%lineno
   end subroutine push_val
 
   ! Pop off value stack
@@ -3082,10 +3432,14 @@ contains
   subroutine swap_vals(parser)
     type(parse_state),intent(inout):: parser
     type(pm_ptr):: temp
+    integer(pm_i16):: templine
     if(parser%error_count>0) return
     temp=top_val(parser)
     parser%vstack(parser%vtop)=parser%vstack(parser%vtop-1)
     parser%vstack(parser%vtop-1)=temp
+    templine=parser%vline(parser%vtop)
+    parser%vline(parser%vtop)=parser%vline(parser%vtop-1)
+    parser%vline(parser%vtop-1)=templine
   end subroutine swap_vals
   
   ! Push a null value onto value stack
@@ -3135,22 +3489,34 @@ contains
     integer,intent(in):: typeno,n
     type(pm_ptr):: val
     integer:: i
+    logical:: reuse
     if(parser%error_count>0) then
        parser%vtop=parser%vtop-n+1
        if(parser%vtop<0) parser%vtop=0
        return
     endif
-    val=pm_fast_newnc(parser%context,pm_pointer,int(n+3,pm_p))
+    val=pm_fast_newnc(parser%context,pm_pointer,int(n+4,pm_p))
     if(parser_xtra_debug) &
          write(*,*) 'make node:',sym_names(typeno),&
          parser%vtop,n,val%data%esize
     val%data%ptr(val%offset)%data=>pm_null_obj%data
-    val%data%ptr(val%offset)%offset=typeno
-    val%data%ptr(val%offset+1)=parser%modl
-    val%data%ptr(val%offset+2)%data=>pm_null_obj%data
-    val%data%ptr(val%offset+2)%offset=parser%lineno
+
+    if(check_node_reuse.and.val%data%ptr(val%offset)%offset==987654) then
+       ! Flag reused nodes if required (for debugging)
+       val%data%ptr(val%offset)%offset=987652
+    else
+       ! Magic number
+       val%data%ptr(val%offset)%offset=987654
+    endif
+    
+    val%data%ptr(val%offset+1)%data=>pm_null_obj%data
+    val%data%ptr(val%offset+1)%offset=typeno
+    val%data%ptr(val%offset+2)=parser%modl
+    val%data%ptr(val%offset+3)%data=>pm_null_obj%data
+    val%data%ptr(val%offset+3)%offset=parser%vline(parser%vtop-n+1)
+    if(val%offset+n+3>4096) call pm_panic('make_node')
     do i=1,n
-       val%data%ptr(val%offset+i+2)=parser%vstack(parser%vtop+i-n)
+       val%data%ptr(val%offset+i+3)=parser%vstack(parser%vtop+i-n)
     enddo
     parser%vtop=parser%vtop-n+1
     parser%vstack(parser%vtop)=val
@@ -3220,7 +3586,6 @@ contains
   end function lname_entry
 
 
-
   ! Create new module object
   subroutine new_modl(parser,name)
     type(parse_state),intent(inout):: parser
@@ -3238,7 +3603,7 @@ contains
        call push_val(parser,parser%modls)
        call push_null_val(parser)
        do i=modl_include,modl_param+modl_local
-          call push_val(parser,pm_dict_new(parser%context,8_pm_ln))
+          call push_val(parser,pm_dict_new(parser%context,4_pm_ln))
        enddo
        modl=pm_fast_newnc(parser%context,pm_pointer,int(siz+1,pm_p))
        modl%data%ptr(modl%offset)%data=>pm_null_obj%data
@@ -3329,8 +3694,8 @@ contains
     integer,intent(in):: iunit
     type(pm_ptr),intent(in):: ptr
     character(len=100):: str
-    character(len=7),dimension(0:3):: dnames = &
-         (/ 'include','proc   ','type   ','param  ' /)
+    character(len=7),dimension(0:4):: dnames = &
+         (/ 'include','proc   ','type   ','param  ','default' /)
     integer:: i,j,k,m
     type(pm_ptr):: keys,vals
     call pm_name_string(context,ptr%data%ptr(ptr%offset+1)%offset,str)
@@ -3345,13 +3710,15 @@ contains
           m=modl_include
        endif
        do j=m,modl_param
-          write(iunit,*) dnames(j-modl_include),'::'
+          write(iunit,*) dnames(j-modl_include),marked(ptr%data%ptr(ptr%offset+j+k)),'::'
           keys=pm_dict_keys(context,ptr%data%ptr(ptr%offset+j+k))
           vals=pm_dict_vals(context,ptr%data%ptr(ptr%offset+j+k))
+          write(iunit,*) marked(keys),marked(vals)
           do i=1,pm_dict_size(context,ptr%data%ptr(ptr%offset+j+k))
              call pm_name_string(context,&
                   keys%data%ptr(keys%offset+i-1)%offset,str)
              write(iunit,*) ' ',trim(str),'::'
+             write(iunit,*) marked(vals%data%ptr(vals%offset+i-1))
              call dump_parse_tree(context,iunit,&
                   vals%data%ptr(vals%offset+i-1),2)
           enddo
@@ -3373,10 +3740,19 @@ contains
        return
     endif
     if(pm_fast_vkind(ptr)==pm_pointer) then
-       sym=ptr%data%ptr(ptr%offset)%offset
+       if(ptr%data%ptr(ptr%offset)%offset/=987654) then
+          if(ptr%data%ptr(ptr%offset)%offset==987652) then
+             write(iunit,*) spaces(1:depth*2),'REUSED NODE',&
+                  ptr%offset,ptr%data%hash,ptr%data%esize
+          else
+             write(iunit,*) spaces(1:depth*2),'INVALID NODE'
+             return
+          endif
+       endif
+       sym=ptr%data%ptr(ptr%offset+1)%offset
        if(sym>0.and.sym<=num_sym) then
           write(iunit,*) spaces(1:depth*2),sym_names(sym),ptr%data%esize,&
-               'line',node_get_lineno(ptr)
+               'line',node_get_lineno(ptr),'Marked:',marked(ptr),ptr%data%hash,ptr%offset
        else if(sym==0) then
           call pm_name_string(context,ptr%data%ptr(ptr%offset+1)%offset,str)
           write(iunit,*) spaces(1:depth*2),'Module: ',trim(str)
@@ -3385,7 +3761,7 @@ contains
           write(iunit,*) spaces(1:depth*2),'???'
           return
        endif
-       do i=3,ptr%data%esize
+       do i=node_args,ptr%data%esize
           call dump_parse_tree(context,iunit,ptr%data%ptr(ptr%offset+i),&
                depth+1)
        enddo
@@ -3415,33 +3791,56 @@ contains
     character(len=100):: modname
     integer:: i,n
     if(parser_xtra_debug) write(*,*) '*****Error::',trim(emess)
-    if(parser%error_count<max_errors) then
-       call pm_name_string(parser%context,&
-            parser%modl%data%ptr(parser%modl%offset+modl_name)%offset,modname)
-       write(*,*) 
-       write(*,*) 'Syntax error: ',trim(modname)
-       write(*,*)
-       i=1
-       n=parser%nsym
-       do while(n>67) 
-          i=i+60
-          n=n-60
-       enddo
-       write(*,'(i4,a2,a67)') parser%lineno-1,': ',&
-            parser%line(3-parser%ls)(i:)
-       write(*,'(i4,a2,a67)') parser%lineno,': ',&
-            parser%line(parser%ls)(i:)
-       caret=" "
-       caret(n:n)="!"
-       write(*,'(6x,a67)') caret
-       caret=emess
-       write(*,'(6x,a67)') caret
-       parser%error_count=parser%error_count+1
-       write(*,*)
-    else
+    call pm_name_string(parser%context,&
+         parser%modl%data%ptr(parser%modl%offset+modl_name)%offset,modname)
+    write(*,*) 
+    write(*,*) 'Syntax error: ',trim(modname)
+    write(*,*)
+    i=1
+    n=parser%nsym
+    do while(n>67) 
+       i=i+60
+       n=n-60
+    enddo
+    write(*,'(i4,a2,a67)') parser%lineno-1,': ',&
+         parser%line(3-parser%ls)(i:)
+    write(*,'(i4,a2,a67)') parser%lineno,': ',&
+         parser%line(parser%ls)(i:)
+    caret=" "
+    caret(n:n)="!"
+    write(*,'(6x,a67)') caret
+    caret=emess
+    write(*,'(6x,a67)') caret
+    parser%error_count=parser%error_count+1
+    write(*,*)
+    if(parser%error_count>max_errors) then
        stop 'Parser Error count exceeded'
     endif
   end subroutine parse_error
+
+  subroutine check_node(node)
+    type(pm_ptr),intent(in):: node
+    if(pm_fast_vkind(node)==pm_pointer) then
+       if(node%data%ptr(node%offset)%offset/=987654) then
+          call pm_panic('Bad parse node')
+       endif
+    endif
+  contains
+    include 'fvkind.inc'
+  end subroutine check_node
+
+  subroutine check_ptr_node(node)
+    type(pm_ptr),intent(in):: node
+    if(pm_fast_vkind(node)==pm_pointer) then
+       if(node%data%ptr(node%offset)%offset/=987654) then
+          call pm_panic('Bad parse node')
+       endif
+    else
+       call pm_panic('not ptr parser node')
+    endif
+  contains
+    include 'fvkind.inc'
+  end subroutine check_ptr_node
 
   function node_sym(node) result(n)
     type(pm_ptr),intent(in):: node
@@ -3449,6 +3848,7 @@ contains
     if(pm_fast_vkind(node)/=pm_pointer) then
        n=0
     else
+       if(pm_debug_level>0) call check_node(node)
        n=node%data%ptr(node%offset+node_symbol)%offset
     endif
   contains
@@ -3461,6 +3861,7 @@ contains
     if(pm_fast_vkind(node)/=pm_pointer) then
        n=0
     else
+       if(pm_debug_level>0) call check_node(node)
        n=pm_fast_esize(node)-node_args+1
     endif
   contains
@@ -3472,6 +3873,8 @@ contains
     type(pm_ptr),intent(in):: node
     integer,intent(in):: n
     type(pm_ptr):: p
+    if(pm_debug_level>0) &
+       call check_ptr_node(node)
     p=node%data%ptr(node%offset+node_args+n-1)
   end function node_arg
 
@@ -3479,6 +3882,8 @@ contains
     type(pm_ptr),intent(in):: node
     integer,intent(in):: n
     type(pm_ptr):: p
+    if(pm_debug_level>0) &
+       call check_ptr_node(node)
     p=node%data%ptr(node%offset+n)
   end function node_get
 
@@ -3486,6 +3891,8 @@ contains
     type(pm_ptr),intent(in):: node
     integer,intent(in):: n
     type(pm_ptr),intent(in):: p
+    if(pm_debug_level>0) &
+       call check_ptr_node(node)
     node%data%ptr(node%offset+n)=p
   end subroutine node_set
 
@@ -3494,6 +3901,8 @@ contains
     integer,intent(in):: n
     integer(pm_p):: num
     type(pm_ptr):: p
+    if(pm_debug_level>0) &
+         call check_ptr_node(node)
     p=node%data%ptr(node%offset+n)
     num=p%offset
   end function node_get_num
@@ -3502,21 +3911,24 @@ contains
     type(pm_ptr),intent(in):: node
     integer,intent(in):: n
     integer(pm_p),intent(in):: num
+    if(pm_debug_level>0) &
+         call check_ptr_node(node)
     node%data%ptr(node%offset+n)%offset=num
   end subroutine node_set_num
 
   function node_get_lineno(node) result(n)
     type(pm_ptr),intent(in):: node
     integer:: n
+    if(pm_debug_level>0) &
+         call check_ptr_node(node)
     n=node%data%ptr(node%offset+node_lineno)%offset
   end function node_get_lineno
 
   function node_get_modl(node) result(modl)
     type(pm_ptr),intent(in):: node
     type(pm_ptr):: modl
-    if(pm_debug_level>0) then
-       if(pm_fast_vkind(node)/=pm_pointer) call pm_panic('node_get_modl')
-    endif
+    if(pm_debug_level>0) &
+       call check_ptr_node(node)
     modl=node%data%ptr(node%offset+node_modl)
   contains
     include 'fvkind.inc'
@@ -3526,6 +3938,8 @@ contains
     type(pm_ptr),intent(in):: node
     integer(pm_p):: name
     type(pm_ptr):: modl
+    if(pm_debug_level>0) &
+       call check_ptr_node(node)
     modl=node_get_modl(node)
     name=modl%data%ptr(modl%offset+modl_name)%offset
   end function node_get_modl_name
