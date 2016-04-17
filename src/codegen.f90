@@ -1597,19 +1597,24 @@ contains
           call make_sp_call(coder,cblock,node,sym_dot,2,1)
        case(sym_any)
           call trav_type(coder,node,node_arg(node,1))
-          if(node_sym(node_arg(node,1))==sym_opt) then
-             p=pm_typ_vect(coder%context,top_word(coder))
-             i=pm_tv_arg(p,1)
-             if(i>=pm_int.and.i<=pm_packed_logical) then
-                call trav_expr(coder,cblock,node,node_arg(node,2))
-                call make_temp_var(coder,cblock,node)
-                call dup_code(coder)
-                call make_const(coder,cblock,node,&
-                     pm_fast_tinyint(coder%context,int(i,pm_p)))
-                call make_sp_call(coder,cblock,node,sym_default,1,1)
-                call make_sys_call(coder,cblock,node,sym_opt_num,2,1)
-                return
-             endif
+          call make_const(coder,cblock,node,&
+               pm_fast_tinyint(coder%context,int(pop_word(coder),pm_p)))
+          call trav_expr(coder,cblock,node,node_arg(node,2))
+          call make_sp_call(coder,cblock,node,sym_any,2,1)
+       case(sym_opt)
+          call trav_type(coder,node,node_arg(node,1))
+          p=pm_typ_vect(coder%context,top_word(coder))
+          i=pm_tv_arg(p,1)
+          if(i>=pm_int.and.i<=pm_packed_logical) then
+             call trav_expr(coder,cblock,node,node_arg(node,2))
+             call make_temp_var(coder,cblock,node)
+             call dup_code(coder)
+             call make_const(coder,cblock,node,&
+                  pm_fast_tinyint(coder%context,int(i,pm_p)))
+             i=pop_word(coder)
+             call make_sp_call(coder,cblock,node,sym_default,1,1)
+             call make_sys_call(coder,cblock,node,sym_opt_num,2,1)
+             return
           endif
           call make_const(coder,cblock,node,&
                pm_fast_tinyint(coder%context,int(pop_word(coder),pm_p)))
@@ -3478,7 +3483,7 @@ contains
     atyp=new_type(coder,coder%wstack(coder%wtop+1:coder%wtop+4))
   end function make_array_type
   
-  ! Make an optional type, given base type
+  ! Make an poly type, given base type
   function make_any_type(coder,btyp) result(atyp)
     type(code_state),intent(inout):: coder
     integer(pm_i16),intent(in):: btyp
@@ -3490,6 +3495,20 @@ contains
     coder%wstack(coder%wtop+3)=btyp
     atyp=new_type(coder,coder%wstack(coder%wtop+1:coder%wtop+3))
   end function make_any_type
+
+  ! Make an optional poly type, given base type
+  function make_opt_type(coder,btyp) result(atyp)
+    type(code_state),intent(inout):: coder
+    integer(pm_i16),intent(in):: btyp
+    integer(pm_i16):: atyp,ctyp
+    if(coder%wtop+4>max_code_stack) &
+         call pm_panic('Program too compex')
+    coder%wstack(coder%wtop+1)=pm_typ_is_any
+    coder%wstack(coder%wtop+2)=0_pm_i16
+    coder%wstack(coder%wtop+3)=btyp
+    ctyp=new_type(coder,coder%wstack(coder%wtop+1:coder%wtop+3))
+    atyp=make_any_type(coder,ctyp)
+  end function make_opt_type
 
   ! Check available space on the word stack
   subroutine check_wstack(coder,amount)

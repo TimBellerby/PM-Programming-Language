@@ -116,42 +116,45 @@ module pm_sysdefs
 
   integer(pm_i16),parameter:: op_start_i=op_assign_l
   integer(pm_i16),parameter:: op_add_i=op_start_i+1
-  integer(pm_i16),parameter:: op_sub_i=op_start_i+3
-  integer(pm_i16),parameter:: op_mult_i=op_start_i+5
-  integer(pm_i16),parameter:: op_divide_i=op_start_i+7
-  integer(pm_i16),parameter:: op_div_i=op_start_i+9
-  integer(pm_i16),parameter:: op_mod_i=op_start_i+11
-  integer(pm_i16),parameter:: op_pow_i=op_start_i+13
-  integer(pm_i16),parameter:: op_uminus_i=op_start_i+15
-  integer(pm_i16),parameter:: op_eq_i=op_start_i+17
-  integer(pm_i16),parameter:: op_ne_i=op_start_i+19
-  integer(pm_i16),parameter:: op_gt_i=op_start_i+21
-  integer(pm_i16),parameter:: op_ge_i=op_start_i+25
-  integer(pm_i16),parameter:: op_string_i=op_start_i+27
-  integer(pm_i16),parameter:: op_get_elt_i=op_start_i+29
-  integer(pm_i16),parameter:: op_set_elt_i=op_start_i+31
-  integer(pm_i16),parameter:: op_long_i = op_start_i+57
-  integer(pm_i16),parameter:: op_assign_i = op_start_i + 59
-  integer(pm_i16),parameter:: op_const_i = op_start_i + 60
+  integer(pm_i16),parameter:: op_sub_i=op_start_i+2
+  integer(pm_i16),parameter:: op_mult_i=op_start_i+3
+  integer(pm_i16),parameter:: op_divide_i=op_start_i+4
+  integer(pm_i16),parameter:: op_div_i=op_start_i+5
+  integer(pm_i16),parameter:: op_mod_i=op_start_i+6
+  integer(pm_i16),parameter:: op_pow_i=op_start_i+7
+  integer(pm_i16),parameter:: op_uminus_i=op_start_i+8
+  integer(pm_i16),parameter:: op_eq_i=op_start_i+9
+  integer(pm_i16),parameter:: op_ne_i=op_start_i+10
+  integer(pm_i16),parameter:: op_gt_i=op_start_i+11
+  integer(pm_i16),parameter:: op_ge_i=op_start_i+12
+  integer(pm_i16),parameter:: op_string_i=op_start_i+13
+  integer(pm_i16),parameter:: op_get_elt_i=op_start_i+14
+  integer(pm_i16),parameter:: op_set_elt_i=op_start_i+15
+  integer(pm_i16),parameter:: op_long_i = op_start_i+16
+  integer(pm_i16),parameter:: op_max_i = op_start_i+17
+  integer(pm_i16),parameter:: op_min_i = op_start_i+18
+  integer(pm_i16),parameter:: op_assign_i = op_start_i + 19
 
   integer(pm_i16),parameter:: op_start_ln =op_assign_i
   integer(pm_i16),parameter:: op_add_ln=op_start_ln+1
-  integer(pm_i16),parameter:: op_sub_ln=op_start_ln+3
-  integer(pm_i16),parameter:: op_mult_ln=op_start_ln+5
-  integer(pm_i16),parameter:: op_divide_ln=op_start_ln+7
-  integer(pm_i16),parameter:: op_div_ln=op_start_ln+9
-  integer(pm_i16),parameter:: op_mod_ln=op_start_ln+11
-  integer(pm_i16),parameter:: op_pow_ln=op_start_ln+13
-  integer(pm_i16),parameter:: op_uminus_ln=op_start_ln+15
-  integer(pm_i16),parameter:: op_eq_ln=op_start_ln+17
-  integer(pm_i16),parameter:: op_ne_ln=op_start_ln+19
-  integer(pm_i16),parameter:: op_gt_ln=op_start_ln+21
-  integer(pm_i16),parameter:: op_ge_ln=op_start_ln+25
-  integer(pm_i16),parameter:: op_string_ln=op_start_ln+27
-  integer(pm_i16),parameter:: op_get_elt_ln=op_start_ln+29
-  integer(pm_i16),parameter:: op_set_elt_ln=op_start_ln+31
-  integer(pm_i16),parameter:: op_int_ln = op_start_ln+33
-  integer(pm_i16),parameter:: op_assign_ln = op_start_ln+34
+  integer(pm_i16),parameter:: op_sub_ln=op_start_ln+2
+  integer(pm_i16),parameter:: op_mult_ln=op_start_ln+3
+  integer(pm_i16),parameter:: op_divide_ln=op_start_ln+4
+  integer(pm_i16),parameter:: op_div_ln=op_start_ln+5
+  integer(pm_i16),parameter:: op_mod_ln=op_start_ln+6
+  integer(pm_i16),parameter:: op_pow_ln=op_start_ln+7
+  integer(pm_i16),parameter:: op_uminus_ln=op_start_ln+8
+  integer(pm_i16),parameter:: op_eq_ln=op_start_ln+9
+  integer(pm_i16),parameter:: op_ne_ln=op_start_ln+10
+  integer(pm_i16),parameter:: op_gt_ln=op_start_ln+11
+  integer(pm_i16),parameter:: op_ge_ln=op_start_ln+12
+  integer(pm_i16),parameter:: op_string_ln=op_start_ln+13
+  integer(pm_i16),parameter:: op_get_elt_ln=op_start_ln+14
+  integer(pm_i16),parameter:: op_set_elt_ln=op_start_ln+15
+  integer(pm_i16),parameter:: op_int_ln = op_start_ln+16
+  integer(pm_i16),parameter:: op_max_ln = op_start_ln+17
+  integer(pm_i16),parameter:: op_min_ln = op_start_ln+18
+  integer(pm_i16),parameter:: op_assign_ln = op_start_ln+19
 
   integer(pm_i16),parameter:: op_get_elt=op_assign_ln+1
   integer(pm_i16),parameter:: op_set_elt=op_assign_ln+2
@@ -360,14 +363,17 @@ contains
     call dcl_uproc(parser,'convert(x,y:long)=long(x)',line)
     call dcl_uproc(parser,'convert(x,y:int)=int(x)',line)
 
-    ! Optional + poly types
-    call dcl_type(parser,'poly{x} includes #<x>',line)
-    call dcl_type(parser,'poly{x:opt num} includes struct _opt{_val:x,_there:bool}',line)
+    ! Optional type
+    call dcl_type(parser,'_base is num,bool',line)
+    call dcl_type(parser,'optional{x} includes #<x>',line)
+    call dcl_type(parser,'optional{x:_base} also includes struct _opt{_val:x,_there:bool}',line)
     call dcl_uproc(parser,'PM__opt_num(x,y)=struct _opt{_val=x,_there=true}',line)
     call dcl_uproc(parser,'PM__opt_num(x:null,y)=struct _opt{_val=y,_there=false}',line)
-    call dcl_uproc(parser,'://(x,y)=x',line)
-    call dcl_uproc(parser,'://(x:null,y)=y',line)
-
+    call dcl_uproc(parser,'://(x:struct _opt{_val,_there},y:num) do z:=y;'//&
+         'if x._there then z=x._val endif; result=z endproc ',line)
+    call dcl_uproc(parser,'=>(there:bool,val:_base)=struct _opt{_val=val,_there=there}',line)
+    call dcl_uproc(parser,'*(x:struct _opt{_val,_there})=x._val check x._there',line)
+    
     ! Tuple types
     call dcl_type(parser,'tuple{t1} is rec _tuple {d1:t1 }',line)
     call dcl_type(parser,'tuple{t1,t2} is rec _tuple{d1:t1,d2:t2}',line)
@@ -458,10 +464,11 @@ contains
     call dcl_uproc(parser,'next(x:seq{},y,z)=zz,null,zz<=x.hi where zz=z+x._st',line)
     call dcl_uproc(parser,'shape(x:seq{})=x._n',line)
     
-    ! Simple domains (0..n-1)
+    ! Simple domains (0..n-1 long integer)
     call dcl_uproc(parser,'num_elem(x:long)=x',line)
     call dcl_uproc(parser,'shape(x:long)=x',line)
     call dcl_uproc(parser,'index(x:long,y:long)=y',line)
+    call dcl_uproc(parser,'index(x:long,y:int)=long(y)',line)
     call dcl_uproc(parser,'from_index(x:long,y:long)=y',line)
     call dcl_uproc(parser,'first(x:long)=0l,null,x>0l',line)
     call dcl_uproc(parser,'next(x:long,s,i:long)=y,null,y<x where y=i+1l',line)
@@ -470,7 +477,9 @@ contains
     call dcl_uproc(parser,'high(x:long)=x-1l',line)
     call dcl_uproc(parser,'step(x:long)=1l',line)
     call dcl_uproc(parser,'(%%)(x:long,y:long)=y check y>0l and y<x',line)
+    call dcl_uproc(parser,'(%%)(x:long,y:int)=z check z>0l and z<x where z=long(y)',line)
 
+    ! Simple domains (0..n-1 std integer)
     call dcl_uproc(parser,'num_elem(x:int)=long(x)',line)
     call dcl_uproc(parser,'shape(x:int)=long(x)',line)
     call dcl_uproc(parser,'index(x:int,y:int)=y',line)
@@ -650,6 +659,36 @@ contains
         '_iota(siz:long,start:long,finish:long,incr:long,totsiz:long)->long',op_iota,0_pm_i16,line,&
         proc_is_generator)
 
+   call dcl_uproc(parser,'_gridit(d:int,x:int)=x..x',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:long)=x..x',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:int)=y..y where y=long(x)',line)
+   call dcl_uproc(parser,'_gridit(d:range{int},x:int)=x..x',line)
+   call dcl_uproc(parser,'_gridit(d:range{long},x:long)=x..x',line)
+   call dcl_uproc(parser,'_gridit(d:range{long},x:int)=y..y where y=long(x)',line)
+   call dcl_uproc(parser,'_gridit(d:seq{},x)=y..y by step(d) where y=convert(x,low(d))',line)
+   call dcl_uproc(parser,'_gridit(d:int,x:range{int})=x',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:range{long})=x',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:range{int})=long(low(x))..long(high(x))',line)
+   call dcl_uproc(parser,'_gridit(d:range{int},x:range{int})=x',line)
+   call dcl_uproc(parser,'_gridit(d:range{long},x:range{long})=x',line)
+   call dcl_uproc(parser,'_gridit(d:range{long},x:range{int})=long(low(x))..long(high(x))',line) 
+   call dcl_uproc(parser,'_gridit(d:seq{},x:range{})=x by step(d)',line)
+   call dcl_uproc(parser,'_gridit(d:int,x:seq{int})=x',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:seq{long})=x',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:seq{int})=long(low(x))..long(high(x))by long(step(x))',line)
+   call dcl_uproc(parser,'_gridit(d:range{int},x:seq{int})=x',line)
+   call dcl_uproc(parser,'_gridit(d:range{long},x:seq{long})=x',line)
+   call dcl_uproc(parser,'_gridit(d:range{long},x:seq{int})=long(low(x))..long(high(x))by long(step(x))',line)
+   call dcl_uproc(parser,'_gridit(d:seq{},x:seq{})=x',line)
+   call dcl_uproc(parser,'_gridit(d,x,y)=grid(_gridit(x),_gridit(y))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z)=grid(_gridit(x),gridit(y),_gridit(z))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z,a)=grid(_gridit(x),_gridit(y),_gridit(z),_gridit(a))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b)=grid(_gridit(x),_gridit(y),_gridit(z),_gridit(a),_gridit(b))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b,c)=grid(_gridit(x),_gridit(y),_gridit(z),'//&
+        '_gridit(a),_gridit(b),_gridit(c))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b,c,d)=grid(_gridit(x),_gridit(y),_gridit(z),'//&
+        '_gridit(a),_gridit(b),_gridit(c),_gridit(d))',line)
+   
    call dcl_uproc(parser,'_elts(x:long,siz,tot)=_iota(siz,0l,x-1l,1l,tot)',line)
    call dcl_uproc(parser,'_elts(x:range{long},siz,tot)=_iota(siz,x._lo,x._hi,1l,tot)',line)
    call dcl_uproc(parser,&
@@ -719,7 +758,8 @@ contains
 
     call dcl_proc(parser,'PM__get_elem(x:any#any,y:long)->*x',op_array_get_elem,0_pm_i16,line,0)
     call dcl_proc(parser,'PM__set_elem(x:any#any,y:long,z:any)',op_array_set_elem,0_pm_i16,line,0)
-    
+
+    call dcl_uproc(parser,'arb(x)=PM__get_elem(x,0l)',line)
     call dcl_uproc(parser,'num_elem(x:any#any)=num_elem(dom(x))',line)
     call dcl_uproc(parser,'dim(x:any,y:any)=_array(x,d,num_elem(d)) where d=dom(y)',line)
     call dcl_proc(parser,'_array(x:any,y:any,z:any)->dim x,y',op_array,0_pm_i16,line,0)
@@ -764,6 +804,11 @@ contains
          'PM__exparray(a:any#any,n:any,v:any) do _export_array(a,index(shape(a),n),v) endproc',line)
 
     call dcl_uproc(parser,'PM__at1::(x) local do result=x endproc',line)
+    call dcl_uproc(parser,'PM__at1_sub%(x;arg...)=proc[](@x,arg...)',line)
+    call dcl_uproc(parser,'PM__at1_open%(x;arg...)=proc{}(@x,arg...)',line)
+    call dcl_uproc(parser,'PM__at2%(x;arg...) local do d:=dom(x);a:=gridit(d,arg...);r:=for i in this_tile do '//&
+         'v:=arb(x)dim a;for j in intersect(displace(a,i),d) seq do v[j]=get_displaced(x,i,j) endfor build @v endfor;'//&
+         'result=r endproc',line)
 
     call dcl_uproc(parser,&
          'check_case(x,y,arg...)=e do e:=x==y; '//&

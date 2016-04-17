@@ -274,7 +274,7 @@ module pm_parser
   integer,parameter:: sym_array = num_sym + 1
   integer,parameter:: sym_dom = num_sym + 2
   integer,parameter:: sym_tuple = num_sym + 3
-  integer,parameter:: sym_poly = num_sym + 4
+  integer,parameter:: sym_optional = num_sym + 4
   integer,parameter:: last_parser_hook = num_sym + 4
   
   integer,parameter:: max_string=100
@@ -502,9 +502,9 @@ contains
          /=sym_tuple) then
        call pm_panic('panic forming key table -- tuple')
     endif
-    parser%temp=pm_new_string(context,'poly')
+    parser%temp=pm_new_string(context,'optional')
     if(pm_set_add(context,parser%context%names,parser%temp)&
-         /=sym_poly) then
+         /=sym_optional) then
        call pm_panic('panic forming key table -- poly')
     endif
   end subroutine init_parser
@@ -1584,23 +1584,33 @@ contains
   recursive function term(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
-    integer:: m,name,sym
+    integer:: m,name,sym,base
     iserr=.true.
     sym=parser%sym
     select case(sym)
     case(sym_struct,sym_rec)
        if(struct_gen(parser,sym)) return
     case(sym_lt)
+       sym=sym_any
        call scan(parser)
        if(parser%sym==sym_gt) then
+          call make_node(parser,sym_any,0)
           call scan(parser)
-          call push_null_val(parser)
-       else
+       elseif(parser%sym==sym_opt) then
+          call scan(parser)
           if(typ(parser)) return
           if(expect(parser,sym_gt)) return
+          base=parser%top
+          call push_sym(parser,sym_optional)
+          call push_sym(parser,1)
+          call name_vector(parser,base)
+          call make_node(parser,sym_type,2)
+          sym=sym_opt
+       else
+          call make_node(parser,sym_any,1)
        endif
        if(term(parser)) return
-       call make_node(parser,sym_any,2)
+       call make_node(parser,sym,2)
     case(sym_open)
        call scan(parser)
        if(expr(parser)) return
@@ -2416,39 +2426,28 @@ contains
        call name_vector(parser,base)
        call make_node(parser,sym,2)
        if(expect(parser,sym_close_brace)) return
-    case(sym_opt)
-       call scan(parser)
-       if(parser%sym==sym_open_brace) then
-          call scan(parser)
-          if(typ(parser)) return
-          if(expect(parser,sym_close_brace)) return
-       else
-          if(typ(parser)) return
-       endif
-       call make_node(parser,sym_opt,1)
     case(sym_lt)
        if(parser%sym==sym_gt) then
           call make_node(parser,sym_any,0)
           call scan(parser)
-       else
+       elseif(parser%sym==sym_opt) then
+          call scan(parser)
           if(typ(parser)) return
           if(expect(parser,sym_gt)) return
+          base=parser%top
+          call push_sym(parser,sym_optional)
+          call push_sym(parser,11)
+          call name_vector(parser,base)
+          call make_node(parser,sym_type,2)
+       else
+          call make_node(parser,sym_any,1)
        endif
-       base=parser%top
-       call push_sym(parser,sym_poly)
-       call push_sym(parser,11)
-       call name_vector(parser,base)
-       call make_node(parser,sym_type,2)
     case(sym_hash)
        call scan(parser)
        if(expect(parser,sym_lt)) return
-       if(parser%sym==sym_gt) then
-          call make_node(parser,sym_any,0)
-          call scan(parser)
-       else
-          if(typ(parser)) return
-          if(expect(parser,sym_gt)) return
-       endif
+       if(typ(parser)) return
+       if(expect(parser,sym_gt)) return
+       call make_node(parser,sym_opt,1)
        call make_node(parser,sym_any,1)
     case(sym_any)
        call make_node(parser,sym_any,0)
@@ -2975,9 +2974,9 @@ contains
     if(parser%sym==sym_arrow) then
        call scan(parser)
        sym=parser%sym
-       if(sym==sym_mult.or.sym==sym_assign.or.&
-            sym==sym_hash.or.sym==sym_gt.or.&
-            sym==sym_dim.or.sym==sym_dot) then
+       select case(sym)
+       case(sym_mult,sym_assign,sym_hash,sym_gt,sym_dim,&
+            sym_dot,sym_query,sym_amp) 
           call scan(parser)
           if(exprlist(parser,m)) return
           parser%temp=pop_val(parser)
@@ -2986,7 +2985,7 @@ contains
           call push_null_val(parser)
           call push_val(parser,parser%temp)
           call make_node(parser,sym,1)
-       else
+       case default
           m=0
           do
              if(typ(parser)) return
@@ -3002,7 +3001,7 @@ contains
           call push_num_val(parser,m)
           call swap_vals(parser)
           call push_null_val(parser)
-       endif
+       end select
     else
        call push_num_val(parser,0)
        call push_null_val(parser)

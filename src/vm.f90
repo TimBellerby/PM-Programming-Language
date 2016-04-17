@@ -203,7 +203,7 @@ contains
        flip=opcode==op_andnot_jmp_none.or.opcode==op_andnot_jmp_any
        if(pm_fast_isnull(ve)) then
           ! No active mask - logical vector becomes new mask
-          newve=pm_new(context,pm_logical,esize)
+          newve=pm_new(context,pm_logical,esize+1_pm_ln)
           if(flip) then
              newve%data%l(newve%offset:newve%offset+esize)=.not. &
                   arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
@@ -573,6 +573,50 @@ contains
                   arg(4)%offset)
           end forall
        endif
+    case(op_max_i)
+       v=alloc_arg(pm_int,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%i(v%offset:v%offset+esize)=&
+               max(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%i(v%offset:v%offset+esize)=&
+                  max(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%i(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  max(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset),&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset))
+          end forall
+       endif
+    case(op_min_i)
+       v=alloc_arg(pm_int,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%i(v%offset:v%offset+esize)=&
+               min(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%i(v%offset:v%offset+esize)=&
+                  min(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%i(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  min(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset),&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset))
+          end forall
+       endif
     case(op_gt_i)
        v=alloc_arg(pm_logical,2)
        if(pm_fast_vkind(ve)==pm_null) then
@@ -742,6 +786,50 @@ contains
                   arg(3)%offset)/&
                   arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
                   arg(4)%offset)
+          end forall
+       endif
+   case(op_max_ln)
+       v=alloc_arg(pm_long,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%ln(v%offset:v%offset+esize)=&
+               max(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%ln(v%offset:v%offset+esize)=&
+                  max(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%ln(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  max(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset),&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset))
+          end forall
+       endif
+   case(op_min_ln)
+       v=alloc_arg(pm_long,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%ln(v%offset:v%offset+esize)=&
+               min(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%ln(v%offset:v%offset+esize)=&
+                  min(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%ln(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  min(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset),&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset))
           end forall
        endif
     case(op_gt_ln)

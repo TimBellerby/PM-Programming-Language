@@ -343,6 +343,12 @@ contains
        case(sym_dim)
           tv=pm_typ_vect(coder%context,rtype)
           rtype=unit_vector(make_array_type(coder,pm_tv_arg(tv,1),pm_tv_arg(tv,2)))
+       case(sym_query)
+          tv=pm_typ_vect(coder%context,rtype)
+          rtype=unit_vector(make_any_type(coder,pm_tv_arg(tv,1)))
+       case(sym_amp)
+          tv=pm_typ_vect(coder%context,rtype)
+          rtype=unit_vector(make_opt_type(coder,pm_tv_arg(tv,1)))
        end select
     endif
     key(1)=-cnode_get_num(prc,bi_id)-1
@@ -502,13 +508,14 @@ contains
           coder%stack(slot)=tno
        case(sym_any)
           tno=cnode_get_num(cnode_arg(p,2),cnode_args)
+          t=pm_typ_vect(coder%context,tno)
           call get_slot_and_type(3,slot2,tno2)
-          if(.not.pm_typ_intersects(coder%context,tno,tno2)) then
+          if(.not.pm_typ_intersects(coder%context,pm_tv_arg(t,1),tno2)) then
              call cnode_error(coder,callnode,&
                   '"any" has incompatible argument type')
           endif
           slot=get_slot(1)
-          coder%stack(slot)=make_any_type(coder,tno)
+          coder%stack(slot)=tno
        case(sym_check)
           if(narg==2) then
              call check_logical(2)
