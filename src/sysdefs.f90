@@ -314,6 +314,8 @@ contains
     call dcl_proc(parser,'*(int,int)->int',op_mult_i,0_pm_i16,line,0)
     call dcl_proc(parser,'/(int,int)->int',op_divide_i,0_pm_i16,line,0)
     call dcl_proc(parser,'**(int,int)->int',op_pow_i,0_pm_i16,line,0)
+    call dcl_proc(parser,'max(int,int)->int',op_max_i,0_pm_i16,line,0)
+    call dcl_proc(parser,'min(int,int)->int',op_min_i,0_pm_i16,line,0)
     call dcl_proc(parser,'-(int)->int',op_uminus_i,0_pm_i16,line,0)
     call dcl_proc(parser,'string(int)->string',op_string_i,0_pm_i16,line,0)
     call dcl_proc(parser,'long(int)->long',op_long_i,0_pm_i16,line,0)
@@ -331,6 +333,8 @@ contains
     call dcl_proc(parser,'*(long,long)->long',op_mult_ln,0_pm_i16,line,0)
     call dcl_proc(parser,'/(long,long)->long',op_divide_ln,0_pm_i16,line,0)
     call dcl_proc(parser,'**(long,long)->long',op_pow_ln,0_pm_i16,line,0)
+    call dcl_proc(parser,'max(long,long)->long',op_max_ln,0_pm_i16,line,0)
+    call dcl_proc(parser,'min(long,long)->long',op_min_ln,0_pm_i16,line,0)
     call dcl_proc(parser,'-(long)->long',op_uminus_ln,0_pm_i16,line,0)
     call dcl_proc(parser,'string(long)->string',op_string_ln,0_pm_i16,line,0)
     call dcl_proc(parser,'int(long)->int',op_int_ln,0_pm_i16,line,0)
@@ -363,7 +367,7 @@ contains
     call dcl_uproc(parser,'convert(x,y:long)=long(x)',line)
     call dcl_uproc(parser,'convert(x,y:int)=int(x)',line)
 
-    ! Optional type
+    ! Optional numeric/bool types
     call dcl_type(parser,'_base is num,bool',line)
     call dcl_type(parser,'optional{x} includes #<x>',line)
     call dcl_type(parser,'optional{x:_base} also includes struct _opt{_val:x,_there:bool}',line)
@@ -371,8 +375,12 @@ contains
     call dcl_uproc(parser,'PM__opt_num(x:null,y)=struct _opt{_val=y,_there=false}',line)
     call dcl_uproc(parser,'://(x:struct _opt{_val,_there},y:num) do z:=y;'//&
          'if x._there then z=x._val endif; result=z endproc ',line)
+    call dcl_uproc(parser,&
+         '://(x:struct _opt{_val,_there}#any,y:num)=z where z=for i in x do build @w where w=i://y endfor',line)
     call dcl_uproc(parser,'=>(there:bool,val:_base)=struct _opt{_val=val,_there=there}',line)
     call dcl_uproc(parser,'*(x:struct _opt{_val,_there})=x._val check x._there',line)
+    call dcl_uproc(parser,'opt(x:_base)=struct _opt{_val=x,_there=true}',line)
+    call dcl_uproc(parser,'null(x:_base)=struct _opt{_val=x,_there=false}',line)
     
     ! Tuple types
     call dcl_type(parser,'tuple{t1} is rec _tuple {d1:t1 }',line)
@@ -435,8 +443,8 @@ contains
     call dcl_uproc(parser,'index(y:range{any_int},x:any_int)=long(x-y._lo)',line)
     call dcl_uproc(parser,&
          'from_index(y:range{any_int},x:long)=y._lo+convert(x,y._lo)',line)
-    call dcl_uproc(parser,'first(x:range{any_int})=x._lo,null,x.lo<=x.hi',line)
-    call dcl_uproc(parser,'next(x:range{any_int},y,z)=zz,null,zz<=x.hi where zz=z+1 ',line)
+    call dcl_uproc(parser,'first(x:range{any_int})=x._lo,null,x._lo<=x._hi',line)
+    call dcl_uproc(parser,'next(x:range{any_int},y,z)=zz,null,zz<=x._hi where zz=z+1 ',line)
     call dcl_uproc(parser,'shape(x:range{any_int})=long(x._hi-x._lo)+1l',line)
     call dcl_uproc(parser,'(%%)(x:range{any_int},y:long)=z check x._lo<=z and z<=x._hi where '//&
          'z=x._lo+convert(y,x._lo)',line)
@@ -463,7 +471,9 @@ contains
     call dcl_uproc(parser,'first(x:seq{})=x._lo,null,x.lo<=x.hi',line)
     call dcl_uproc(parser,'next(x:seq{},y,z)=zz,null,zz<=x.hi where zz=z+x._st',line)
     call dcl_uproc(parser,'shape(x:seq{})=x._n',line)
-    
+    call dcl_uproc(parser,'(%%)(x:seq{},y:long)=z check x._lo<=z and z<=x._hi where '//&
+         'z=x._lo+x._step*convert(y,x._lo)',line)
+        
     ! Simple domains (0..n-1 long integer)
     call dcl_uproc(parser,'num_elem(x:long)=x',line)
     call dcl_uproc(parser,'shape(x:long)=x',line)
@@ -476,8 +486,10 @@ contains
     call dcl_uproc(parser,'low(x:long)=0l',line)
     call dcl_uproc(parser,'high(x:long)=x-1l',line)
     call dcl_uproc(parser,'step(x:long)=1l',line)
-    call dcl_uproc(parser,'(%%)(x:long,y:long)=y check y>0l and y<x',line)
-    call dcl_uproc(parser,'(%%)(x:long,y:int)=z check z>0l and z<x where z=long(y)',line)
+    call dcl_uproc(parser,'(%%)(x:long,y:long)=y check y>=0l and y<x',line)
+    call dcl_uproc(parser,'(%%)(x:long,y:int)=z check z>=0l and z<x where z=long(y)',line)
+    call dcl_uproc(parser,'in(x:long,y:long)=x>=0l and x<y',line)
+    call dcl_uproc(parser,'in(x:int,y:long)=x>0 and long(x)<y',line)
 
     ! Simple domains (0..n-1 std integer)
     call dcl_uproc(parser,'num_elem(x:int)=long(x)',line)
@@ -490,8 +502,9 @@ contains
     call dcl_uproc(parser,'low(x:int)=0',line)
     call dcl_uproc(parser,'high(x:int)=x-1',line)
     call dcl_uproc(parser,'step(x:int)=1',line)
-    call dcl_uproc(parser,'(%%)(x:int,y:long)=int(y) check y>0l and int(y)<x',line)
-
+    call dcl_uproc(parser,'(%%)(x:int,y:long)=int(y) check y>=0l and int(y)<x',line)
+    call dcl_uproc(parser,'in(x:int,y:int)=x>=0 and x<y',line)
+    
     ! Domain types
     call dcl_type(parser,&
          'dom includes std_int,range{any_int},seq{},grid,mat_dom{},vect_dom{}',line)
@@ -648,6 +661,7 @@ contains
         ' x.d3(% y.d3 %) , x.d4(% y.d4 %), x.d5 (% y.d5 %), x.d6 (% y.d6 %) )',line)
    call dcl_uproc(parser,'(%%)(x:grid7d,y:tuple7d)=( x.d1(% y.d1 %), x.d2(% y.d2 %) ,'//&
         ' x.d3(% y.d3 %) , x.d4(% y.d4 %), x.d5 (% y.d5 %), x.d6(% y.d6 %), x.d7 (% y.d7 %) )',line)
+
    call dcl_uproc(parser,'next(d:grid1d,g:rec _gs{d1},i:tuple1d)'//&
         '=j,s,e where j,s,e=next(d.d1,g.d1,i.d1)',line)
    call dcl_uproc(parser,'next(d:grid2d,g:rec _gs{d1,d2},i:tuple2d) do '//&
@@ -661,33 +675,34 @@ contains
 
    call dcl_uproc(parser,'_gridit(d:int,x:int)=x..x',line)
    call dcl_uproc(parser,'_gridit(d:long,x:long)=x..x',line)
-   call dcl_uproc(parser,'_gridit(d:long,x:int)=y..y where y=long(x)',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:int)=x..x',line)
    call dcl_uproc(parser,'_gridit(d:range{int},x:int)=x..x',line)
    call dcl_uproc(parser,'_gridit(d:range{long},x:long)=x..x',line)
-   call dcl_uproc(parser,'_gridit(d:range{long},x:int)=y..y where y=long(x)',line)
+   call dcl_uproc(parser,'_gridit(d:range{long},x:int)=x..x',line)
    call dcl_uproc(parser,'_gridit(d:seq{},x)=y..y by step(d) where y=convert(x,low(d))',line)
    call dcl_uproc(parser,'_gridit(d:int,x:range{int})=x',line)
    call dcl_uproc(parser,'_gridit(d:long,x:range{long})=x',line)
-   call dcl_uproc(parser,'_gridit(d:long,x:range{int})=long(low(x))..long(high(x))',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:range{int})=low(x)..high(x)',line)
    call dcl_uproc(parser,'_gridit(d:range{int},x:range{int})=x',line)
    call dcl_uproc(parser,'_gridit(d:range{long},x:range{long})=x',line)
-   call dcl_uproc(parser,'_gridit(d:range{long},x:range{int})=long(low(x))..long(high(x))',line) 
+   call dcl_uproc(parser,'_gridit(d:range{long},x:range{int})=x',line) 
    call dcl_uproc(parser,'_gridit(d:seq{},x:range{})=x by step(d)',line)
    call dcl_uproc(parser,'_gridit(d:int,x:seq{int})=x',line)
    call dcl_uproc(parser,'_gridit(d:long,x:seq{long})=x',line)
-   call dcl_uproc(parser,'_gridit(d:long,x:seq{int})=long(low(x))..long(high(x))by long(step(x))',line)
+   call dcl_uproc(parser,'_gridit(d:long,x:seq{int})=x',line)
    call dcl_uproc(parser,'_gridit(d:range{int},x:seq{int})=x',line)
    call dcl_uproc(parser,'_gridit(d:range{long},x:seq{long})=x',line)
-   call dcl_uproc(parser,'_gridit(d:range{long},x:seq{int})=long(low(x))..long(high(x))by long(step(x))',line)
+   call dcl_uproc(parser,'_gridit(d:range{long},x:seq{int})=x',line)
    call dcl_uproc(parser,'_gridit(d:seq{},x:seq{})=x',line)
-   call dcl_uproc(parser,'_gridit(d,x,y)=grid(_gridit(x),_gridit(y))',line)
-   call dcl_uproc(parser,'_gridit(d,x,y,z)=grid(_gridit(x),gridit(y),_gridit(z))',line)
-   call dcl_uproc(parser,'_gridit(d,x,y,z,a)=grid(_gridit(x),_gridit(y),_gridit(z),_gridit(a))',line)
-   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b)=grid(_gridit(x),_gridit(y),_gridit(z),_gridit(a),_gridit(b))',line)
-   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b,c)=grid(_gridit(x),_gridit(y),_gridit(z),'//&
-        '_gridit(a),_gridit(b),_gridit(c))',line)
-   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b,c,d)=grid(_gridit(x),_gridit(y),_gridit(z),'//&
-        '_gridit(a),_gridit(b),_gridit(c),_gridit(d))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y)=grid(_gridit(d,x),_gridit(d,y))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z)=grid(_gridit(d,x),_gridit(d,y),_gridit(d,z))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z,a)=grid(_gridit(d,x),_gridit(d,y),_gridit(d,z),_gridit(d,a))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b)=grid(_gridit(d,x),_gridit(d,y),_gridit(d,z),_gridit(d,a),'//&
+        '_gridit(d,b))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b,c)=grid(_gridit(d,x),_gridit(d,y),_gridit(d,z),'//&
+        '_gridit(d,a),_gridit(d,b),_gridit(d,c))',line)
+   call dcl_uproc(parser,'_gridit(d,x,y,z,a,b,c,e)=grid(_gridit(d,x),_gridit(d,y),_gridit(d,z),'//&
+        '_gridit(d,a),_gridit(d,b),_gridit(d,c),_gridit(d,e))',line)
    
    call dcl_uproc(parser,'_elts(x:long,siz,tot)=_iota(siz,0l,x-1l,1l,tot)',line)
    call dcl_uproc(parser,'_elts(x:range{long},siz,tot)=_iota(siz,x._lo,x._hi,1l,tot)',line)
@@ -723,7 +738,80 @@ contains
     
    ! Vector index of a grid
 
-    
+
+   ! Neighborhoods
+   call dcl_uproc(parser,'nbd(x:long,y:range{long})=x+y._lo..x+y._hi',line)
+   call dcl_uproc(parser,'nbd(x:long,y:range{int})=x+long(y._lo)..x+long(y._hi)',line)
+   call dcl_uproc(parser,'nbd(x:int,y:range{int})=x+y._lo..x+y._hi',line)
+   call dcl_uproc(parser,'nbd(x,y:range{})=x+y._lo..x+y._hi',line)
+   call dcl_uproc(parser,'nbd(x:long,y:seq{long})=x+y._lo..x+y._hi by y._st',line)
+   call dcl_uproc(parser,'nbd(x:long,y:seq{int})=x+long(y._lo)..x+long(y._hi) by long(y._st)',line)
+   call dcl_uproc(parser,'nbd(x:int,y:seq{int})=x+y._lo..x+y._hi by y._st',line)
+   call dcl_uproc(parser,'nbd(x,y:seq{})=x+y._lo..x+y._hi by y._st',line)
+   call dcl_uproc(parser,'nbd(x:tuple2d,y:grid2d)=( nbd(x.d1,y.d1),nbd(x.d2,y.d2) )',line)
+   call dcl_uproc(parser,'nbd(x:tuple3d,y:grid3d)=( nbd(x.d1,y.d1),nbd(x.d2,y.d2),nbd(x.d3,y.d3) )',line)
+   call dcl_uproc(parser,'nbd(x:tuple4d,y:grid4d)=( nbd(x.d1,y.d1),nbd(x.d2,y.d2),nbd(x.d3,y.d3),nbd(x.d4,y.d4) )',line)
+   call dcl_uproc(parser,'nbd(x:tuple5d,y:grid5d)=( nbd(x.d1,y.d1),nbd(x.d2,y.d2),nbd(x.d3,y.d3),nbd(x.d4,y.d4),'//&
+        'nbd(x.d5,y.d5) )',line)
+   call dcl_uproc(parser,'nbd(x:tuple6d,y:grid6d)=( nbd(x.d1,y.d1),nbd(x.d2,y.d2),nbd(x.d3,y.d3),nbd(x.d4,y.d4),'//&
+        'nbd(x.d5,y.d5),nbd(x.d6,y.d6) )',line)
+   call dcl_uproc(parser,'nbd(x:tuple7d,y:grid7d)=( nbd(x.d1,y.d1),nbd(x.d2,y.d2),nbd(x.d3,y.d3),nbd(x.d4,y.d4),'//&
+        'nbd(x.d5,y.d5),nbd(x.d6,y.d6), nbd(x.d7,y.d7) )',line)
+
+   ! Displacement
+   call dcl_type(parser,'_intd is int,range{int},seq{int}',line)
+   call dcl_type(parser,'_longd is long,range{long},seq{long}',line)
+   call dcl_uproc(parser,'displace(d:_longd,x:long,y:long)=x+y',line)
+   call dcl_uproc(parser,'displace(d:_longd,x:long,y:int)=x+long(y)',line)
+   call dcl_uproc(parser,'displace(d:_intd,x:int,y:int)=x+y',line)
+   call dcl_uproc(parser,'displace(d:grid2d,x:tuple2d,y:tuple2d)=(displace(x.d1,y.d1),displace(x.d2,y.d2)) ',line)
+   call dcl_uproc(parser,'displace(d:grid3d,x:tuple3d,y:tuple3d)=(displace(x.d1,y.d1),displace(x.d2,y.d2), '//&
+        'displace(x.d3,y.d3) ) ',line)
+   call dcl_uproc(parser,'displace(d:grid4d,x:tuple4d,y:tuple4d)=(displace(x.d1,y.d1),displace(x.d2,y.d2), '//&
+        'displace(x.d3,y.d3),displace(x.d4,y.d4) ) ',line)
+   call dcl_uproc(parser,'displace(d:grid5d,x:tuple5d,y:tuple5d)=(displace(x.d1,y.d1),displace(x.d2,y.d2), '//&
+        'displace(x.d3,y.d3),displace(x.d4,y.d4),displace(x.d5,y.d5) ) ',line)
+   call dcl_uproc(parser,'displace(d:grid6d,x:tuple6d,y:tuple6d)=(displace(x.d1,y.d1),displace(x.d2,y.d2), '//&
+        'displace(x.d3,y.d3),displace(x.d4,y.d4),displace(x.d5,y.d5),displace(x.d6,y.d6) ) ',line)
+   call dcl_uproc(parser,'displace(d:grid7d,x:tuple7d,y:tuple7d)=(displace(x.d1,y.d1),displace(x.d2,y.d2), '//&
+        'displace(x.d3,y.d3),displace(x.d4,y.d4),displace(x.d5,y.d5),displace(x.d6,y.d6),displace(x.d7,y.d7) ) ',line)
+
+   ! Intersection of domains
+   call dcl_uproc(parser,'intersect(x:long,y:long)=min(x,y)',line)
+   call dcl_uproc(parser,'intersect(x:long,y:range{long})=max(0l,y._lo)..min(x,y._hi)',line)
+   call dcl_uproc(parser,'intersect(x:long,y:seq{long})=max(0l,y._lo)..min(x,y._hi) by y._st',line)
+   call dcl_uproc(parser,'intersect(x:range{long},y:long)=max(0l,x._lo)..min(x._hi,y)',line)
+   call dcl_uproc(parser,'intersect(x:range{long},y:range{long})=max(x._lo,y._lo)..min(x._hi,y._hi)',line)
+   call dcl_uproc(parser,'intersect(x:range{long},y:seq{long})=max(x._lo,y._lo)..min(x._hi,y._hi) by y._st',line)
+   call dcl_uproc(parser,'intersect(x:seq{long},y:long)=max(x._lo,0l)..min(x._hi,y) by x._st',line)
+   call dcl_uproc(parser,'intersect(x:seq{long},y:range{long})=max(x._lo,y._lo)..min(x._hi,y._hi) by x._st',line)
+   call dcl_uproc(parser,'intersect(x:seq{long},y:seq{long})=max(x._lo,y._lo)..min(x._hi,y._hi) by max(x._st,y._st)',&
+        line)
+
+   call dcl_uproc(parser,'intersect(x:int,y:int)=min(x,y)',line)
+   call dcl_uproc(parser,'intersect(x:int,y:range{int})=max(0l,y._lo)..min(x,y._hi)',line)
+   call dcl_uproc(parser,'intersect(x:int,y:seq{int})=max(0l,y._lo)..min(x,y._hi) by y._st',line)
+   call dcl_uproc(parser,'intersect(x:range{int},y:int)=max(0l,x._lo)..min(x._hi,y)',line)
+   call dcl_uproc(parser,'intersect(x:range{int},y:range{int})=max(x._lo,y._lo)..min(x._hi,y._hi)',line)
+   call dcl_uproc(parser,'intersect(x:range{int},y:seq{int})=max(x._lo,y._lo)..min(x._hi,y._hi) by y._st',line)
+   call dcl_uproc(parser,'intersect(x:seq{int},y:int)=max(x._lo,0l)..min(x._hi,y) by x._st',line)
+   call dcl_uproc(parser,'intersect(x:seq{int},y:range{int})=max(x._lo,y._lo)..min(x._hi,y._hi) by x._st',line)
+   call dcl_uproc(parser,'intersect(x:seq{int},y:seq{int})=max(x._lo,y._lo)..min(x._hi,y._hi) by max(x._st,y._st)',&
+        line)
+
+   call dcl_uproc(parser,'intersect(x:tuple2d,y:tuple2d)=(intersect(x.d1,y.d1),intersect(x.d2,y.d2)) ',line)
+   call dcl_uproc(parser,'intersect(x:tuple3d,y:tuple3d)=(intersect(x.d1,y.d1),intersect(x.d2,y.d2), '//&
+        'intersect(x.d3,y.d3) ) ',line)
+   call dcl_uproc(parser,'intersect(x:tuple4d,y:tuple4d)=(intersect(x.d1,y.d1),intersect(x.d2,y.d2), '//&
+        'intersect(x.d3,y.d3),intersect(x.d4,y.d4) ) ',line)
+   call dcl_uproc(parser,'intersect(x:tuple5d,y:tuple5d)=(intersect(x.d1,y.d1),intersect(x.d2,y.d2), '//&
+        'intersect(x.d3,y.d3),intersect(x.d4,y.d4),intersect(x.d5,y.d5) ) ',line)
+   call dcl_uproc(parser,'intersect(x:tuple6d,y:tuple6d)=(intersect(x.d1,y.d1),intersect(x.d2,y.d2), '//&
+        'intersect(x.d3,y.d3),intersect(x.d4,y.d4),intersect(x.d5,y.d5),intersect(x.d6,y.d6) ) ',line)
+   call dcl_uproc(parser,'intersect(x:tuple7d,y:tuple7d)=(intersect(x.d1,y.d1),intersect(x.d2,y.d2), '//&
+        'intersect(x.d3,y.d3),intersect(x.d4,y.d4),intersect(x.d5,y.d5),intersect(x.d6,y.d6),'//&
+        'intersect(x.d7,y.d7) ) ',line)
+   
    ! Array types
     call dcl_type(parser,'array{e,d:dom} is e#d,_slice{e,d},e#grid{d},_slice{e,grid{d}}',line)
     call dcl_type(parser,&
@@ -749,15 +837,15 @@ contains
 
     call dcl_uproc(parser,'(//)(a:any#any,arg...)='//&
          'PM__get_elem(a,index(dom(a),arg...))',line)
- !   call dcl_uproc(parser,'(//)=(&a:any#any,v,arg...)'//&
- !        ' do PM__set_elem(a,v,index(dom(a),arg...)) endproc',line)
+    call dcl_uproc(parser,'(//)=(&a:any#any,v,arg...)'//&
+         ' do PM__set_elem(&a,index(dom(a),arg...),v) endproc',line)
     call dcl_uproc(parser,'(%%)(a:any#any,arg...)='//&
          'PM__get_elem(a,index(shape(a),arg...))',line)
- !   call dcl_uproc(parser,'(%%)=(&a:any#any,v,arg...:any) '//&
- !        'do PM__set_elem(a,v,index(shape(a),arg...)) endproc',line)
+    call dcl_uproc(parser,'(%%)=(&a:any#any,v,arg...:any) '//&
+         'do PM__set_elem(&a,index(shape(a),arg...),v) endproc',line)
 
     call dcl_proc(parser,'PM__get_elem(x:any#any,y:long)->*x',op_array_get_elem,0_pm_i16,line,0)
-    call dcl_proc(parser,'PM__set_elem(x:any#any,y:long,z:any)',op_array_set_elem,0_pm_i16,line,0)
+    call dcl_proc(parser,'PM__set_elem(&x:any#any,y:long,z:any)',op_array_set_elem,0_pm_i16,line,0)
 
     call dcl_uproc(parser,'arb(x)=PM__get_elem(x,0l)',line)
     call dcl_uproc(parser,'num_elem(x:any#any)=num_elem(dom(x))',line)
@@ -776,44 +864,55 @@ contains
     call dcl_proc(parser,'PM__checkkeys(arg...:any)',op_checkkeys,0_pm_i16,line,0)
     call dcl_proc(parser,'PM__getvkey(arg...:any)->any',op_getvkey,0_pm_i16,line,0)
 
+    ! Select statement
+    call dcl_uproc(parser,&
+         'check_case(x,y,arg...)=e do e:=match(x,y); '//&
+         'if not e then e=check_case(x,arg...) endif endproc',line)
+    call dcl_uproc(parser,'check_case(x,y)= match(x,y)',line)
+    call dcl_uproc(parser,'match(x,y)=x==y',line)
+    call dcl_uproc(parser,'match(x:num,y:range{num})=x>=y._lo and x<=y._hi',line)
+    
     ! Variables
-    call dcl_proc(parser,'PM__assign(&any,any)',op_assign,0_pm_i16,line,0)
+    call dcl_uproc(parser,'PM__assign(&a:any,b:any) do _assign(&a,b); check "Cannot assign":a?=b endproc',line)
+    call dcl_proc(parser,'_assign(&any,any)',op_assign,0_pm_i16,line,0)
     call dcl_proc(parser,'PM__dup(x:any)->=x',op_clone,0_pm_i16,line,0)
     call dcl_uproc(parser,'PM__getref(x)=x',line)
 
+    ! Implementation of for statements
     call dcl_proc(parser,'PM__import_val(x:any)->=x',op_import_val,0_pm_i16,line,0)
     call dcl_proc(parser,'PM__export(x:any)->=x',op_export,0_pm_i16,line,0)
-    call dcl_proc(parser,'_export_array(a,n,v)',op_export_array,0_pm_i16,line,0)
+    call dcl_proc(parser,'_export_array(any,any,any)',op_export_array,0_pm_i16,line,0)
     call dcl_proc(parser,'PM__extract(x:any)->=x',op_extract,0_pm_i16,line,0)
     call dcl_proc(parser,'PM__extractelm(x:any)->*x',op_extractelm,0_pm_i16,line,0)
     call dcl_proc(parser,'_makearray(x:any,y:any,n:any)->dim x,y',op_make_array,0_pm_i16,line,0)
     call dcl_uproc(parser,'PM__makearray(x,y)=_makearray(x,d,num_elem(d)) where d=dom(y)',line)
+    call dcl_uproc(parser,&
+         'PM__exparray(a:any#any,n:any,v:any) do _export_array(a,index(shape(a),n),v) endproc',line)
+
+    ! Parallel aspects of for statements (just hooks here)
     call dcl_uproc(parser,'PM__sync(&w,x,y) do endproc',line)
     call dcl_uproc(parser,'PM__partition(w,grid=1)=1l,w dim 2l',line)
     call dcl_uproc(parser,'single_elem(w)=w',line)
     call dcl_uproc(parser,'PM__pop_prc(w) do print(w) endproc',line)
     call dcl_uproc(parser,'this_prc()=1l',line)
-    call dcl_uproc(parser,'prc_grid()=1l dim 2',line)
+    call dcl_uproc(parser,'prc_grid()=1..2',line)
     call dcl_uproc(parser,'broadcast(&x,y) do endproc',line)
     call dcl_uproc(parser,'PM__start_find()=1',line)
     call dcl_uproc(parser,'PM__test_find(x) do endproc',line)
     call dcl_uproc(parser,'PM__sync_find(x)=x',line)
     call dcl_uproc(parser,'PM__conc()=false,1l',line)
     call dcl_uproc(parser,'PM__pop_conc(x) do endproc',line)
-    call dcl_uproc(parser,&
-         'PM__exparray(a:any#any,n:any,v:any) do _export_array(a,index(shape(a),n),v) endproc',line)
 
+    ! Communicating operators
     call dcl_uproc(parser,'PM__at1::(x) local do result=x endproc',line)
     call dcl_uproc(parser,'PM__at1_sub%(x;arg...)=proc[](@x,arg...)',line)
     call dcl_uproc(parser,'PM__at1_open%(x;arg...)=proc{}(@x,arg...)',line)
-    call dcl_uproc(parser,'PM__at2%(x;arg...) local do d:=dom(x);a:=gridit(d,arg...);r:=for i in this_tile do '//&
-         'v:=arb(x)dim a;for j in intersect(displace(a,i),d) seq do v[j]=get_displaced(x,i,j) endfor build @v endfor;'//&
+    call dcl_uproc(parser,'PM__at2%(x;v1) local do d:=dom(x);r:=for i in this_tile do '//&
+         'a:=_gridit(d,v1{i});v:=null(arb(x)) dim a;for j in a seq do '//&
+         'v[j]=get_displaced(x,i,j) endfor build @v endfor;'//&
          'result=r endproc',line)
-
-    call dcl_uproc(parser,&
-         'check_case(x,y,arg...)=e do e:=x==y; '//&
-         'if not e then e=check_case(x,arg...) endif endproc',line)
-    call dcl_uproc(parser,'check_case(x,y)= x==y',line)
+    call dcl_uproc(parser,'get_displaced(x,i,j)=r do sh:=shape(x);di:=displace(sh,i,j);'//&
+         'r:=null(arb(x));if di in sh then r=opt(x{di}) endif endproc',line)
     
   end subroutine sysdefs
 

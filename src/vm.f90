@@ -449,7 +449,7 @@ contains
     case(op_export_array)
        errno=0
        call array_export(context,arg(2),arg(3),arg(4),&
-            arg(1)%data%ptr(arg(1)%offset),errno)
+            arg(1)%data%ptr(arg(1)%offset+1_pm_p),errno)
        if(errno/=0) goto 997
     case(op_iota)
        call set_arg(2,vector_iota(context,&
@@ -617,6 +617,68 @@ contains
                   arg(4)%offset))
           end forall
        endif
+    case(op_uminus_i)
+       v=alloc_arg(pm_int,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%i(v%offset:v%offset+esize)=&
+               -arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%i(v%offset:v%offset+esize)=&
+                  -arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%i(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  -arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)
+          end forall
+       endif
+    case(op_eq_i)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)==&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)==&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)==&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+    case(op_ne_i)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)/=&
+               arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)/=&
+                  arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)/=&
+                  arg(4)%data%i(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
     case(op_gt_i)
        v=alloc_arg(pm_logical,2)
        if(pm_fast_vkind(ve)==pm_null) then
@@ -661,6 +723,7 @@ contains
                   arg(4)%offset)
           end forall
        endif
+       
     case(op_long_i)
        v=alloc_arg(pm_long,2)
        if(pm_fast_vkind(ve)==pm_null) then
@@ -830,6 +893,69 @@ contains
                   arg(3)%offset),&
                   arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
                   arg(4)%offset))
+          end forall
+       endif
+   case(op_uminus_ln)
+       v=alloc_arg(pm_long,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%ln(v%offset:v%offset+esize)=&
+               -arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%ln(v%offset:v%offset+esize)=&
+                  -arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%ln(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  -arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)
+          end forall
+       endif
+       
+    case(op_eq_ln)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)==&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)==&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)==&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
+          end forall
+       endif
+    case(op_ne_ln)
+       v=alloc_arg(pm_logical,2)
+       if(pm_fast_vkind(ve)==pm_null) then
+          v%data%l(v%offset:v%offset+esize)=&
+               arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)==&
+               arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+       elseif(pm_fast_vkind(ve)==pm_logical) then
+          where(ve%data%l(ve%offset:ve%offset+esize))
+             v%data%l(v%offset:v%offset+esize)=&
+                  arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)==&
+                  arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
+          end where
+       else
+          forall(j=0:pm_fast_esize(ve))
+             v%data%l(ve%data%ln(ve%offset+j)+&
+                  v%offset)=&
+                  arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(3)%offset)==&
+                  arg(4)%data%ln(ve%data%ln(ve%offset+j)+&
+                  arg(4)%offset)
           end forall
        endif
     case(op_gt_ln)

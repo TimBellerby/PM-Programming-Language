@@ -572,7 +572,9 @@ contains
     else
        if(pm_debug_level>2) then
           write(*,*) 'PROCESS FULL CALL>',&
-               trim(sig_name_str(coder,int(sig))),coder%stack(4)
+               trim(sig_name_str(coder,int(sig)))
+          if(cnode_get_kind(p)/=cnode_is_arglist) call pm_panic('not arglist')
+          call qdump_code_tree(coder,pm_null_obj,6,callnode,2)
        endif
        proclist=pm_dict_val(coder%context,coder%sig_cache,int(sig,pm_ln))
        nkey=cnode_get_num(callnode,call_nkeys)
@@ -689,6 +691,7 @@ contains
       endif
       ! First signifcant argument
       call code_num(coder,nret+nkey_sig*2+nextra+1)
+      if(pm_debug_level>4) write(*,*) 'Checking',cnode_numargs(procs),' sigs'
       do i=3,cnode_numargs(procs),2
          pars=cnode_get_num(procs,cnode_args+i-1)
          apars=check_call_sig(coder,&

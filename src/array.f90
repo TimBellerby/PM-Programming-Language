@@ -120,10 +120,10 @@ contains
     else
        len=vector_zero_unused(context,j,ve)
     endif
-    if(pm_fast_esize(vec)+1_pm_ln/=total_size(len)) then
-       write(*,*) pm_fast_esize(vec)+1_pm_ln,total_size(len)
-       call pm_panic('make_array_from_vect')
-    endif
+!!$    if(pm_fast_esize(vec)+1_pm_ln/=total_size(len)) then
+!!$       write(*,*) pm_fast_esize(vec)+1_pm_ln,total_size(len)
+!!$       call pm_panic('make_array_from_vect')
+!!$    endif
     off=array_offsets(context,len)
     ptr=make_array(context,typno,vec,dom,len,off)
     call pm_delete_register(context,reg)
@@ -291,6 +291,15 @@ contains
        do i=0,pm_fast_esize(j)-dispj
           do k=1,j%data%ln(j%offset+i+dispj)
              ptr%data%ln(ptr%offset+n)=v%data%ln(v%offset+i+dispv)
+             n=n+1
+          enddo
+       enddo
+    case(pm_logical)
+       ptr=pm_new(context,pm_logical,siz)
+       n=0
+       do i=0,pm_fast_esize(j)-dispj
+          do k=1,j%data%ln(j%offset+i+dispj)
+             ptr%data%l(ptr%offset+n)=v%data%l(v%offset+i+dispv)
              n=n+1
           enddo
        enddo
@@ -623,6 +632,7 @@ contains
     type(pm_ptr):: len,off,avec,len2,off2,avec2
     tno=pm_fast_typeof(v)
     if(pm_fast_typeof(e)/=tno) then
+       write(*,*) trim(pm_typ_as_string(context,int(tno,pm_i16))),'<-->',trim(pm_typ_as_string(context,pm_fast_typeof(e)))
        errno=vector_type_error
        return
     endif
@@ -647,7 +657,7 @@ contains
        enddo
     case(pm_struct_type,pm_rec_type,pm_polyref_type)
        do k=2,pm_fast_esize(v)
-          call vector_set_elems(context,v%data%ptr(v%offset+k),ix,e,errno)
+          call vector_set_elems(context,v%data%ptr(v%offset+k),ix,e%data%ptr(e%offset+k),errno)
        enddo
     case(pm_poly_type)
        call vector_set_elems(context,&
@@ -1127,6 +1137,7 @@ contains
     do i=0,siz
        j=ptr%data%ln(ptr%offset+i)
        iserr=iserr.or.j<0.or.j>len%data%ln(len%offset+i)
+       if(iserr) write(*,*) 'INDEX ERROR:',j,len%data%ln(len%offset+i)
        ptr%data%ln(ptr%offset+i)=j+off%data%ln(off%offset+i)
     enddo
     if(iserr) then
@@ -1170,7 +1181,7 @@ contains
     integer(pm_ln):: length,offset,length2
     logical:: iserr
     integer:: disp2
-    siz2=pm_fast_esize(len)-4_pm_ln
+    siz2=pm_fast_esize(import_vec)-4_pm_ln
     disp2=import_vec%data%ln(import_vec%offset+1)
     ptr=pm_new(context,pm_long,pm_fast_esize(idx)+1_pm_ln)
     m=0
@@ -1190,9 +1201,11 @@ contains
     enddo
     if(iserr) errno=vector_index_error
     if(pm_debug_level>0) then
-       if(m/=pm_fast_esize(idx)+1_pm_ln) &
-            call pm_panic('index_vector_nested')
-    endif
+       if(m/=pm_fast_esize(idx)+1_pm_ln) then
+          write(*,*) m,pm_fast_esize(idx)
+          call pm_panic('index_vector_nested')
+       endif
+    endif 
   contains
     include 'fesize.inc'
   end function index_vector_nested

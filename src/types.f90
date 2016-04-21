@@ -1278,7 +1278,7 @@ contains
                 call pm_name_string(context,name,str(n:))
              endif
              n=len_trim(str)+1
-             if(name>len(str)-10) return
+             if(n>len(str)-10) return
              if(add_char(':')) return
              call typ_to_str(context,pm_tv_arg(tv,i),str,n)
              if(i<narg) then

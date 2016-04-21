@@ -610,7 +610,7 @@ contains
        call release_var(fs,new_ve)
     case(sym_loop)
        if(restart) return
-       if(cblock_has_at(cnode_arg(args,2))) then
+       if(cblock_has_at(cnode_arg(args,1))) then
           break=.true.
           return
        endif

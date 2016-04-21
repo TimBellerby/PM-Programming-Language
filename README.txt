@@ -12,9 +12,11 @@ The language specification (available in /doc) while incomplete in places, will 
 a good view of the features of the version 0.1 of the language.
     
 
-The code is not quite ready to start playing with yet - unless you
+Most of the single-node part of the language - including concurrent loops and communicating
 
-are very into compiler/interpreter design. A full working release
+operators is now working. Types are currently restricted to int, long and bool, with some support for
 
-of version 0.1 is planned soon.
+strings.
 
+
+Look out for updates over the next month or so.

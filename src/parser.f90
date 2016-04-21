@@ -145,9 +145,12 @@ module pm_parser
   integer,parameter:: sym_brace_at = node0 + 4
   integer,parameter:: sym_reduce_at = node0 + 5
   integer,parameter:: sym_dotref = node0 + 6
+  integer,parameter:: sym_open_assign = node0 + 7
+  integer,parameter:: sym_sub_assign = node0 + 8
+  integer,parameter:: sym_dot_assign = node0 + 9
 
   ! Operators
-  integer,parameter:: sym1 = sym_dotref
+  integer,parameter:: sym1 = sym_dot_assign
   integer,parameter:: sym_open = sym1 + 1
   integer,parameter:: first_opr = sym_open
   integer,parameter:: sym_close = sym1 + 2
@@ -326,8 +329,9 @@ module pm_parser
        ',           ','.           ','=           ','_           ',&
        ':/          ','&           ','::          ','?           ',&
        '->          ','hash        ','%           ','<string>    ',&
-       '<number>    ','<iter>      ','<list>      ',&
-       '<square-at> ','<brace-at>  ','<reduce-at> ','<dotref>    ',&
+       '<number>    ','<iter>      ','<list>      ','<square-at> ',&
+       '<brace-at>  ','<reduce-at> ','<dotref>    ','<open-assn> ',&
+       '<sub-assn>  ','<dot-assn>  ',&
        '(           ',')           ','unary *     ','unary -     ',&
        '//          ','?=          ','==          ','/=          ',&
        '>=          ','>           ','<=          ','<           ',&
@@ -476,9 +480,9 @@ contains
     parser%modls=pm_null_obj
     parser%vtop=0
     do i=1,num_sym
-       !write(*,*) 'Init parser',i,sym_names(i)
        if(i<=first_key) then
-          parser%temp=pm_new_string(context,'"'//trim(sym_names(i))//'"')
+          parser%temp=pm_new_string(context,'"'//&
+               trim(sym_names(i))//'"')
        else
           parser%temp=pm_new_string(context,trim(sym_names(i)))
        endif
@@ -767,7 +771,8 @@ contains
        ! End of extended character set options
        ! ****************************************
     case default
-       write(*,*) 'Error: Unexpected character "',c,'" ascii code=',iachar(c)
+       write(*,*) 'Error: Unexpected character "',c,&
+            '" ascii code=',iachar(c)
        c=getchar()
        goto 5
     end select
@@ -1079,7 +1084,8 @@ contains
        if(present(mess)) then
           call parse_error(parser,'Expected '//mess)
        else
-          call parse_error(parser,'Expected "'//trim(sym_names(sym))//'"')
+          call parse_error(parser,'Expected "'//&
+               trim(sym_names(sym))//'"')
        endif
     endif
   end function expect
@@ -1220,7 +1226,8 @@ contains
           if(qual(parser)) return
           m=m+1
           if(m>pm_max_args) then
-             call parse_error(parser,'"&" too late in long argument list')
+             call parse_error(parser,&
+                  '"&" too late in long argument list')
           else
              if(parser%top>=max_parse_stack) then
                 call parse_error(parser,'expression too complex')
@@ -1262,7 +1269,8 @@ contains
              if(expect_name(parser)) return
              if(parser%sym/=sym_close.and.&
                   parser%sym/=sym_semi.and.parser%sym/=sym_comma) then
-                call parse_error(parser,'Loop argument must be single variable name')
+                call parse_error(parser,&
+                     'Loop argument must be single variable name')
                 return
              endif
              nloop=nloop+1
@@ -1486,17 +1494,27 @@ contains
     logical:: iserr
     iserr=.true.
     select case (parser%sym)
-    case(first_unary:last_opr,sym_assign,sym_hi,sym_lo,sym_step)
+    case(first_unary:last_opr,sym_hi,sym_lo,sym_step,sym_opt,sym_null)
        sym=parser%sym
        call scan(parser)
     case(sym_open_square)
        call scan(parser)
        if(expect(parser,sym_close_square)) return
-       sym=sym_open_square
+       if(parser%sym==sym_assign) then
+          sym=sym_sub_assign
+          call scan(parser)
+       else
+          sym=sym_open_square
+       endif
     case(sym_open_brace)
        call scan(parser)
        if(expect(parser,sym_close_brace)) return
-       sym=sym_open_brace
+       if(parser%sym==sym_assign) then
+          sym=sym_open_assign
+          call scan(parser)
+       else
+          sym=sym_open_brace
+       endif
     case(sym_at)
        call scan(parser)
        if(parser%sym==sym_open_square) then
@@ -1637,7 +1655,7 @@ contains
        else
           call make_node(parser,sym_proc,1)
        endif
-    case(sym_hi,sym_lo,sym_step)
+    case(sym_hi,sym_lo,sym_step,sym_null)
        call scan(parser)
        if(parser%sym==sym_open.or.parser%sym==sym_dcolon&
             .or.parser%sym==sym_pct) then
@@ -1645,7 +1663,13 @@ contains
        else
           call push_sym_val(parser,sym)
        endif
-    case(sym_true,sym_false,sym_null,sym_argc) 
+    case(sym_opt)
+       call scan(parser)
+       if(parser%sym/=sym_open) then
+          if(expect(parser,sym_open)) return
+       endif
+       if(proccall(parser,sym)) return
+    case(sym_true,sym_false,sym_argc) 
        call push_sym_val(parser,parser%sym)
        call scan(parser)
        goto 20
