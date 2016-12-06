@@ -31,6 +31,7 @@ program pm
   use pm_infer
   use pm_sysdefs
   use pm_backend
+  use pm_parlib
   use pm_vm
   implicit none
   type(pm_context),pointer:: context
@@ -39,33 +40,46 @@ program pm
   type(finaliser),target:: fs
   type(pm_ptr):: root,prog,sptr,svec,p
   type(pm_ptr),dimension(1):: arg
-  type(pm_ptr),target:: ve,ve1
+  type(pm_ptr),target:: ve
   integer:: name,err
-  character*100 str
+  character(len=pm_max_filename_size):: str
   logical:: out_debug_files,ok
   integer(pm_p):: i
   integer(pm_ln):: jj
   type(pm_reg),pointer:: reg
 
+  ! ****** Initialise ******
+  
   call pm_check_kinds
 
-  context=>pm_init_gc()
-  reg=>pm_register(context,'main',ve,ve1)
+  call init_par
 
-  if(iargc()==1) then
-     call getarg(1,str)
+  call pm_init_compilation
+
+  ! ****** Command line *****
+  
+  context=>pm_init_gc()
+  reg=>pm_register(context,'main',ve)
+
+  if(pm_get_cl_count()==1) then
+     call pm_get_cl_arg(1,str)
      out_debug_files=.false.
-  else if(iargc()==2) then
-     call getarg(1,str)
+  else if(pm_get_cl_count()==2) then
+     call pm_get_cl_arg(1,str)
      if(str/='-d') call usage() 
-     out_debug_files=.true.
-     call getarg(2,str)
+     out_debug_files=pm_main_process
+     call pm_get_cl_arg(2,str)
   else
      call usage()
   endif
-  inquire(file=trim(str)//'.pmm',exist=ok)
-  if(.not.ok) call usage()
 
+  call pm_change_filename(str)
+  !write(*,*) 'Input file:',trim(str)
+  if(.not.pm_file_exists(str)) call usage()
+
+  ! ************* Parser ********************
+  if(pm_debug_level>1) write(*,*) 'PARSING>>'
+  
   ! Parse sytem module
   call init_parser(parser,context)
   call sysdefs(parser)
@@ -76,8 +90,7 @@ program pm
      close(9)
   endif
 
-  ! ************* Parser ********************
-  if(pm_debug_level>1) write(*,*) 'PARSING'
+  ! Parse other modules
   name=name_entry(parser,trim(str))
   call new_modl(parser,name)
   root=parser%modls
@@ -87,15 +100,23 @@ program pm
      parser%modls=parser%modl%data%ptr(&
           parser%modl%offset+modl_link)
      if(pm_fast_isnull(parser%modl)) exit
+     str=' '
      call pm_name_string(context,&
           int(get_modl_name(parser%modl),pm_p),str)
-     open(unit=8,file=trim(str)//'.pmm')
-     parser%iunit=8
+     call pm_change_filename(str)
+     call pm_open_file(pm_comp_file_unit,str,ok)
+     if(.not.ok) then
+        if(pm_main_process) then
+           write(*,*) 'Cannot open: '//trim(str)
+           call pm_stop('Compilation terminated')
+        endif
+     endif
+     parser%iunit=pm_comp_file_unit
      parser%lineno=0
      call next_line(parser)
      call scan(parser)
      call decl(parser)
-     close(8)
+     close(pm_comp_file_unit)
      call pm_gc(context,.false.)
      do jj=0,pm_dict_size(context,parser%modl_dict)
         p=pm_dict_val(context,parser%modl_dict,jj)
@@ -106,89 +127,91 @@ program pm
         close(9)
      endif
   enddo
-  if(parser%error_count>0) stop 'Parse errors'
+  if(parser%error_count>0) call pm_stop('Parse errors')
   call pm_gc(context,.false.)
 
   ! ***************Linker*******************
-  if(pm_debug_level>1) write(*,*) 'LINKING'
+  if(pm_debug_level>1) write(*,*) 'LINKING>>'
   call link_includes(context,parser%modl_dict)
   call pm_gc(context,.false.)
   if(out_debug_files) then
-     open(unit=8,file='linker.out')
-     call dump_module(context,8,root)
-     close(8)
+     open(unit=pm_comp_file_unit,file='linker.out')
+     call dump_module(context,pm_comp_file_unit,root)
+     close(pm_comp_file_unit)
   endif
   
   !************ Code generation ***************
-  if(pm_debug_level>1) write(*,*) 'CODE GENERATION'
+  if(pm_debug_level>1) write(*,*) 'CODE GENERATION>>'
   prog=root%data%ptr(root%offset+modl_stmts)
-  if(pm_fast_isnull(prog)) stop 'No program defined to run'
+  if(pm_fast_isnull(prog)) call pm_stop('No program defined to run')
   call init_coder(context,coder)
   call trav_prog(coder,prog)
   if(out_debug_files) then
-!!$     open(unit=8,file='coder.out')
-!!$     call dump_code_tree(coder,pm_null_obj,8,coder%vstack(1),1)
-!!$     write(8,*) '------------------------'
-!!$     call dump_sigs(coder,8)
-!!$     close(8)
-     open(unit=8,file='codegen.out')
-     call qdump_code_tree(coder,pm_null_obj,8,coder%vstack(1),1)
-     call dump_sigs(coder,8)
-     close(8)
+!!$     open(unit=pm_comp_file_unit,file='coder.out')
+!!$     call dump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
+!!$     write(pm_comp_file_unit,*) '------------------------'
+!!$     call dump_sigs(coder,pm_comp_file_unit)
+!!$     close(pm_comp_file_unit)
+     open(unit=pm_comp_file_unit,file='codegen.out')
+     call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
+     call dump_sigs(coder,pm_comp_file_unit)
+     close(pm_comp_file_unit)
+     
   endif
-  if(coder%num_errors>0) stop 'Code generation errors'
+  if(coder%num_errors>0) call pm_stop('Code generation errors')
   
   ! *********** Type Inference *********************
-  if(pm_debug_level>1) write(*,*) 'TYPE INFERENCE'
+  if(pm_debug_level>1) write(*,*) 'TYPE INFERENCE>>'
   call prc_prog(coder)
   if(out_debug_files) then
-     open(unit=8,file='infer.out')
-     call dump_code_tree(coder,pm_null_obj,8,coder%vstack(1),1)
-     call dump_res_sigs(coder,8)
-     close(8)
+     open(unit=pm_comp_file_unit,file='infer.out')
+     call dump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
+     call dump_res_sigs(coder,pm_comp_file_unit)
+     close(pm_comp_file_unit)
   endif
-  if(coder%num_errors>0) stop 'Type inference errors'
+  if(coder%num_errors>0) call pm_stop('Type inference errors')
 
 
   !**************** Backend **********************
-  if(pm_debug_level>1) write(*,*) 'FINAL STAGE'
+  if(pm_debug_level>1) write(*,*) 'FINAL STAGE>>'
   call init_fs(context,fs,coder%proc_cache)
   call finalise_prog(fs,coder%vstack(1))
   call finalise_procs(fs)
   if(out_debug_files) then
-     open(unit=8,file='final.out')
+     open(unit=pm_comp_file_unit,file='final.out')
      context%funcs=fs%code_cache
-     call dump_wc(context,8)
-     close(8)
+     call dump_wc(context,pm_comp_file_unit)
+     close(pm_comp_file_unit)
   endif
+  if(coder%num_errors>0) call pm_stop('Errors in final coding stage')
 
   !********** Run interpreter ***********************
   if(pm_debug_level>1) write(*,*) 'RUNNING...'
   ! Pass over code from backend
   context%funcs=pm_dict_vals(context,fs%code_cache)
   ! Create intial vector engine structure
-  ve1=pm_fast_newnc(context,pm_long,4_pm_p)
-  ve1%data%ln(ve1%offset)=0_pm_ln
-  ve1%data%ln(ve1%offset+1)=0_pm_ln
-  ve1%data%ln(ve1%offset+2)=0_pm_ln
-  ve1%data%ln(ve1%offset+3)=1_pm_ln
-  ve=pm_fast_newnc(context,pm_pointer,2_pm_p)
-  ve%data%ptr(ve%offset)=pm_null_obj
-  ve%data%ptr(ve%offset+1)=ve1
+  ve=simple_ve(context,1_pm_ln)
   arg(1)=ve
-
   ! Run the code
   err=pm_run(context,pm_null_obj,pm_null_obj,&
        pm_null_obj,op_call,0_pm_i16,arg,1)
-
   call pm_delete_register(context,reg)
+  if(err/=0) then
+     call pm_abort('Runtime error')
+  endif
+  call finalise_par
 contains
+  
   include 'fisnull.inc'
   include 'fnewnc.inc'
+  
   subroutine usage()
-    write(*,*) 'Usage: pm [-d] root_module_name'
-    write(*,*) 'Module name should not have .pmm suffix'
-    write(*,*) 'Option -d outputs intermediate compilation for debug'
-    stop
+    if(pm_main_process) then
+       write(*,*) 'Usage: pm [-d] root_module_name'
+       write(*,*) 'Module name should not have .pmm suffix'
+       write(*,*) 'Option -d outputs intermediate compilation for debug'
+    endif
+    call pm_stop(' ')
   end subroutine usage
+
 end program pm

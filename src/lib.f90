@@ -38,22 +38,23 @@ module pm_lib
   public:: pm_obj_set_new, pm_obj_set_lookup, pm_obj_set_add, &
        pm_obj_set_keys,pm_obj_set_key,pm_obj_set_size,pm_obj_set_from
   public:: pm_deep_copy
-  public:: pm_intern,pm_intern_val
-  public:: pm_name_val, pm_name_string, pm_name_as_string
   
   integer(pm_p),public,parameter:: pm_first_libtype=pm_usr+1
   integer(pm_p),public,parameter:: pm_matched_type=pm_first_libtype
   integer(pm_p),public,parameter:: pm_dict_type = pm_first_libtype+1
   integer(pm_p),public,parameter:: pm_set_type = pm_first_libtype+2
   integer(pm_p),public,parameter:: pm_obj_set_type = pm_first_libtype+3
-  integer(pm_p),public,parameter:: pm_string_type=pm_first_libtype+4
-  integer(pm_p),public,parameter:: pm_poly_type=pm_first_libtype+5
-  integer(pm_p),public,parameter:: pm_struct_type=pm_first_libtype+6
-  integer(pm_p),public,parameter:: pm_rec_type=pm_first_libtype+7
-  integer(pm_p),public,parameter:: pm_polyref_type=pm_first_libtype+8
-  integer(pm_p),public,parameter:: pm_array_type=pm_first_libtype+9
+  integer(pm_p),public,parameter:: pm_prc_type = pm_first_libtype+4
+  integer(pm_p),public,parameter:: pm_string_type=pm_first_libtype+5
+  integer(pm_p),public,parameter:: pm_poly_type=pm_first_libtype+6
+  integer(pm_p),public,parameter:: pm_struct_type=pm_first_libtype+7
+  integer(pm_p),public,parameter:: pm_rec_type=pm_first_libtype+8
+  integer(pm_p),public,parameter:: pm_polyref_type=pm_first_libtype+9
+  integer(pm_p),public,parameter:: pm_array_type=pm_first_libtype+10
+  integer(pm_p),public,parameter:: pm_const_array_type=pm_first_libtype+11
+  integer(pm_p),public,parameter:: pm_elemref_type=pm_first_libtype+12
 
-  integer(pm_p),public,parameter:: pm_last_libtype=pm_array_type
+  integer(pm_p),public,parameter:: pm_last_libtype=pm_elemref_type
   
   integer,parameter:: max_count=1000
 
@@ -82,7 +83,7 @@ contains
   function pm_dict_lookup(context,obj,key,n_out) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj,key
-    integer,intent(out),optional:: n_out
+    integer(pm_ln),intent(out),optional:: n_out
     type(pm_ptr):: ptr
     integer(pm_ln):: h,n
     if(pm_debug_level>0) then
@@ -99,7 +100,7 @@ contains
     else
        ptr=pm_null_obj
     endif
-    if(present(n_out)) n=n_out
+    if(present(n_out)) n_out=n
   end function pm_dict_lookup
 
   ! Set value in dictionary object (optionally add / overwrite)
@@ -1221,118 +1222,5 @@ contains
     newhash=newhash+ishftc(newhash,15)
   end function hashfn
 
-  ! Create a name value from a string
-  function pm_intern(context,str) result(n)
-    type(pm_context),pointer:: context
-    character(len=*),intent(in):: str
-    integer(pm_p):: n
-    type(pm_root),pointer:: root
-    type(pm_ptr):: string
-    string=pm_new_string(context,str)
-    n=pm_set_lookup(context,context%names,string)
-    if(n==0) then
-       root=>pm_add_root(context,string)
-       n=pm_set_add(context,context%names,string)
-       call pm_delete_root(context,root)
-    endif
-  end function pm_intern
-
-  ! Intern a value
-  function pm_intern_val(context,val) result(n)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: val
-    integer(pm_p):: n
-    n=pm_set_lookup(context,context%names,val)
-    if(n==0) then
-       n=pm_set_add(context,context%names,val)
-    endif
-  end function pm_intern_val
-  
-  ! Get name value
-  function pm_name_val(context,m) result(val)
-    type(pm_context),pointer:: context
-    integer(pm_p):: m
-    type(pm_ptr):: val
-    type(pm_ptr):: keys
-    keys=pm_set_keys(context,context%names)
-    if(pm_debug_level>0) then
-       if(m<1.or.m>pm_fast_esize(keys)) &
-            call pm_panic('name_val')
-    endif
-    val=keys%data%ptr(keys%offset+m-1)
-  contains
-    include 'fesize.inc'
-  end function pm_name_val
-
-  ! Get name string from name entry
-  recursive subroutine pm_name_string(context,m,str)
-    type(pm_context),pointer:: context
-    integer(pm_p),intent(in):: m
-    character(len=*),intent(out):: str
-    integer(pm_p):: n
-    character(len=100):: str2
-    type(pm_ptr):: keys,vals,ptr
-    integer:: i
-    n=m
-    if(n>0) then
-       keys=pm_set_keys(context,context%names)
-       if(n<=pm_fast_esize(keys)) then
-          ptr=keys%data%ptr(keys%offset+n-1)
-          if(pm_fast_vkind(ptr)==pm_string) then
-             call pm_strval(ptr,str)
-          else if(pm_fast_vkind(ptr)==pm_int16) then
-             str='('
-             do i=0,pm_fast_esize(ptr)
-                if(ptr%data%i16(ptr%offset+i)>64) then
-                   call pm_name_string(context,&
-                        int(ptr%data%i16(ptr%offset+i),pm_p),str2)
-                else
-                   write(str2,'(i6)') ptr%data%i16(ptr%offset+i)
-                   str2=adjustl(str2)
-                endif
-                if(i==0) then
-                   str=trim(str)//trim(str2)
-                else
-                   str=trim(str)//'.'//trim(str2)
-                endif
-             enddo
-             str=trim(str)//')'
-!!$             if(marked(ptr)) then
-!!$                str=trim(str)//')T'
-!!$             else
-!!$                str=trim(str)//')F'
-!!$             endif
-            
-          else if(pm_fast_vkind(ptr)==pm_int) then
-             call pm_name_string(context,&
-                  int(ptr%data%i(ptr%offset),pm_p),str2)
-             str=trim(str2)//'::'
-             call pm_name_string(context,&
-                  int(ptr%data%i(ptr%offset+1),pm_p),str2)
-             str=trim(str)//trim(str2)
-          else
-             str='?type'
-          endif
-       else
-          str='???'
-       endif
-    else if(n<0) then
-       str='(-ve)'
-    else
-       str='EOF'
-    endif
-  contains
-    include 'fvkind.inc'
-    include 'fesize.inc'
-  end subroutine pm_name_string
-
-  ! Returns name as a string
-  function pm_name_as_string(context,m) result(str)
-    type(pm_context),pointer:: context
-    integer(pm_p):: m
-    character(len=300):: str
-    str=''
-    call pm_name_string(context,m,str)
-  end function pm_name_as_string
 
 end module pm_lib

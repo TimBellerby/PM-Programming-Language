@@ -35,7 +35,7 @@
     ptr_p=>context%obj_list(esize,vkind)
     ptr=ptr_p
     if(associated(ptr%data)) then
-       if(ptr%offset<ptr%data%next_sweep) then
+       if(ptr%offset<ptr%data%next_sweep) then				  
           ptr_p%offset=ptr%offset+esize
           return
        endif

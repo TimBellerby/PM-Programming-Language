@@ -23,50 +23,58 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 FC=gfortran
-FFLAGS=-g  -fbounds-check -fcheck=mem
-PMCODE= kinds.o memory.o lib.o types.o parser.o linker.o sysdefs.o codegen.o infer.o backend.o array.o vm.o main.o
+PC=mpifort
+FFLAGS=-g #   -fbounds-check -fcheck=mem # -Wall
+PFLAGS=-g  #  -fbounds-check -fcheck=mem
+PMCODE= sysdep.o kinds.o memory.o lib.o types.o parser.o linker.o sysdefs.o codegen.o infer.o backend.o array.o parlib.o vm.o main.o
 
-all : pm.exe
+all : pm
 
-pm.exe : $(PMCODE)
-	$(FC) -o pm $(FFLAGS) $(PMCODE) 
+pm : $(PMCODE)
+	$(PC) -o pm $(PFLAGS) $(PMCODE) 
 
-kinds.o : kinds.f90
+sysdep.o : sysdep.f90
+	$(PC) $(PFLAGS) -c $<
+
+kinds.o : kinds.f90 sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-memory.o : memory.f90 kinds.o
+memory.o : memory.f90 kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-lib.o : lib.f90 kinds.o memory.o
+lib.o : lib.f90 memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-types.o : types.f90 parser.o lib.o kinds.o memory.o
+parser.o : parser.f90 lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-parser.o : parser.f90 lib.o kinds.o memory.o
+types.o : types.f90 parser.o lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-linker.o : linker.f90  parser.o lib.o kinds.o memory.o
+array.o : array.f90 types.o lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-sysdefs.o : sysdefs.f90 parser.o lib.o kinds.o memory.o
+parlib.o : parlib.f90 array.f90 types.o lib.o memory.o kinds.o sysdep.o
+	$(PC) $(PFLAGS) -c $<
+
+linker.o : linker.f90  parser.o lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-codegen.o : codegen.f90 parser.o sysdefs.o types.o lib.o kinds.o memory.o
+sysdefs.o : sysdefs.f90 parser.o lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-infer.o : infer.f90 codegen.o parser.o sysdefs.o types.o lib.o kinds.o memory.o
+codegen.o : codegen.f90 parser.o sysdefs.o types.o lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-array.o : array.f90 sysdefs.o types.o lib.o kinds.o memory.o
+infer.o : infer.f90 codegen.o parser.o sysdefs.o types.o lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-backend.o : backend.f90 array.o infer.o codegen.o parser.o sysdefs.o types.o lib.o kinds.o memory.o
+backend.o : backend.f90 array.o infer.o codegen.o parser.o sysdefs.o types.o lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-vm.o : vm.f90 array.o sysdefs.o types.o lib.o kinds.o memory.o
+vm.o : vm.f90 parlib.o array.o sysdefs.o types.o lib.o memory.o kinds.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-main.o : main.f90 vm.o array.o backend.o infer.o codegen.o linker.o parser.o sysdefs.o types.o lib.o kinds.o memory.o
-	$(FC) $(FFLAGS) -c $<
+main.o : main.f90 vm.o parlib.o array.o backend.o infer.o codegen.o linker.o parser.o sysdefs.o types.o lib.o memory.o kinds.o sysdep.o
+	$(FC) $(PFLAGS) -c $<
 

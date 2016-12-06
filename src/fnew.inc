@@ -33,6 +33,7 @@
     ptr_p=>context%obj_list(esize,vkind)
     ptr=ptr_p
     if(associated(ptr%data)) then
+!       write(*,*) 'Swwwp>>>',ptr%offset,ptr%data%next_sweep,mod(ptr%offset-1,esize)
        if(ptr%offset<ptr%data%next_sweep) then
           ptr_p%offset=ptr%offset+esize
           if(vkind>=pm_pointer)&

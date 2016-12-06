@@ -1,0 +1,2 @@
+write(*,'(a)') 'hello'
+end

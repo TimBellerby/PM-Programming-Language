@@ -24,6 +24,7 @@
 ! THE SOFTWARE.
 module pm_linker
   use pm_kinds
+  use pm_sysdep
   use pm_memory
   use pm_lib
   use pm_parser
@@ -181,6 +182,7 @@ contains
     character(len=*),intent(in):: mess
     type(pm_ptr),intent(in):: name
     character(len=100):: namestr,mnamestr,inamestr
+    if(.not.pm_main_process) return
     call pm_name_string(context,name%offset,namestr)
     call pm_name_string(context,node_get_modl_name(node),&
          mnamestr)

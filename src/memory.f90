@@ -1,9 +1,9 @@
 !
-!PM (Parallel Models) Programming Language
+! PM (Parallel Models) Programming Language
 !
-!Released under the MIT License (MIT)
+! Released under the MIT License (MIT)
 !
-!Copyright (c) Tim Bellerby, 2016
+! Copyright (c) Tim Bellerby, 2016
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -28,12 +28,6 @@ module pm_memory
 
   private
 
-  integer,parameter,public:: pm_debug_level=0
-  ! 1= basic checks - slows things down
-  ! 2= print short additional info
-  ! 3= print substantial additional info
-  ! 4= print & check everything
-
   logical,parameter:: gc_xtra_debug=.false.
 
   ! Public routines
@@ -45,11 +39,12 @@ module pm_memory
   public pm_ptr_eq, pm_new, pm_new_multi,pm_new_small, pm_new_large
   public pm_assign_new, pm_expand, pm_ptr_assign
   public pm_new_as_root,pm_get_ptr_as_root, pm_copy, pm_copy_ptr, pm_assign_copy
-  public pm_new_string, pm_concat_string, pm_strval, pm_fill_vect, pm_copy_obj, pm_set_obj
+  public pm_new_string, pm_concat_string, pm_strval, pm_fill_vect, &
+       pm_copy_obj, pm_set_obj
   public pm_add_root, pm_delete_root
   public pm_numroot, pm_delete_numroot
   public pm_register, pm_delete_register 
-  public pm_verify_ptr, pm_dump_tree, pm_panic, pm_copy_val, pm_copy_val_to0
+  public pm_verify_ptr, pm_dump_tree, pm_copy_val, pm_copy_val_to0
   public pm_copy_val_from0,pm_copy_from_slots, pm_copy_to_slots, pm_copy_slots
   public marked
 
@@ -102,7 +97,8 @@ module pm_memory
   integer,public,parameter:: pm_stack_pc=1
   integer,public,parameter:: pm_stack_oldstack=2
   integer,public,parameter:: pm_stack_func=3
-  integer,public,parameter:: pm_stack_locals=4
+  integer,public,parameter:: pm_stack_nullve = 4
+  integer,public,parameter:: pm_stack_locals=5
 
   ! Various size parameters
   integer(pm_f):: eg_flag
@@ -213,7 +209,7 @@ module pm_memory
      type(pm_ptr),&
           dimension(pm_large_obj_size,pm_int:pm_num_vkind):: obj_list
      type(pm_ptr):: threads_start,threads_end,running,wait_start,wait_end
-     type(pm_ptr):: tcache,pcache,names,lnames,funcs
+     type(pm_ptr):: tcache,pcache,names,lnames,funcs,null_ve
      type(pm_block_ptr),dimension(pm_int:pm_num_vkind):: &
           free_blocks, old_free_blocks,free_large_blocks,&
           old_free_large_blocks
@@ -223,7 +219,7 @@ module pm_memory
      integer(pm_ln):: hash
   end type pm_context
 
-  type(pm_ptr),public:: pm_null_obj,pm_tinyint_obj,pm_name_obj
+  type(pm_ptr),public:: pm_undef_obj,pm_null_obj,pm_tinyint_obj,pm_name_obj
   type(pm_ptr),public:: pm_true_obj,pm_false_obj
 
 contains
@@ -288,7 +284,7 @@ contains
 
   ! Add a root object
   function pm_add_root(context,ptr) result(root)
-    type(pm_context):: context
+    type(pm_context),pointer:: context
     type(pm_ptr):: ptr
     type(pm_root),pointer:: root
     integer:: status
@@ -315,6 +311,8 @@ contains
          root%last%next=>root%next
     if(associated(root%next)) &
          root%next%last=>root%last
+    if(associated(context%roots%next,root)) &
+         nullify(context%roots%next)
     if(context%num_free_roots<max_free_roots) then
        root%next=>context%free_roots
        context%free_roots=>root
@@ -411,6 +409,7 @@ contains
     type(pm_reg),pointer:: reg
     reg%last%next=>reg%next
     if(associated(reg%next)) reg%next%last=>reg%last
+    if(associated(context%regs%next,reg)) nullify(context%regs%next)
     if(context%num_free_regs<max_free_regs) then
        reg%next=>context%free_regs
        context%free_regs=>reg
@@ -429,7 +428,7 @@ contains
 
   ! Return pointer within object as root
   function pm_get_ptr_as_root(context,obj,n) result(root)
-    type(pm_context):: context
+    type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
     integer(pm_ln):: n
     type(pm_root),pointer:: root
@@ -636,7 +635,7 @@ contains
        ptr%data=>new_block(context,vkind,int(esize,pm_ln))
        ptr%offset=1
        ptr%data%next=>ptr%data
-       ptr%data%next_sweep=ptr%data%size-esize+1
+       ptr%data%next_sweep=ptr%data%size-esize+2
        ptr_p%data=>ptr%data
        ptr_p%offset=1+esize
        nptr=ptr
@@ -647,7 +646,8 @@ contains
     if(ptr%data%tick<context%tick) then
        if(gc_xtra_debug) write(*,*) 'RESTART',esize,ptr%data%hash,ptr%offset
        ptr%data%tick=context%tick
-       ptr%offset=ptr%data%next_sweep
+       if(ptr%data%next_sweep/=ptr%data%size-esize+2 ) &
+            ptr%offset=ptr%data%next_sweep
     endif
 
     ! Lazy sweep - find free slot
@@ -659,23 +659,33 @@ contains
           
           ! Call GC and restart scan from start of this block
           call pm_gc(context,.false.)
-          ptr%offset=1
-          ptr%data%tick=context%tick
-          
-          ! Try again
-          call next_free()
-
+          ptr_p=>context%obj_list(esize,vkind)
+          if(associated(ptr_p%data)) then
+             ptr=ptr_p
+             ptr%offset=1
+             ptr%data%tick=context%tick
+             
+             ! Try again
+             call next_free()
+          else
+             ok=.false.
+          endif
        endif
        
        if(.not.ok) then
           ! All full - allocate new block
           ptr%data=>new_block(context,vkind,int(esize,pm_ln))
           ptr%offset=1
-          ptr%data%next_sweep=ptr%data%size-esize+1
-          ptr%data%next=>ptr_p%data%next
-          ptr_p%data%next=>ptr%data
-          ptr_p%data=>ptr%data
-          ptr_p%offset=1+esize
+          ptr%data%next_sweep=ptr%data%size-esize+2
+          ptr_p=>context%obj_list(esize,vkind)
+          if(associated(ptr_p%data)) then
+             ptr%data%next=>ptr_p%data%next
+             ptr_p%data%next=>ptr%data
+             ptr_p%data=>ptr%data
+             ptr_p%offset=1+esize
+          else
+             ptr%data%next=>ptr%data
+          endif
           nptr=ptr
           goto 10
        endif
@@ -695,7 +705,7 @@ contains
        ! No following loc - force gc next time
        ! allocation attempted for this slot
        ptr%data%next_sweep=ptr%data%size+1
-       ptr%offset=ptr%data%size+1
+       ptr%offset=ptr%data%size+2
        ptr_p=ptr
        goto 10
     endif
@@ -711,7 +721,7 @@ contains
        endif
        if(marked(ptr)) exit
        if(gc_xtra_debug) &
-            write(0,*) 'FREE',ptr%offset,ptr%data%ptr(ptr%offset)%offset
+            write(0,*) 'FREE',ptr%offset
        ptr%offset=ptr%offset+esize
     enddo
     ptr%data%next_sweep=ptr%offset
@@ -720,6 +730,12 @@ contains
 
     if(pm_debug_level>3) call pm_verify_heap(context)
 
+    if(pm_debug_level>0) then
+       if(mod(nptr%offset-1,esize)/=0.or.nptr%offset+esize>nptr%data%size+1) then
+           call pm_panic('misaligned allocation')
+       endif
+    endif
+    
     ! Always initialise pointers
     if(vkind>=pm_pointer) &
          nptr%data%ptr(nptr%offset:nptr%offset+esize-1)=pm_null_obj
@@ -743,9 +759,10 @@ contains
             ptr%data%tick=context%tick
          endif
          if(gc_xtra_debug) then
-            if(gc_xtra_debug) write(*,*) 'CHECK MARKED',ptr%data%hash,ptr%offset,marked(ptr)
+            write(*,*) 'CHECK MARKED',ptr%data%hash,ptr%offset,marked(ptr)
             if(ptr%data%vkind>=pm_pointer) &
-                 write(*,*) 'pting to',ptr%data%ptr(ptr%offset)%data%hash,ptr%data%ptr(ptr%offset)%offset
+                 write(*,*) 'pting to',ptr%data%ptr(ptr%offset)%data%hash,&
+                 ptr%data%ptr(ptr%offset)%offset
          endif
          if(.not.marked(ptr)) exit
          ptr%offset=ptr%offset+esize
@@ -789,8 +806,9 @@ contains
     character(len=*),intent(in):: string
     type(pm_ptr):: ptr
     integer::i,n
-    n=len(string)
+    n=max(1,len(string))
     ptr=pm_new(context,pm_string,int(n,pm_ln))
+    ptr%data%s(ptr%offset)=' '
     do i=1,n
        ptr%data%s(ptr%offset+i-1)=string(i:i)
     enddo
@@ -924,8 +942,11 @@ contains
        is_single=.false.
     endif
     spaces=' '
-    call pm_verify_ptr(ptr,'Dumping tree',.true.,ok)
-    if(.not.ok) return
+    call pm_verify_ptr(ptr,'Dumping tree',.true.,ok=ok)
+    if(.not.ok) then
+       write(iunit,*) spaces(1:depth*2),'BAD PTR!!!'
+       return
+    endif
     select case(ptr%data%vkind)
     case(pm_name)
        write(iunit,*) spaces(1:depth*2),'Name: ',ptr%offset
@@ -1168,6 +1189,7 @@ contains
              write(iunit,*) spaces(1:depth*2),')'
              return
           else
+             write(*,*) ptr%offset,ptr%data%esize,(ptr%offset-1)/(ptr%data%esize+1)
              write(iunit,*) spaces(1:depth*2),'Stack(',ptr%data%esize
           endif
        else
@@ -1277,7 +1299,7 @@ contains
 
     if(pm_debug_level>1) write(*,*) '==GC started=='
 
-    if(pm_debug_level>2) call pm_verify_heap(context)
+    if(pm_debug_level>0) call pm_verify_heap(context)
 
     major_cycle=force_major_cycle.or.context%tick>max_ticks
     10 continue
@@ -1320,6 +1342,7 @@ contains
     call mark_from(context,context%pcache)
     call mark_from(context,context%names)
     call mark_from(context,context%lnames)
+    call mark_from(context,context%null_ve)
     if(.not.associated(context%heap)) then
        call mark_from(context,context%funcs)
     endif
@@ -1336,7 +1359,12 @@ contains
        enddo
        if(associated(reg_obj%array)) then
           do i=1,reg_obj%asize
+             if(pm_debug_level>3) then
+                write(*,*) 'slot:',i
+                write(*,*) reg_obj%array(i)%data%vkind
+             endif
              call mark_from(context,reg_obj%array(i))
+             if(pm_debug_level>3) write(*,*) 'slot done'
           enddo
        endif
        reg_obj=>reg_obj%next
@@ -1347,6 +1375,7 @@ contains
     ! Mark from roots
     root_obj=>context%roots%next
     do while(associated(root_obj))
+       if(pm_debug_level>3) write(*,*) 'Mark from:',root_obj%ptr%data%hash,root_obj%ptr%offset
        call mark_from(context,root_obj%ptr)
        root_obj=>root_obj%next
     enddo
@@ -1454,6 +1483,8 @@ contains
     type(pm_reg),pointer:: reg
     if(startup) then
        if(pm_debug_level>1) write(*,*) 'Initialising GC'
+       pm_undef_obj%data=>new_block(context,pm_undef,0_pm_ln)
+       pm_undef_obj%offset=0
        pm_null_obj%data=>new_block(context,pm_null,0_pm_ln)
        pm_null_obj%offset=0
        pm_tinyint_obj%data=>new_block(context,pm_tiny_int,0_pm_ln)
@@ -1520,6 +1551,7 @@ contains
     context%pcache=pm_null_obj
     context%names=pm_null_obj
     context%lnames=pm_null_obj
+    context%null_ve=pm_null_obj
     context%funcs=pm_null_obj
     context%max_numroots=0
     context%last_numroot=0
@@ -1659,7 +1691,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_block),pointer:: blk
     integer:: i
-    if(pm_debug_level>2) write(*,*) 'Free block'
+    if(pm_debug_level>1) write(*,*) 'Free block'
     if(blk%size/block_size>context%free_cache_size/4) then
        deallocate(blk)
        return
@@ -1807,13 +1839,13 @@ contains
              ptr2%offset=((ptr2%offset-1)/i)*i+1
              if(gc_xtra_debug) write(*,*) 'TO',ptr2%offset,'USING',ptr2%data%esize+1
              ptr3=ptr2%data%ptr(ptr2%offset+pm_stack_oldstack)
-             if(associated(ptr3%data%context,context)) then 
+             if(associated(ptr3%data%context,context)) then
                 if(ptr3%data%vkind==pm_stack) then 
                    if(marked(ptr3)) then
                       ! OLDSTACK is older frame - mark from it
                       n=ptr3%data%ptr(ptr3%offset)%offset
                       do i=ptr3%offset+pm_stack_locals,ptr3%offset+n
-                         ptr4=ptr3%data%ptr(ptr3%offset+i)
+                         ptr4=ptr3%data%ptr(i)
                          if(associated(ptr4%data%context,context)) then
                             if(.not.marked(ptr4)) then
                                if(ptr4%data%vkind>=pm_pointer) then
@@ -1846,7 +1878,8 @@ contains
        do i=ptr2%offset,ptr2%offset+n
           ptr3=ptr2%data%ptr(i)
           if(gc_xtra_debug) &
-               write(*,*) 'Mark from Slot',i-ptr2%offset,ptr3%data%vkind,ptr3%data%hash,ptr3%offset
+               write(*,*) 'Mark from Slot',&
+               i-ptr2%offset,ptr3%data%vkind,ptr3%data%hash,ptr3%offset
           if(pm_debug_level>0) &
                   call pm_verify_ptr(ptr3,'in mark_from')
           if(associated(ptr3%data%context,context)) then
@@ -2005,13 +2038,12 @@ contains
        next=>blk%next
        if(all(next%marks==0)) then
           blk%next=>next%next
-          blk=>next%next
           if(associated(list,next)) list=>blk
           call free_block(context,next)
        else
           blk=>next
        endif
-       if(associated(blk,list)) exit
+       if(associated(blk%next,list)) exit
     enddo
   end subroutine free_empty_blocks
  
@@ -2665,13 +2697,6 @@ contains
        call pm_delete_numroot(context%heap,ext(2))
     end select
   end subroutine pm_finalize
-
-  subroutine pm_panic(emess)
-    character(len=*):: emess
-    write(*,*) 'Panic: '//trim(emess)
-    write(*,*) pm_null_obj%data%ptr(-10001)%offset
-    stop 'System crash!'
-  end subroutine pm_panic
 
 end module pm_memory
 
