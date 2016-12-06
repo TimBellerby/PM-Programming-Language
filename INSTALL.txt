@@ -8,4 +8,13 @@ You may need to edit the Makefile - sorry no ./configure yet!
 
 You can edit sysdep.f90 - but are very unlikely to need to do so.
 
+To run:
+ 
+./pm module_name          --> file will be module_name.pmm
+./pm module_name.pmm
+
+To use more than one process/core:
+
+mpirun ... ./pm module_name   
+
 This is an early release so is likely to have bugs!
