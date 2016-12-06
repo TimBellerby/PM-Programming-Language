@@ -9,19 +9,13 @@ For a more complete project description see www.pm-lang.org
 
 The language specification (available in /doc) while incomplete in places, will give
 
-a good view of the features of the version 0.1 of the language.
+a good view of the features of the version 0.2 of the language.
     
 
-Most of the single-node part of the language - including concurrent loops and communicating
+This is an initial (not stable) release of version 0.2 of the language.
 
-operators (apart from reductions) is now working. Types are currently restricted to int, long and bool, 
+Some features are missing/incomplete - including
+integer and real types with defined bit size
+polymorphic types
 
-with some support for strings. 
-
-
-There is a floating bug in the code generator that causes crashes in some compilations. I am chasing
-
-this down.
-
-
-Look out for updates over the next month or so.
+Watch out for continuing updates.
