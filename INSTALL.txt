@@ -1,0 +1,11 @@
+In order to compile and install PM you will need:
+
+A Fortran compiler - F95 with allocatable components TR: ISO/IEC TR 15581:2001 (almost any compiler)
+
+A version of MPI (so far tested with OpenMPI)
+
+You may need to edit the Makefile - sorry no ./configure yet!
+
+You can edit sysdep.f90 - but are very unlikely to need to do so.
+
+This is an early release so is likely to have bugs!
