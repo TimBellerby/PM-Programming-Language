@@ -1,22 +1,22 @@
-! Solution to 2D Laplace equation using Jacobi iteration
-! Boundaries set to 0.0 except for left boundary set to 1.0
-
-const grid_size=10
+const grid_size=50
 const tol=0.0001
 const model_grid=grid(1..grid_size,1..grid_size)
 for point in model_grid do
    x:=0.5
    repeat
-      xnew:=(x@[-1,0]|1.0+x@[1,0]|0.0+x@[0,1]|0.0+x@[0,-1]|0.0)/4.0
+      xnew:=(x@{-1,0}|1.0+x@{1,0}|0.0+x@{0,1}|0.0+x@{0,-1}|0.0)/4.0
       diff:=(x-xnew)**2.0
+      !dump(diff)
+      !print("diff"//point.d1//","//point.d2//"="//x//","//xnew)
       maxdiff:=maxval::diff
       if point==[1l,1l] then print("Max diff="//maxdiff) endif
       x=xnew
    until maxdiff<tol
-let
-   outgrid=@x
+return
+   outgrid::=gather::x
 endfor
 for each point in model_grid do
+!  print(point.d1//","//point.d2)
    print(point.d1//","//point.d2//"="//outgrid[point])
 endfor
 

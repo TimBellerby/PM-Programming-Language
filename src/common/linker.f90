@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2016
+! Copyright (c) Tim Bellerby, 2017
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,7 @@
 module pm_linker
   use pm_kinds
   use pm_sysdep
+  use pm_compbase
   use pm_memory
   use pm_lib
   use pm_parser
@@ -63,7 +64,7 @@ contains
              write(*,*) 'including',trim(str)
           endif
           imodl=node%data%ptr(node%offset+node_args+1)
-          if(node_sym(node)==sym_use) then
+          if(node_sym(node)==sym_include) then
              call link_include(context,node,modl,imodl)
           else
              call link_include_mod(context,node,modl,imodl)
@@ -143,13 +144,20 @@ contains
     dict=modl%data%ptr(modl%offset+kind)
     lcl_dict=modl%data%ptr(modl%offset+kind+modl_local)
     idict=imodl%data%ptr(imodl%offset+kind)
-    if(kind==modl_param.or.kind==modl_default) then
+    if(kind==modl_param) then
        if(.not.pm_fast_isnull(pm_dict_lookup(context,dict,elem))) &
             call link_error(context,node,'Repeated definition:',elem)
        call pm_dict_set(context,&
             lcl_dict,elem,val,.true.,.false.,changed)
-       if(changed) &
-            call link_error(context,node,'Repeated inclusion:',elem)
+    elseif(kind==modl_tag) then
+       old=pm_dict_lookup(context,dict,elem)
+       if(.not.pm_fast_isnull(old)) then
+          if(old%offset/=val%offset) then
+             call link_error(context,node,&
+              'struct/rec tag does not have consistent elements across modules: ',&
+               elem)
+          endif
+       endif 
     else
        ! Check existing entry
        old=pm_dict_lookup(context,dict,elem)
@@ -190,7 +198,7 @@ contains
          node%offset+node_args)%offset,inamestr)
     write(*,*) 'Error: '//trim(mnamestr)//&
          ' include ',trim(inamestr)
-    write(*,*) trim(mess)//trim(namestr)
+    write(*,*) mess//trim(namestr)
   end subroutine link_error
 
 end module pm_linker

@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2016
+! Copyright (c) Tim Bellerby, 2017
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -23,8 +23,6 @@
 ! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ! THE SOFTWARE.
 
-
-
 module pm_array
   use pm_kinds
   use pm_memory
@@ -36,10 +34,16 @@ module pm_array
   integer(pm_p),parameter:: pm_array_typeof=1_pm_p
   integer(pm_p),parameter:: pm_array_vect=2_pm_p
   integer(pm_p),parameter:: pm_array_dom=3_pm_p
-  integer(pm_p),parameter:: pm_array_offset=4_pm_p
-  integer(pm_p),parameter:: pm_array_length=5_pm_p
-  integer(pm_p),parameter:: pm_array_shape=6_pm_p
-  integer(pm_p),parameter:: pm_array_size=7_pm_p
+  integer(pm_p),parameter:: pm_array_length=4_pm_p
+  integer(pm_p),parameter:: pm_array_offset=5_pm_p
+  integer(pm_p),parameter:: pm_array_size=6_pm_p
+
+  ! Elemref type offsets
+  integer(pm_p),parameter:: pm_elemref_typeof=1_pm_p
+  integer(pm_p),parameter:: pm_elemref_vect=2_pm_p
+  integer(pm_p),parameter:: pm_elemref_idx=3_pm_p
+  integer(pm_p),parameter:: pm_elemref_offset=4_pm_p
+  integer(pm_p),parameter:: pm_elemref_size=5_pm_p
 
   ! Error codes
   integer,parameter:: vector_type_error=-1
@@ -48,6 +52,7 @@ module pm_array
   integer,parameter:: vector_index_error=-4
   integer,parameter:: vector_shape_error=5
 
+  ! Widths for formatted outputs
   integer,parameter:: fmt_i_width=10
   integer,parameter:: fmt_ln_width=20
   integer,parameter:: fmt_r_width=15
@@ -57,25 +62,29 @@ module pm_array
 contains
 
   ! Zero any unused (according to ve) elements of vector of long ints
-  function vector_zero_unused(context,v,ve) result(ptr)
+  function vector_zero_unused(context,v,ve,zero) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ve
+    integer(pm_ln),intent(in),optional:: zero
     type(pm_ptr):: ptr
-    integer(pm_ln):: i,j,siz
+    integer(pm_ln):: i,j,siz,z
+    z=0_pm_ln
+    if(present(zero)) z=zero
     siz=pm_fast_esize(v)
     ptr=pm_new(context,pm_long,siz+1_pm_ln)
     if(pm_fast_isnull(ve)) then
-       ptr%data%ln(ptr%offset:ptr%offset+siz)=v%data%ln(v%offset:v%offset+siz)
+       ptr%data%ln(ptr%offset:ptr%offset+siz)=&
+            v%data%ln(v%offset:v%offset+siz)
     elseif(pm_fast_vkind(ve)==pm_logical) then
        do i=0,siz
           if(ve%data%l(ve%offset+i)) then
              ptr%data%ln(ptr%offset+i)=v%data%ln(v%offset+i)
           else
-             ptr%data%ln(ptr%offset+i)=0
+             ptr%data%ln(ptr%offset+i)=z
           endif
        enddo
     else
-       ptr%data%ln(ptr%offset:ptr%offset+siz)=0
+       ptr%data%ln(ptr%offset:ptr%offset+siz)=z
        do j=0,pm_fast_esize(ve)
           i=ve%data%ln(ve%offset+j)
           ptr%data%ln(ptr%offset+i)=v%data%ln(v%offset+i)
@@ -89,15 +98,15 @@ contains
 
   ! Make an array, or vector of arrays
   ! Defined by four vectors:
-  !  vec - vector of elements (for all arrays in array vector)
+  !  vec - vector of vectors of elements (for all arrays in array vector)
   !  dom - vector of array domain values 
   !  len - vector of array lengths (num's of elements)
   !  off - vector giving offset of first element of each array in vec
-  function make_array(context,akind,typno,vec,dom,shape,len,off) result(ptr)
+  function make_array(context,akind,typno,vec,dom,len,off) result(ptr)
     type(pm_context),pointer:: context
     integer(pm_p),intent(in):: akind
     integer(pm_i16),intent(in):: typno
-    type(pm_ptr),intent(in):: vec,dom,shape,len,off
+    type(pm_ptr),intent(in):: vec,dom,len,off
     type(pm_ptr):: ptr
     ptr=pm_fast_newnc(context,pm_usr,pm_array_size)
     ptr%data%ptr(ptr%offset)=pm_fast_tinyint(context,pm_array_type)
@@ -107,7 +116,6 @@ contains
     ptr%data%ptr(ptr%offset+pm_array_dom)=dom
     ptr%data%ptr(ptr%offset+pm_array_length)=len
     ptr%data%ptr(ptr%offset+pm_array_offset)=off
-    ptr%data%ptr(ptr%offset+pm_array_shape)=shape
   contains
     include 'fnewnc.inc'
     include 'ftiny.inc'
@@ -121,92 +129,178 @@ contains
     type(pm_ptr):: ptr
     type(pm_ptr)::a
     type(pm_root),pointer:: root
-    root=>pm_new_as_root(context,pm_usr,4_pm_ln)
+    type(pm_ptr):: w,vec,newvec,oldoff,off,newoff,idx,newidx
+    integer(pm_ln):: esize,i,j
+    root=>pm_new_as_root(context,pm_usr,int(pm_elemref_size,pm_ln))
     ptr=root%ptr
     ptr%data%ptr(ptr%offset)=pm_fast_tinyint(context,pm_elemref_type)
-    ptr%data%ptr(ptr%offset+1_pm_p)=&
-         array%data%ptr(array%offset+pm_array_typeof)
-    ptr%data%ptr(ptr%offset+2_pm_p)=&
-            array%data%ptr(array%offset+pm_array_vect)
+ 
+    esize=pm_fast_esize(index)
+    newidx=pm_assign_new(context,ptr,int(pm_elemref_idx,pm_ln),&
+         pm_long,esize+1_pm_ln,.false.)
+    newoff=pm_assign_new(context,ptr,int(pm_elemref_offset,pm_ln),&
+         pm_long,esize+1_pm_ln,.false.)
     if(pm_fast_typeof(array)==pm_elemref_type) then
-       a=array%data%ptr(array%offset+2_pm_p)
-       ptr%data%ptr(ptr%offset+2_pm_p)=&
-            a%data%ptr(a%offset+pm_array_vect)
-       call pm_ptr_assign(context,ptr,3_pm_ln,index_vector_indirect(context,&
-            a%data%ptr(a%offset+pm_array_length),&
-            a%data%ptr(a%offset+pm_array_offset),&
-            index,array%data%ptr(array%offset+3_pm_p),ve,errno))
+       newvec=pm_assign_new(context,ptr,int(pm_elemref_vect,pm_ln),&
+            pm_pointer,esize+1_pm_ln,.true.)
+       vec=array%data%ptr(array%offset+pm_elemref_vect)
+       ptr%data%ptr(ptr%offset+pm_elemref_typeof)=&
+            pm_fast_tinyint(context,int(full_type(vec%data%ptr(vec%offset)),pm_p))
+       idx=array%data%ptr(array%offset+pm_elemref_idx)
+       oldoff=array%data%ptr(array%offset+pm_elemref_offset)
+       do i=0,esize
+          w=vec%data%ptr(vec%offset+i)
+          w=w%data%ptr(w%offset+pm_array_vect)
+          off=w%data%ptr(w%offset+pm_array_offset)
+          j=idx%data%ln(idx%offset+i)+oldoff%data%ln(oldoff%offset+i)
+          call pm_ptr_assign(context,newvec,i,&
+               w%data%ptr(w%offset+j))
+          newidx%data%ln(newidx%offset+i)=&
+               index%data%ln(index%offset+i)
+          newoff%data%ln(newoff%offset+i)=&
+               off%data%ln(off%offset+j)
+       enddo
     else
-       ptr%data%ptr(ptr%offset+2_pm_p)=&
-            array%data%ptr(array%offset+pm_array_vect)
-       call pm_ptr_assign(context,ptr,3_pm_ln,index_vector(context,&
-            array%data%ptr(array%offset+pm_array_length),&
-            array%data%ptr(array%offset+pm_array_offset),&
-            index,ve,errno))
+       off=array%data%ptr(array%offset+pm_array_offset)
+       vec=array%data%ptr(array%offset+pm_array_vect)
+       ptr%data%ptr(ptr%offset+pm_elemref_typeof)=&
+            pm_fast_tinyint(context,&
+            int(full_type(vec%data%ptr(vec%offset)),pm_p))
+       do i=0,esize
+          newidx%data%ln(newidx%offset+i)=&
+               index%data%ln(index%offset+i)
+          newoff%data%ln(newoff%offset+i)=&
+               off%data%ln(off%offset+i)
+       enddo
+       call pm_ptr_assign(context,ptr,int(pm_elemref_vect,pm_ln),&
+            vec)
     endif
     call pm_delete_root(context,root)
   contains
     include 'ftiny.inc'
     include 'ftypeof.inc'
+    include 'fesize.inc'
   end function make_elem_ref
 
-  ! Create single-element reference from raw elements
-  function elemref(context,tno,array,index) result(ptr)
+  function get_elem_ref(context,p,esize,errno) result(ptr)
     type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: array,index
-    integer(pm_i16),intent(in):: tno
+    type(pm_ptr),intent(in):: p
+    integer(pm_ln),intent(in):: esize
+    integer,intent(out):: errno
     type(pm_ptr):: ptr
-    ptr=pm_fast_newnc(context,pm_usr,4_pm_p)
-    ptr%data%ptr(ptr%offset)=pm_fast_tinyint(context,pm_elemref_type)
-    ptr%data%ptr(ptr%offset+1_pm_p)=&
-         pm_fast_tinyint(context,int(tno,pm_p))
-    ptr%data%ptr(ptr%offset+2_pm_p)=array
-    ptr%data%ptr(ptr%offset+3_pm_p)=index
+    type(pm_ptr):: v,idx,off
+    type(pm_root),pointer:: root
+    if(pm_fast_typeof(p)==pm_elemref_type) then
+       v=p%data%ptr(p%offset+pm_elemref_vect)
+       idx=p%data%ptr(p%offset+pm_elemref_idx)
+       off=p%data%ptr(p%offset+pm_elemref_offset)
+       root=>pm_add_root(context,empty_copy_vector(context,v%data%ptr(v%offset),&
+            pm_fast_esize(idx)+1_pm_p))
+       call array_vect_index(context,root%ptr,v,idx,off,esize)
+       ptr=root%ptr
+       call pm_delete_root(context,root)
+    else
+       ptr=p
+    endif
   contains
-    include 'fnewnc.inc'
-    include 'ftiny.inc'
-  end function elemref
+    include 'fesize.inc'
+    include 'ftypeof.inc'
+  end function get_elem_ref
+
+  ! Return domain of an array
+  function array_dom(context,v,esize) result(ptr)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: esize
+    type(pm_ptr):: ptr
+    type(pm_ptr),target:: p,q
+    type(pm_ptr):: w,x,idx,off
+    integer(pm_ln):: i
+    type(pm_reg),pointer:: reg
+    if(pm_fast_typeof(v)==pm_array_type) then
+       ptr=v%data%ptr(v%offset+pm_array_dom)
+    else
+       reg=>pm_register(context,'adom',p,q)
+       w=v%data%ptr(v%offset+pm_elemref_vect)
+       idx=v%data%ptr(v%offset+pm_elemref_idx)
+       off=v%data%ptr(v%offset+pm_elemref_offset)
+       p=empty_copy_vector(context,w%data%ptr(w%offset),esize+1)
+       q=pm_new(context,pm_pointer,esize+1)
+       do i=0,esize
+          x=w%data%ptr(w%offset+i)
+          q%data%ptr(q%offset+i)=x%data%ptr(x%offset+pm_array_dom)
+       enddo
+       call array_vect_index(context,p,q,idx,off,esize)
+       call pm_delete_register(context,reg)
+    endif
+  contains
+    include 'ftypeof.inc'
+  end function array_dom
 
   ! Make an array with j elements having intial value val
   ! domain dom
   ! (vector inputs yield vector of arrays)
-  function make_array_dim(context,typno,val,dom,shape,j,ve) result(ptr)
+  function make_array_dim(context,typno,val,dom,j,ve) result(ptr)
     type(pm_context),pointer:: context
     integer(pm_i16),intent(in):: typno
-    type(pm_ptr),intent(in):: val,dom,shape,j,ve
+    type(pm_ptr),intent(in):: val,dom,j,ve
     type(pm_ptr):: ptr
-    type(pm_ptr),target:: len,off,vec
+    type(pm_ptr),target:: len,off,vec,domv
     type(pm_reg),pointer:: reg
+    integer(pm_ln):: i,esize
     reg=>pm_register(context,'arrdim',vec,len,off)
-    if(pm_fast_isnull(ve)) then
-       len=j
-    else
-       len=vector_zero_unused(context,j,ve)
-    endif
-    off=array_offsets(context,len)
-    vec=make_vector(context,val,len,0_pm_ln,0_pm_p,total_size(len),.false.)
-    ptr=make_array(context,pm_array_type,typno,vec,dom,shape,len,off)
+    esize=pm_fast_esize(j)
+    len=vector_zero_unused(context,j,ve)
+    vec=pm_new(context,pm_pointer,esize+1_pm_ln)
+    call pm_ptr_assign(context,vec,0_pm_ln,vector_from_scalar(context,val,0_pm_ln,&
+               max(0_pm_ln,len%data%ln(len%offset)-1_pm_ln),.false.))
+    do i=1,esize
+       if(len%data%ln(len%offset+i)>0) then
+          call pm_ptr_assign(context,vec,i,vector_from_scalar(context,val,i,&
+               len%data%ln(len%offset+i)-1_pm_ln,.false.))
+       endif
+    enddo
+    off=pm_new(context,pm_long,esize+1_pm_ln)
+    off%data%ln(off%offset:off%offset+esize)=0_pm_ln
+    domv=copy_vector(context,dom,ve,0_pm_ln,-1_pm_ln)
+    ptr=make_array(context,pm_array_type,typno,vec,domv,len,off)
     call pm_delete_register(context,reg)
   contains
     include 'fisnull.inc'
+    include 'fesize.inc'
   end function make_array_dim
 
+  ! Create array with same elements (by ref) but new domain
+  function array_redim(context,tno,array,dom) result(ptr)
+    type(pm_context),pointer:: context
+    integer(pm_i16),intent(in):: tno
+    type(pm_ptr),intent(in):: array,dom
+    type(pm_ptr):: ptr
+    ptr=make_array(context,pm_array_type,&
+         tno,&
+         array%data%ptr(array%offset+pm_array_vect),&
+         dom,&
+         array%data%ptr(array%offset+pm_array_length),&
+         array%data%ptr(array%offset+pm_array_offset))
+  end function array_redim
+
   ! Build array from vector of values
-  function make_array_from_vect(context,typno,vec,dom,shape,j,ve) result(ptr)
+  function make_array_from_vect(context,typno,vec,dom,j,ve) result(ptr)
     type(pm_context),pointer:: context
     integer(pm_i16),intent(in):: typno
-    type(pm_ptr),intent(in):: vec,dom,shape,j,ve
+    type(pm_ptr),intent(in):: vec,dom,j,ve
     type(pm_ptr):: ptr
-    type(pm_ptr),target:: len,off
+    type(pm_ptr),target:: len,off,vect,domv
     type(pm_reg),pointer:: reg
-    reg=>pm_register(context,'arrdim',len,off)
-    if(pm_fast_isnull(ve)) then
-       len=j
-    else
-       len=vector_zero_unused(context,j,ve)
-    endif
+    integer(pm_ln):: i,esize
+    reg=>pm_register(context,'arrdim',vect,len,off,domv)
+    esize=pm_fast_esize(j)
+    len=vector_zero_unused(context,j,ve)
+    vect=pm_new(context,pm_pointer,esize+1_pm_ln)
+    vect%data%ptr(vect%offset:vect%offset+esize)=vec
     off=array_offsets(context,len)
-    ptr=make_array(context,pm_array_type,typno,vec,dom,shape,len,off)
+    domv=copy_vector(context,dom,ve,0_pm_ln,-1_pm_ln)
+    ptr=make_array(context,pm_array_type,typno,vect,domv,len,off)
     call pm_delete_register(context,reg)
   contains
     include 'fisnull.inc'
@@ -222,7 +316,6 @@ contains
     include 'fesize.inc'
   end function array_vector_esize
 
-
   ! Size-1 of a vector
   recursive function vector_esize(v) result(esize)
     type(pm_ptr),intent(in):: v
@@ -232,7 +325,7 @@ contains
     select case(tno)
     case(pm_array_type,pm_const_array_type)
        esize=vector_esize(v%data%ptr(v%offset+pm_array_length))
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_struct_type,pm_rec_type)
        esize=vector_esize(v%data%ptr(v%offset+2_pm_p))
     case default
        esize=pm_fast_esize(v)
@@ -251,7 +344,7 @@ contains
     select case(tno)
     case(pm_array_type,pm_const_array_type)
        n=vector_num_leaves(v%data%ptr(v%offset+pm_array_vect))+pm_array_size-3
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_struct_type,pm_rec_type)
        n=0
        do i=2,pm_fast_esize(v)
           n=n+vector_num_leaves(v%data%ptr(v%offset+i))
@@ -265,56 +358,505 @@ contains
   end function vector_num_leaves
   
   ! Return array element value for given index
-  function array_index(context,array,index,ve,errno) result(ptr)
+  function array_index(context,array,index,ve,esize,errno) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: array,index,ve
+    integer(pm_ln),intent(in):: esize
     integer,intent(out):: errno
     type(pm_ptr):: ptr
-    type(pm_root),pointer:: root
-    root=>pm_add_root(context,&
-         index_vector(context,&
-         array%data%ptr(array%offset+pm_array_length),&
-         array%data%ptr(array%offset+pm_array_offset),&
-         index,ve,errno))
-    if(errno==0) then
-       ptr=vector_get_elems(context,&
-            array%data%ptr(array%offset+pm_array_vect),&
-            root%ptr,errno)
-    else
-       ptr=pm_null_obj
+    type(pm_ptr):: vec,off,len
+    type(pm_ptr),target:: idx,p
+    type(pm_reg),pointer:: reg
+    reg=>pm_register(context,'aindx',idx,p)
+    vec=array%data%ptr(array%offset+pm_array_vect)
+    off=array%data%ptr(array%offset+pm_array_offset)
+    len=array%data%ptr(array%offset+pm_array_length)
+          p=empty_copy_vector(context,vec%data%ptr(vec%offset),&
+               esize+1_pm_ln)
+    ptr=p
+    idx=vector_zero_unused(context,index,ve)
+    if(any(idx%data%ln(idx%offset:idx%offset+esize)<0.or.&
+         idx%data%ln(idx%offset:idx%offset+esize)>&
+         len%data%ln(len%offset:len%offset+esize))) then
+       errno=vector_index_error
+       return
     endif
-    call pm_delete_root(context,root)
+    call array_vect_index(context,p,vec,idx,off,esize)
+    if(p%data%vkind/=vec%data%ptr(vec%offset+esize)%data%vkind) then
+       errno=vector_type_error
+    endif
+    call pm_delete_register(context,reg)
   end function array_index
+
+  recursive subroutine array_vect_index(context,p,v,idx,offset,esize)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: p,v,idx,offset
+    integer(pm_ln),intent(in):: esize
+    type(pm_ptr):: vec,dom,len,off,vec2,dom2,len2,off2,w,vv
+    integer:: tno
+    integer(pm_ln):: i,ix
+    integer:: j
+    type(pm_root),pointer:: root
+    tno=pm_fast_typeof(p)
+    select case(tno)
+    case(pm_array_type,pm_const_array_type)
+       vec=p%data%ptr(p%offset+pm_array_vect)
+       dom=p%data%ptr(p%offset+pm_array_dom)
+       len=p%data%ptr(p%offset+pm_array_length)
+       off=p%data%ptr(p%offset+pm_array_offset)
+       root=>pm_new_as_root(context,pm_pointer,esize+1_pm_ln)
+       vv=root%ptr
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             vv%data%ptr(vv%offset+i)=w%data%ptr(w%offset+pm_array_dom)
+          endif
+       enddo
+       call array_vect_index(context,dom,vv,idx,offset,esize)
+       call pm_delete_root(context,root)      
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             vec2=w%data%ptr(w%offset+pm_array_vect)
+             off2=w%data%ptr(w%offset+pm_array_offset)
+             len2=w%data%ptr(w%offset+pm_array_length)
+             ix=idx%data%ln(idx%offset+i)+offset%data%ln(offset%offset+i)
+             call pm_ptr_assign(context,vec,i,&
+                  copy_vector(context,&
+                  vec2%data%ptr(vec2%offset+ix),&
+                  pm_null_obj,&
+                  off2%data%ln(off2%offset+ix),&
+                  len2%data%ln(len2%offset+ix)&
+               ))
+             len%data%ln(len%offset+i)=len2%data%ln(len2%offset+ix)
+             off%data%ln(off%offset+i)=0_pm_ln
+          endif
+       enddo
+    case(pm_struct_type,pm_rec_type)
+       root=>pm_add_root(context,pm_null_obj)
+       do j=2,pm_fast_esize(p)
+          root%ptr=pm_new(context,pm_pointer,esize+1_pm_ln)
+          vv=root%ptr
+          do i=0,esize
+             w=v%data%ptr(v%offset+i)
+             if(.not.pm_fast_isnull(w)) then
+                vv%data%ptr(vv%offset+i)=w%data%ptr(w%offset+j)
+             endif
+          enddo
+          call array_vect_index(context,p%data%ptr(p%offset+j),&
+               vv,idx,offset,esize)
+       enddo
+       call pm_delete_root(context,root)
+    case(pm_int)
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             ix=idx%data%ln(idx%offset+i)+offset%data%ln(offset%offset+i)
+             p%data%i(p%offset+i)=w%data%i(w%offset+ix)
+          endif
+       enddo
+    case(pm_long)
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             ix=idx%data%ln(idx%offset+i)+offset%data%ln(offset%offset+i)    
+             p%data%ln(p%offset+i)=w%data%ln(w%offset+ix)
+          endif
+       enddo
+    case(pm_single)
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             ix=idx%data%ln(idx%offset+i)+offset%data%ln(offset%offset+i)
+             p%data%r(p%offset+i)=w%data%r(w%offset+ix)
+          endif
+       enddo
+    case(pm_double)
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             ix=idx%data%ln(idx%offset+i)+offset%data%ln(offset%offset+i)
+             p%data%d(p%offset+i)=w%data%d(w%offset+ix)
+          endif
+       enddo
+    case(pm_logical)
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             ix=idx%data%ln(idx%offset+i)+offset%data%ln(offset%offset+i)
+             p%data%l(p%offset+i)=w%data%l(w%offset+ix)
+          endif
+       enddo
+    case(pm_pointer)
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             ix=idx%data%ln(idx%offset+i)+offset%data%ln(offset%offset+i)
+             call pm_ptr_assign(context,p,i,&
+                  w%data%ptr(w%offset+ix))
+          endif
+       enddo
+    end select
+  contains
+    include 'fisnull.inc'
+    include 'ftypeof.inc'
+    include 'fesize.inc'
+  end subroutine array_vect_index
 
   ! Set array element at given index to given value (e)
   subroutine array_set_index(context,array,index,e,ve,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: array,index,e,ve
     integer,intent(out):: errno
-    type(pm_ptr):: a
-    type(pm_root),pointer:: root
-    if(pm_fast_typeof(array)==pm_elemref_type) then
-       a=array%data%ptr(array%offset+2)
-       root=>pm_add_root(context,index_vector_indirect(context,&
-            a%data%ptr(a%offset+pm_array_length),&
-            a%data%ptr(a%offset+pm_array_offset),&
-            index,array%data%ptr(array%offset+3),ve,errno))
+    type(pm_ptr):: ptr
+    type(pm_ptr):: vec,off,len,ix,v,w
+    type(pm_ptr),target:: idx,newvec,newoff
+    type(pm_reg),pointer:: reg
+    integer(pm_ln):: i,j
+    integer(pm_ln):: esize
+    if(pm_fast_typeof(array)==pm_array_type) then
+       reg=>pm_register(context,'aindx',idx)
+       vec=array%data%ptr(array%offset+pm_array_vect)
+       off=array%data%ptr(array%offset+pm_array_offset)
+       len=array%data%ptr(array%offset+pm_array_length)
+       idx=vector_zero_unused(context,index,ve,-987654321_pm_ln)
+       esize=pm_fast_esize(idx)
+       if(any((idx%data%ln(idx%offset:idx%offset+esize)<0.and.&
+            idx%data%ln(idx%offset:idx%offset+esize)/=-987654321_pm_ln).or.&
+            idx%data%ln(idx%offset:idx%offset+esize)>&
+            len%data%ln(len%offset:len%offset+esize))) then
+          errno=vector_index_error
+          return
+       endif
+       call array_vect_set_index(context,vec,idx,off,e,esize,errno)
+       call pm_delete_register(context,reg)
     else
-       root=>pm_add_root(context,index_vector(context,&
-            array%data%ptr(array%offset+pm_array_length),&
-            array%data%ptr(array%offset+pm_array_offset),&
-            index,ve,errno))
-       a=array
+       reg=>pm_register(context,'arindx',idx,newvec)
+       vec=array%data%ptr(array%offset+pm_elemref_vect)
+       off=array%data%ptr(array%offset+pm_elemref_offset)
+       ix=array%data%ptr(array%offset+pm_elemref_idx)
+       idx=vector_zero_unused(context,index,ve,-1_pm_ln)
+       esize=pm_fast_esize(idx)
+       newvec=pm_new(context,pm_pointer,esize+1)
+       newoff=pm_new(context,pm_long,esize+1)
+       do i=0,esize
+          w=vec%data%ptr(vec%offset+i)
+          j=ix%data%ln(ix%offset+i)+off%data%ln(off%offset+i)
+          v=w%data%ptr(w%offset+pm_array_vect)
+          newvec%data%ptr(newvec%offset+i)=v%data%ptr(v%offset+j)
+          v=w%data%ptr(w%offset+pm_array_offset)
+          newoff%data%ln(newoff%offset+i)=v%data%ln(v%offset+j)
+          v=w%data%ptr(w%offset+pm_array_length)
+          if(v%data%ln(v%offset+j)<=idx%data%ln(idx%offset+i).or.&
+               idx%data%ln(idx%offset+i)<0) then
+             errno=vector_index_error
+             return
+          endif
+       enddo
+       call array_vect_set_index(context,newvec,idx,newoff,e,esize,errno)
+       call pm_delete_register(context,reg)
     endif
-    if(errno==0) then
-       call vector_set_elems(context,&
-            a%data%ptr(a%offset+pm_array_vect),root%ptr,e,ve,errno)
-    endif
-    call pm_delete_root(context,root)
   contains
+    include 'fesize.inc'
     include 'ftypeof.inc'
   end subroutine  array_set_index
 
+  recursive subroutine array_vect_set_index(context,v,idx,offset,p,esize,errno)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: p,v,idx,offset
+    integer(pm_ln),intent(in):: esize
+    integer,intent(out):: errno
+    type(pm_ptr):: vec,dom,off,len,vec2,dom2,len2,off2,w,vv
+    integer:: tno
+    integer(pm_ln):: i,ix
+    integer:: j
+    type(pm_root),pointer:: root
+    tno=pm_fast_typeof(p)
+    select case(tno)
+    case(pm_array_type,pm_const_array_type)
+       vec=p%data%ptr(p%offset+pm_array_vect)
+       dom=p%data%ptr(p%offset+pm_array_dom)
+       len=p%data%ptr(p%offset+pm_array_length)
+       off=p%data%ptr(p%offset+pm_array_offset)
+       root=>pm_new_as_root(context,pm_pointer,esize+1_pm_ln)
+       vv=root%ptr
+       do i=0,esize
+          w=v%data%ptr(v%offset+i)
+          if(.not.pm_fast_isnull(w)) then
+             vv%data%ptr(vv%offset+i)=w%data%ptr(w%offset+pm_array_dom)
+          endif
+       enddo
+       call array_vect_set_index(context,vv,idx,offset,dom,esize,errno)
+       call pm_delete_root(context,root)      
+       do i=0,esize
+          ix=idx%data%ln(idx%offset+i)
+          if(ix>=0) then
+             w=v%data%ptr(v%offset+i)
+             call array_assign(context,w,&
+                  ix+offset%data%ln(offset%offset+i),&
+                  p,i,errno)
+          endif
+       enddo
+    case(pm_struct_type,pm_rec_type)
+       root=>pm_add_root(context,pm_null_obj)
+       do j=2,pm_fast_esize(p)
+          root%ptr=pm_new(context,pm_pointer,esize+1_pm_ln)
+          vv=root%ptr
+          do i=0,esize
+             w=v%data%ptr(v%offset+i)
+             if(.not.pm_fast_isnull(w)) then
+                vv%data%ptr(vv%offset+i)=w%data%ptr(w%offset+j)
+             endif
+          enddo
+          call array_vect_set_index(context,vv,idx,offset,&
+               p%data%ptr(p%offset+j),esize,errno)
+       enddo
+       call pm_delete_root(context,root)
+    case(pm_int)
+       do i=0,esize
+          ix=idx%data%ln(idx%offset+i)
+          if(ix>=0) then
+             w=v%data%ptr(v%offset+i)
+             ix=ix+offset%data%ln(offset%offset+i)
+             w%data%i(w%offset+ix)=p%data%i(p%offset+i)
+          endif
+       enddo
+    case(pm_long)
+       do i=0,esize
+          ix=idx%data%ln(idx%offset+i)
+          if(ix>=0) then
+             w=v%data%ptr(v%offset+i)
+             ix=ix+offset%data%ln(offset%offset+i)
+             w%data%ln(w%offset+ix)=p%data%ln(p%offset+i)
+          endif
+       enddo
+    case(pm_single)
+       do i=0,esize
+          ix=idx%data%ln(idx%offset+i)
+          if(ix>=0) then
+             w=v%data%ptr(v%offset+i)
+             ix=ix+offset%data%ln(offset%offset+i)
+             w%data%r(w%offset+ix)=p%data%r(p%offset+i)
+          endif
+       enddo
+    case(pm_double)
+       do i=0,esize
+          ix=idx%data%ln(idx%offset+i)
+          if(ix>=0) then
+             w=v%data%ptr(v%offset+i)
+             ix=ix+offset%data%ln(offset%offset+i)
+             w%data%d(w%offset+ix)=p%data%d(p%offset+i)
+          endif
+       enddo
+    case(pm_logical)
+       do i=0,esize
+          ix=idx%data%ln(idx%offset+i)
+          if(ix>=0) then
+             w=v%data%ptr(v%offset+i)
+             ix=ix+offset%data%ln(offset%offset+i)
+             w%data%l(w%offset+ix)=p%data%l(p%offset+i)
+          endif
+       enddo
+    case(pm_pointer)
+       do i=0,esize
+          ix=idx%data%ln(idx%offset+i)
+          if(ix>=0) then
+             w=v%data%ptr(v%offset+i)
+             ix=ix+offset%data%ln(offset%offset+i)
+             call pm_ptr_assign(context,w,ix,p%data%ptr(p%offset+i))
+          endif
+       enddo
+    end select
+  contains
+    include 'fisnull.inc'
+    include 'ftypeof.inc'
+    include 'fesize.inc'
+  end subroutine array_vect_set_index
+
+  function array_pack(context,v,t,m,n,d) result(ptr)
+    type(pm_context),pointer:: context
+    integer(pm_i16):: t
+    type(pm_ptr),intent(in):: v,m,n,d
+    type(pm_ptr):: ptr
+    type(pm_reg),pointer:: reg
+    type(pm_ptr),target:: nvec,noff
+    type(pm_ptr):: vvec,mvec
+    integer(pm_ln):: i,esize
+    reg=>pm_register(context,'apack',nvec)
+    vvec=v%data%ptr(v%offset+pm_array_vect)
+    mvec=m%data%ptr(m%offset+pm_array_vect)
+    esize=pm_fast_esize(n)
+    nvec=pm_new(context,pm_pointer,esize+1)
+    noff=pm_new(context,pm_long,esize+1)
+    noff%data%ln(noff%offset:noff%offset+esize)=0
+    do i=0,esize
+       nvec%data%ptr(nvec%offset+i)=vector_pack(context,&
+            vvec%data%ptr(vvec%offset+i),&
+            mvec%data%ptr(mvec%offset+i),&
+            n%data%ln(n%offset+i))
+    enddo
+    ptr=make_array(context,pm_array_type,t,nvec,d,n,noff)
+    call pm_delete_register(context,reg)
+  contains
+    include 'fesize.inc'
+  end function array_pack
+
+  recursive function vector_pack(context,v,m,n) result(ptr)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v,m
+    integer(pm_ln),intent(in):: n
+    type(pm_ptr):: ptr
+    integer:: tno
+    integer(pm_p):: k
+    integer(pm_ln):: esize,esize2,i,j
+    type(pm_ptr),target:: vv,dv,lv,ov
+    type(pm_reg),pointer:: reg
+    if(n<=0) then
+       ptr=pm_null_obj
+       return
+    endif
+    esize=n-1
+    tno=pm_fast_typeof(v)
+    select case(tno)
+    case(pm_array_type)
+       reg=>pm_register(context,'vpack',vv,dv,lv,ov)
+       vv=vector_pack(context,v%data%ptr(v%offset+pm_array_vect),m,n)
+       dv=vector_pack(context,v%data%ptr(v%offset+pm_array_dom),m,n)
+       lv=vector_pack(context,v%data%ptr(v%offset+pm_array_length),m,n)
+       ov=pm_new(context,pm_long,n)
+       ov%data%ln(ov%offset:ov%offset+esize)=0
+       ptr=make_array(context,pm_array_type,&
+            int(v%data%ptr(v%offset+pm_array_typeof)%offset,pm_i16),&
+            vv,dv,lv,ov)
+       call pm_delete_register(context,reg)
+    case(pm_struct_type,pm_rec_type)
+       reg=>pm_register(context,'vpack2',vv)
+       vv=pm_fast_new(context,pm_usr,int(pm_fast_esize(v),pm_p))
+       vv%data%ptr(vv%offset)=v%data%ptr(v%offset)
+       vv%data%ptr(vv%offset+1_pm_p)=v%data%ptr(v%offset+1_pm_p)
+       do k=2,pm_fast_esize(v)
+          vv%data%ptr(vv%offset+k)=vector_pack(context,&
+               v%data%ptr(v%offset+k),m,n)
+       enddo
+       ptr=vv
+       call pm_delete_register(context,reg)
+    case(pm_pointer)
+       ptr=pm_new(context,pm_pointer,n)
+       j=0
+       do i=0,pm_fast_esize(m)
+          if(m%data%l(m%offset+i)) then
+             ptr%data%ptr(ptr%offset+j)=v%data%ptr(v%offset+i)
+             j=j+1
+          endif
+       enddo
+    case(pm_int)
+       ptr=pm_new(context,pm_int,n)
+       esize2=pm_fast_esize(v)
+       ptr%data%i(ptr%offset:ptr%offset+esize)=&
+            pack(v%data%i(v%offset:v%offset+esize2),&
+            m%data%l(m%offset:m%offset+esize2))
+    end select
+  contains
+    include 'fesize.inc'
+    include 'ftypeof.inc'
+    include 'fnew.inc'
+  end function vector_pack
+
+  function poly_new(context,v,ve,esize) result(ptr)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v,ve
+    integer(pm_ln),intent(in):: esize
+    type(pm_ptr):: ptr
+    integer(pm_ln):: i,j
+    type(pm_ptr),target:: p,idx
+    integer:: errno
+    type(pm_reg),pointer:: reg
+    reg=>pm_register(context,'polynw',p,idx)
+    p=pm_new(context,pm_pointer,esize+1)
+    idx=pm_fast_newnc(context,pm_long,1_pm_p)
+    do i=0,pm_fast_esize(ve)
+       j=ve%data%ln(ve%offset+i)
+       idx%data%ln(idx%offset)=j
+       call pm_ptr_assign(context,p,j,vector_get_elems(&
+            context,v,idx,errno))
+    enddo
+    ptr=p
+    call pm_delete_register(context,reg)
+  contains
+    include 'fesize.inc'
+    include 'fvkind.inc'
+    include 'fnewnc.inc'
+  end function  poly_new
+
+  subroutine poly_get(context,v,w,ve,esize,errno)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v,w,ve
+    integer(pm_ln),intent(in):: esize
+    integer,intent(inout):: errno
+    integer(pm_ln):: i,j
+    integer(pm_i16):: tno
+    type(pm_ptr):: p
+ 
+    tno=full_type(v)
+    if(pm_fast_vkind(ve)==pm_null) then
+       do j=0,esize
+          p=w%data%ptr(w%offset+j)
+          call assign_single(context,v,j,p,errno)
+       enddo
+    elseif(pm_fast_vkind(ve)==pm_logical) then
+       do j=0,esize
+          if(ve%data%l(ve%offset+j)) then
+             p=w%data%ptr(w%offset+j)
+             call assign_single(context,v,j,p,errno)
+          endif
+       enddo
+    else
+       do i=0,pm_fast_esize(ve)
+          j=ve%data%ln(ve%offset+i)
+          p=w%data%ptr(w%offset+j)
+          call assign_single(context,v,j,p,errno)
+       enddo
+    endif
+  contains
+    include 'fvkind.inc'
+    include 'fesize.inc'
+  end subroutine poly_get
+
+  function poly_check_type(context,v,tno,ve,esize) result(ptr)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v,ve
+    integer(pm_i16),intent(in):: tno
+    integer(pm_ln),intent(in):: esize
+    type(pm_ptr):: ptr
+    integer(pm_ln):: i,j
+    ptr=pm_new(context,pm_logical,esize+1)
+    if(pm_fast_vkind(ve)==pm_null) then
+       do i=0,esize
+          ptr%data%l(ptr%offset+i)=&
+               full_type(v%data%ptr(v%offset+i))==tno
+       enddo
+    elseif(pm_fast_vkind(ve)==pm_logical) then
+       do i=0,esize
+          if(ve%data%l(ve%offset+i)) then
+             ptr%data%l(ptr%offset+i)=&
+                  full_type(v%data%ptr(v%offset+i))==tno
+          else
+             ptr%data%l(ptr%offset+i)=.false.
+          endif
+       enddo
+    else
+       ptr%data%l(ptr%offset:ptr%offset+esize)=.false.
+       do j=0,esize
+          i=ve%data%ln(ve%offset+j)
+          ptr%data%l(ptr%offset+i)=&
+               full_type(v%data%ptr(v%offset+i))==tno
+       enddo
+    endif
+  contains
+    include 'fvkind.inc'
+    include 'fesize.inc'
+  end function poly_check_type
+     
   ! Import vector using information in import_vec
   ! import_vec(0)  : size of imported vector
   ! import_vec(1)  : offset into vector being imported
@@ -329,7 +871,7 @@ contains
     integer(pm_ln):: siz,start
     siz=import_vec%data%ln(import_vec%offset)+1_pm_ln
     start=import_vec%data%ln(import_vec%offset+1)
-    ptr=make_vector(context,v,import_vec,start,4_pm_p,siz,.true.)
+    ptr=make_vector(context,v,import_vec,start,4_pm_p,siz)
   end function import_vector
 
   subroutine split_import_vector(context,oldve,&
@@ -380,14 +922,14 @@ contains
           n=n+1
        else
           do j=0,nn/2-1
-             lovec%data%ln(hivec%offset+n)=j+jstart
-             hivec%data%ln(lovec%offset+n)=j+nn/2+jstart
+             lovec%data%ln(lovec%offset+n)=j+jstart
+             hivec%data%ln(hivec%offset+n)=j+nn/2+jstart
              mask%data%l(mask%offset+n)=.true.
              n=n+1
           enddo
           if(iand(nn,1)/=0) then
-             lovec%data%ln(hivec%offset+n)=nn-1+jstart
-             hivec%data%ln(lovec%offset+n)=nn-1+jstart
+             lovec%data%ln(lovec%offset+n)=nn-1+jstart
+             hivec%data%ln(hivec%offset+n)=nn-1+jstart
              mask%data%l(mask%offset+n)=.false.
              n=n+1
           endif
@@ -407,30 +949,6 @@ contains
     include 'fisnull.inc'
   end subroutine split_import_vector
   
-  ! Set array of array elements to elements of vector e
-  subroutine array_export(context,array,idx,e,import_vec,errno)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: array,idx,e,import_vec
-    integer,intent(out):: errno
-    type(pm_reg),pointer:: reg
-    type(pm_ptr):: idxv
-    reg=>pm_register(context,'amidx',idxv)
-    idxv=index_vector_nested(context,&
-         array%data%ptr(array%offset+pm_array_length),&
-         array%data%ptr(array%offset+pm_array_offset),&
-         idx,&
-         import_vec,&
-         errno)
-    if(errno==0) then
-       call vector_set_elems(context,&
-            array%data%ptr(array%offset+pm_array_vect),idxv,&
-            e,pm_null_obj,errno)
-    endif
-    call pm_delete_register(context,reg)
-  contains
-    include 'fnewnc.inc'
-    include 'fisnull.inc'
-  end subroutine array_export
 
   ! Assign first element in each iteration group for which mask==true
   ! to variable defined outside of for statement
@@ -488,15 +1006,13 @@ contains
   contains
     include 'fesize.inc'
   end subroutine vector_extract
-
   
   ! Build a vector by replicating a scalar value
-  recursive function make_vector(context,v,j,dispv,dispj,vsize,is_const) result(ptr)
+  recursive function make_vector(context,v,j,dispv,dispj,vsize) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,j
     integer(pm_p),intent(in):: dispj
     integer(pm_ln),intent(in):: dispv,vsize
-    logical,intent(in):: is_const
     type(pm_ptr):: ptr
     integer:: tno
     type(pm_root),pointer:: root
@@ -515,30 +1031,21 @@ contains
        call pm_ptr_assign(context,ptr,int(pm_array_dom,pm_ln),&
             make_vector(context,&
             v%data%ptr(v%offset+pm_array_dom),&
-            j,dispv,dispj,siz,is_const))
-       call pm_ptr_assign(context,ptr,int(pm_array_shape,pm_ln),&
+            j,dispv,dispj,siz))
+       call pm_ptr_assign(context,ptr,int(pm_array_vect,pm_ln),&
             make_vector(context,&
-            v%data%ptr(v%offset+pm_array_shape),&
-            j,dispv,dispj,siz,is_const))
-       len=make_vector(context,&
+            v%data%ptr(v%offset+pm_array_vect),&
+            j,dispv,dispj,siz))
+       call pm_ptr_assign(context,ptr,int(pm_array_length,pm_ln),&
+            make_vector(context,&
             v%data%ptr(v%offset+pm_array_length),&
-            j,dispv,dispj,siz,is_const)
-       call pm_ptr_assign(context,ptr,int(pm_array_length,pm_ln),len)
-       off=make_vector(context,v%data%ptr(v%offset+pm_array_offset),&
-            j,dispv,dispj,siz,is_const)
-       call pm_ptr_assign(context,ptr,int(pm_array_offset,pm_ln),off)
-       if(is_const) then
-          call pm_ptr_assign(context,ptr,int(pm_array_vect,pm_ln),&
-               v%data%ptr(v%offset+pm_array_vect))
-       else
-          call pm_ptr_assign(context,ptr,int(pm_array_vect,pm_ln),&
-               array_elem_vector(context,&
-               v%data%ptr(v%offset+pm_array_vect),&
-               len,off,total_size(len)))
-          call set_offsets(off,len)
-       endif
+            j,dispv,dispj,siz))
+       call pm_ptr_assign(context,ptr,int(pm_array_offset,pm_ln),&
+            make_vector(context,&
+            v%data%ptr(v%offset+pm_array_offset),&
+            j,dispv,dispj,siz))
        call pm_delete_root(context,root)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_struct_type,pm_rec_type)
        root=>pm_new_as_root(context,pm_usr,pm_fast_esize(v)+1_pm_ln)
        ptr=root%ptr
        ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
@@ -546,30 +1053,18 @@ contains
        do i=2,pm_fast_esize(v)
           call pm_ptr_assign(context,ptr,int(i,pm_ln),&
                make_vector(context,v%data%ptr(v%offset+i),&
-               j,dispv,dispj,siz,is_const))
+               j,dispv,dispj,siz))
        enddo
        call pm_delete_root(context,root)
     case(pm_pointer)
-       root=>pm_new_as_root(context,pm_usr,siz)
-       ptr=root%ptr
+       ptr=pm_new(context,pm_pointer,siz)
        n=0
-       if(is_const) then
-          do i=0,pm_fast_esize(j)-dispj
-             do k=1,j%data%ln(j%offset+i+dispj)
-                call pm_ptr_assign(context,ptr,n,v%data%ptr(v%offset+i+dispv))
-                n=n+1
-             enddo
+       do i=0,pm_fast_esize(j)-dispj
+          do k=1,j%data%ln(j%offset+i+dispj)
+             ptr%data%ptr(ptr%offset+n)=v%data%ptr(v%offset+i+dispv)
+             n=n+1
           enddo
-       else
-          do i=0,pm_fast_esize(j)-dispj
-             do k=1,j%data%ln(j%offset+i+dispj)
-                call pm_ptr_assign(context,ptr,n,&
-                     copy_vector(context,v%data%ptr(v%offset+i+dispv),pm_null_obj))
-                n=n+1
-             enddo
-          enddo
-       endif
-       call pm_delete_root(context,root)
+       enddo
     case(pm_int)
        ptr=pm_new(context,pm_int,siz)
        n=0
@@ -622,45 +1117,73 @@ contains
   end function make_vector
 
   ! Make a copy of a vector
-  recursive function copy_vector(context,v,ve) result(ptr)
+  ! size==-1 means use source size
+  recursive function copy_vector(context,v,ve,start,size) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ve
+    integer(pm_ln),intent(in):: start,size
     type(pm_ptr):: ptr
     integer:: typ
     integer(pm_p):: vk
-    integer(pm_ln):: i
-    type(pm_ptr):: off,len
+    integer(pm_ln):: i,esize
+    type(pm_ptr):: off,len,dom,vec,p,w,oldvec,oldoff,oldlen
     type(pm_root),pointer:: root
+    type(pm_reg),pointer:: reg
+    esize=size-1_pm_ln
     if(pm_fast_vkind(v)<=pm_null) then
        ptr=v
        return
     endif
     vk=pm_fast_vkind(v)
     if(vk<=pm_string) then
-       ptr=pm_new(context,vk,pm_fast_esize(v)+1)
-       call pm_copy_obj(v,0_pm_ln,ptr,0_pm_ln,pm_fast_esize(v))
+       if(esize<0) esize=pm_fast_esize(v)
+       ptr=pm_new(context,vk,esize+1_pm_ln)
+       call pm_copy_obj(v,start,ptr,0_pm_ln,esize)
+    elseif(vk==pm_pointer) then
+       if(esize<0) esize=pm_fast_esize(v)
+       root=>pm_new_as_root(context,pm_pointer,esize+1_pm_ln)
+       p=root%ptr
+       do i=0,esize
+          w=v%data%ptr(v%offset+i+start)
+          if(.not.pm_fast_isnull(w)) then
+             call pm_ptr_assign(context,p,i,&
+                  copy_vector(context,w,ve,0_pm_ln,-1_pm_ln))
+          endif
+       enddo
+       ptr=p
+       call pm_delete_root(context,root)
     else
        typ=pm_fast_typeof(v)
-       if(typ==pm_const_array_type) then
-          root=>pm_new_as_root(context,pm_usr,int(pm_array_size,pm_ln))
-          ptr=root%ptr
-          ptr%data%ptr(ptr%offset)=pm_fast_tinyint(context,pm_array_type)
-          ptr%data%ptr(ptr%offset+pm_array_typeof)=&
-               v%data%ptr(v%offset+pm_array_typeof)
-          ptr%data%ptr(ptr%offset+pm_array_dom)=&
-               v%data%ptr(v%offset+pm_array_dom)
-          ptr%data%ptr(ptr%offset+pm_array_shape)=&
-               v%data%ptr(v%offset+pm_array_shape)
-          len=v%data%ptr(v%offset+pm_array_length)
-          ptr%data%ptr(ptr%offset+pm_array_length)=len
-          call pm_ptr_assign(context,ptr,int(pm_array_vect,pm_ln),&
-               array_elem_vector(context,&
-               v%data%ptr(v%offset+pm_array_vect),&
-               len,ptr%data%ptr(ptr%offset+pm_array_offset),total_size(len)))
-          call pm_ptr_assign(context,ptr,int(pm_array_offset,pm_ln),&
-               array_offsets(context,&
-               len))
-          call pm_delete_root(context,root)
+       if(typ==pm_const_array_type.or.typ==pm_array_type) then
+          reg=>pm_register(context,'cpvect',dom,len,off,vec)
+          oldlen=v%data%ptr(v%offset+pm_array_length)
+          if(esize<0) esize=pm_fast_esize(oldlen)
+          dom=copy_vector(context,v%data%ptr(v%offset+pm_array_dom),&
+               ve,start,esize+1_pm_ln)
+          if(pm_fast_isnull(ve)) then
+             len=pm_new(context,pm_long,esize+1_pm_ln)
+             len%data%ln(len%offset:len%offset+esize)=&
+                  oldlen%data%ln(oldlen%offset+start:oldlen%offset+start+esize)
+          else
+             len=vector_zero_unused(context,v%data%ptr(v%offset+pm_array_length),ve)
+          endif
+          off=pm_new(context,pm_long,esize+1_pm_ln)
+          off%data%ln(off%offset:off%offset+esize)=0
+          vec=pm_new(context,pm_pointer,esize+1_pm_ln)
+          oldvec=v%data%ptr(v%offset+pm_array_vect)
+          oldoff=v%data%ptr(v%offset+pm_array_offset)
+          do i=0,esize
+             if(len%data%ln(len%offset+i)>0) then
+                call pm_ptr_assign(context,vec,i,copy_vector(context,&
+                     oldvec%data%ptr(oldvec%offset+i+start),pm_null_obj,&
+                     oldoff%data%ln(oldoff%offset+i+start),&
+                     len%data%ln(len%offset+i)))
+             endif
+          enddo
+          ptr=make_array(context,pm_array_type,&
+               int(v%data%ptr(v%offset+pm_array_typeof)%offset,pm_i16),&
+               vec,dom,len,off)
+          call pm_delete_register(context,reg)
        else
           ptr=pm_new(context,pm_usr,pm_fast_esize(v)+1)
           root=>pm_add_root(context,ptr)
@@ -668,10 +1191,10 @@ contains
           ptr%data%ptr(ptr%offset+1_pm_p)=v%data%ptr(v%offset+1_pm_p)
           do i=2,pm_fast_esize(v)
              call pm_ptr_assign(context,ptr,i,&
-                  copy_vector(context,v%data%ptr(v%offset+i),ve))
+                  copy_vector(context,v%data%ptr(v%offset+i),ve,start,esize+1_pm_ln))
           enddo
+          call pm_delete_root(context,root)
        endif
-       call pm_delete_root(context,root)
     endif
   contains
     include 'fvkind.inc'
@@ -681,6 +1204,59 @@ contains
     include 'ftiny.inc'
   end function copy_vector
 
+  subroutine array_assign(context,lhs,ix,rhs,iy,errno)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: lhs,rhs
+    integer(pm_ln),intent(in):: ix,iy
+    integer,intent(out):: errno
+    type(pm_ptr):: vec1,len1,off1,vec2,len2,off2,v
+    integer(pm_ln):: size1,size2
+    vec1=lhs%data%ptr(lhs%offset+pm_array_vect)
+    len1=lhs%data%ptr(lhs%offset+pm_array_length)
+    off1=lhs%data%ptr(lhs%offset+pm_array_offset)
+    vec2=rhs%data%ptr(rhs%offset+pm_array_vect)
+    len2=rhs%data%ptr(rhs%offset+pm_array_length)
+    off2=rhs%data%ptr(rhs%offset+pm_array_offset)
+    size1=len1%data%ln(len1%offset+ix)
+    size2=len2%data%ln(len2%offset+iy)
+    if(size1==size2) then
+       if(size1==0) return
+       call vector_copy_range(context,&
+            vec1%data%ptr(vec1%offset+ix),&
+            off1%data%ln(off1%offset+ix),&
+            vec2%data%ptr(vec2%offset+iy),&
+            off2%data%ln(off2%offset+iy),&
+            size1,errno)
+    else
+       if(size2==0) then
+          if(ix==0) then
+             v=vec1%data%ptr(vec1%offset)
+             if(pm_fast_esize(v)>&
+                  max(1_pm_ln,pm_fast_esize(vec1)/8_pm_ln)) then
+                call pm_ptr_assign(context,vec1,ix,&
+                     empty_copy_vector(context,&
+                     v,1_pm_ln))
+             endif
+          else
+             vec1%data%ptr(vec1%offset+ix)=pm_null_obj
+          endif
+          len1%data%ln(len1%offset+ix)=0
+          off1%data%ln(off1%offset+ix)=0
+       else
+          call pm_ptr_assign(context,vec1,ix,&
+               copy_vector(context,&
+               vec2%data%ptr(vec2%offset+iy),&
+               pm_null_obj,&
+               off2%data%ln(off2%offset+iy),&
+               len2%data%ln(len2%offset+iy)))
+          len1%data%ln(len1%offset+ix)=size2
+       endif
+    endif
+  contains
+    include 'fesize.inc'
+  end subroutine array_assign
+
+  
   ! Make an empty copy of a vector with a new length
   recursive function empty_copy_vector(context,v,size) result(ptr)
     type(pm_context),pointer:: context
@@ -690,40 +1266,41 @@ contains
     integer:: typ
     integer(pm_p):: vk
     integer(pm_ln):: i
-    type(pm_ptr):: off,len
+    type(pm_ptr),target:: vec,dom,off,len
+    type(pm_ptr):: w
     type(pm_root),pointer:: root
+    type(pm_reg),pointer:: reg
     integer(pm_ln):: j,elsize
     if(pm_fast_isnull(v)) then
        ptr=v
        return
     endif
     vk=pm_fast_vkind(v)
-    if(vk<=pm_string) then
+    if(vk<=pm_null) then
+       ptr=v
+    elseif(vk<=pm_pointer) then
        ptr=pm_new(context,vk,size)
     else
        typ=pm_fast_typeof(v)
        if(typ==pm_array_type.or.typ==pm_const_array_type) then
-          ! Empty copy of array - assumes all arrays in vector have same size
-          ptr=pm_new(context,pm_usr,pm_fast_esize(v)+1)
-          ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
-          ptr%data%ptr(ptr%offset+1_pm_p)=ptr%data%ptr(ptr%offset+1_pm_p)
-          len=ptr%data%ptr(ptr%offset+pm_array_length)
-          elsize=len%data%ln(len%offset)
-          root=>pm_add_root(context,ptr)
-          do i=pm_array_dom,pm_array_shape
-             call pm_ptr_assign(context,ptr,i,&
-                  empty_copy_vector(context,v%data%ptr(v%offset+i),size))
-          enddo
-          call pm_ptr_assign(context,ptr,int(pm_array_vect,pm_ln),&
-               empty_copy_vector(context,v%data%ptr(v%offset+pm_array_vect),&
-               size*elsize))
-          len=ptr%data%ptr(ptr%offset+pm_array_length)
-          len%data%ln(len%offset:len%offset+size-1)=elsize
-          off=ptr%data%ptr(ptr%offset+pm_array_offset)
-          call set_offsets(off,len)
-          call pm_delete_root(context,root)
+          ! Empty copy of array - all with size 0
+          reg=>pm_register(context,'vempty',vec,dom,len,off)
+          dom=empty_copy_vector(&
+               context,v%data%ptr(v%offset+pm_array_dom),size)
+          vec=pm_new(context,pm_pointer,size)
+          w=v%data%ptr(v%offset+pm_array_vect)
+          call pm_ptr_assign(context,vec,0_pm_ln,&
+               empty_copy_vector(context,w%data%ptr(w%offset),1_pm_ln))
+          len=pm_new(context,pm_long,size)
+          len%data%ln(len%offset:len%offset+size-1)=0
+          off=pm_new(context,pm_long,size)
+          off%data%ln(off%offset:off%offset+size-1)=0
+          ptr=make_array(context,pm_array_type,&
+               int(v%data%ptr(v%offset+pm_array_typeof)%offset,pm_i16),&
+               vec,dom,len,off)
+          call pm_delete_register(context,reg)
        else
-          ptr=pm_new(context,pm_usr,size)
+          ptr=pm_new(context,pm_usr,pm_fast_esize(v)+1)
           root=>pm_add_root(context,ptr)
           ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
           ptr%data%ptr(ptr%offset+1_pm_p)=v%data%ptr(v%offset+1_pm_p)
@@ -742,48 +1319,64 @@ contains
     include 'ftiny.inc'
   end function empty_copy_vector
 
-  ! Make a copy of a vector
-  recursive function vector_from_scalar(context,v,esize) result(ptr)
+  ! Make a vector by replicating v[offset]
+  recursive function vector_from_scalar(context,v,offset,esize,is_const) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: esize
+    integer(pm_ln),intent(in):: offset,esize
+    logical,intent(in):: is_const
     type(pm_ptr):: ptr
     integer:: typ
     integer(pm_p):: vk
     integer(pm_ln):: i
-    type(pm_ptr):: off,len
+    type(pm_ptr),target:: vec,dom,off,len
+    type(pm_ptr):: oldoff,oldlen,oldvec
+    type(pm_reg),pointer:: reg
     type(pm_root),pointer:: root
     if(pm_fast_isnull(v)) then
        ptr=v
        return
     endif
     vk=pm_fast_vkind(v)
-    if(vk<=pm_string) then
+    if(vk<=pm_pointer) then
        ptr=pm_new(context,vk,esize+1_pm_ln)
-       call pm_fill_vect(context,ptr,v)
+       call pm_set_obj(ptr,0_pm_ln,esize,v,offset)
     else
        typ=pm_fast_typeof(v)
        if(typ==pm_const_array_type.or.typ==pm_array_type) then
-          root=>pm_new_as_root(context,pm_usr,int(pm_array_size,pm_ln))
-          ptr=root%ptr
-          ptr%data%ptr(ptr%offset)=pm_fast_tinyint(context,pm_array_type)
-          ptr%data%ptr(ptr%offset+pm_array_typeof)=&
-               v%data%ptr(v%offset+pm_array_typeof)
-          call pm_ptr_assign(context,ptr,int(pm_array_dom,pm_ln),&
-               vector_from_scalar(context,v%data%ptr(v%offset+pm_array_dom),&
-               esize))
-          call pm_ptr_assign(context,ptr,int(pm_array_shape,pm_ln),&
-               vector_from_scalar(context,v%data%ptr(v%offset+pm_array_shape),&
-               esize))
-          call pm_ptr_assign(context,ptr,int(pm_array_length,pm_ln),&
-               vector_from_scalar(context,&
-               v%data%ptr(v%offset+pm_array_length),esize))
-          call pm_ptr_assign(context,ptr,int(pm_array_offset,pm_ln),&
-               vector_from_scalar(context,&
-               v%data%ptr(v%offset+pm_array_offset),esize))
-          call pm_ptr_assign(context,ptr,int(pm_array_vect,pm_ln),&
-               v%data%ptr(v%offset+pm_array_vect))
-          call pm_delete_root(context,root)
+          reg=>pm_register(context,'vscal',vec,dom,len,off)
+          dom=vector_from_scalar(context,v%data%ptr(v%offset+pm_array_dom),&
+               offset,esize,is_const)
+          oldvec=v%data%ptr(v%offset+pm_array_vect)
+          oldoff=v%data%ptr(v%offset+pm_array_offset)
+          oldlen=v%data%ptr(v%offset+pm_array_length)
+          len=pm_new(context,pm_long,esize+1_pm_ln)
+          len%data%ln(len%offset:len%offset+esize)=&
+               oldlen%data%ln(oldlen%offset+offset)
+          if(is_const) then
+             vec=pm_new(context,pm_pointer,esize+1_pm_ln)
+             vec%data%ptr(vec%offset:vec%offset+esize)=&
+                  oldvec%data%ptr(oldvec%offset+offset)
+             off=pm_new(context,pm_long,esize+1_pm_ln)
+             off%data%ln(off%offset:off%offset+esize)=&
+                  oldoff%data%ln(oldoff%offset+offset)
+          else
+             vec=pm_new(context,pm_pointer,esize+1_pm_ln)
+             do i=0,esize
+                call pm_ptr_assign(context,vec,i,&
+                     copy_vector(context,&
+                     oldvec%data%ptr(oldvec%offset+offset),&
+                     pm_null_obj,&
+                     oldoff%data%ln(oldoff%offset+offset),&
+                     oldlen%data%ln(oldlen%offset+offset)))
+             enddo
+             off=pm_new(context,pm_long,esize+1_pm_ln)
+             off%data%ln(off%offset:off%offset+esize)=0
+          endif
+          ptr=make_array(context,pm_array_type,&
+               int(v%data%ptr(v%offset+pm_array_typeof)%offset,pm_i16),&
+               vec,dom,len,off)
+          call pm_delete_register(context,reg)
        else
           ptr=pm_new(context,pm_usr,pm_fast_esize(v)+1)
           root=>pm_add_root(context,ptr)
@@ -791,7 +1384,8 @@ contains
           ptr%data%ptr(ptr%offset+1_pm_p)=v%data%ptr(v%offset+1_pm_p)
           do i=2,pm_fast_esize(v)
              call pm_ptr_assign(context,ptr,i,&
-                  vector_from_scalar(context,v%data%ptr(v%offset+i),esize))
+                  vector_from_scalar(context,v%data%ptr(v%offset+i),&
+                  offset,esize,is_const))
           enddo
           call pm_delete_root(context,root)
        endif
@@ -812,7 +1406,8 @@ contains
     integer(pm_p):: i
     integer(pm_i16):: tno,tno2
     integer(pm_ln):: j,k
-    type(pm_ptr):: vec1,vec2,off1,off2,len1,len2
+    type(pm_ptr):: vec1,vec2,off1,off2,len1,len2,idx
+    type(pm_root),pointer:: root
  
     if(pm_fast_isnull(lhs)) return
     tno=pm_fast_typeof(lhs)
@@ -822,79 +1417,40 @@ contains
     endif
     select case(tno)
     case(pm_array_type)
-       vec1=lhs%data%ptr(lhs%offset+pm_array_vect)
-       if(pm_fast_vkind(lhs)==pm_string) then
-          call vector_assign_string(context,lhs,rhs,ve,esize)
-          return
-       endif
-       vec2=rhs%data%ptr(rhs%offset+pm_array_vect)
-       off1=lhs%data%ptr(lhs%offset+pm_array_offset)
-       off2=rhs%data%ptr(rhs%offset+pm_array_offset)
-       len1=lhs%data%ptr(lhs%offset+pm_array_length)
-       len2=rhs%data%ptr(rhs%offset+pm_array_length)
+       call vector_assign(context,&
+            lhs%data%ptr(lhs%offset+pm_array_dom),&
+            rhs%data%ptr(rhs%offset+pm_array_dom),&
+            ve,errno,esize)
        if(pm_fast_vkind(ve)==pm_null) then
-          if(.not.vector_all_eq(context,lhs%data%ptr(lhs%offset+pm_array_shape),&
-               rhs%data%ptr(rhs%offset+pm_array_shape),0_pm_ln,0_pm_ln,esize+1_pm_ln)) then
-              errno=vector_shape_error
-             return
-          endif
           do j=0,esize
-             if(len1%data%ln(len1%offset+j)/=&
-                  len2%data%ln(len2%offset+j)) then
-                errno=vector_size_error
-                return
-             endif
-             call vector_copy_range(context,&
-                  vec1,off1%data%ln(off1%offset+j),&
-                  vec2,off2%data%ln(off2%offset+j),&
-                  len1%data%ln(len1%offset+j),errno)
+             call array_assign(context,lhs,j,rhs,j,errno)
              if(errno/=0) return
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do j=0,esize
              if(ve%data%l(ve%offset+j)) then
-                if(len1%data%ln(len1%offset+j)/=&
-                     len2%data%ln(len2%offset+j)) then
-                   errno=vector_size_error
-                   return
-                endif
-                if(.not.vector_all_eq(context,vec1%data%ptr(vec1%offset+pm_array_shape),&
-                     vec2%data%ptr(vec2%offset+pm_array_shape),j,j,1_pm_ln)) then
-                   errno=vector_shape_error
-                   return
-                endif
-                call vector_copy_range(context,&
-                     vec1,off1%data%ln(off1%offset+j),&
-                     vec2,off2%data%ln(off2%offset+j),&
-                     len1%data%ln(len1%offset+j),errno)
+                call array_assign(context,lhs,j,rhs,j,errno)
                 if(errno/=0) return
              endif
           enddo
        else
           do k=0,esize
              j=ve%data%ln(ve%offset+k)
-             if(len1%data%ln(len1%offset+j)/=&
-                  len2%data%ln(len2%offset+j)) then
-                errno=vector_size_error
-                return
-             endif
-             if(.not.vector_all_eq(context,&
-                  vec1%data%ptr(vec1%offset+pm_array_shape),&
-                  vec2%data%ptr(vec2%offset+pm_array_shape),j,j,1_pm_ln)) then
-                errno=vector_shape_error
-                return
-             endif
-             call vector_copy_range(context,&
-                  vec1,off1%data%ln(off1%offset+j),&
-                  vec2,off2%data%ln(off2%offset+j),&
-                  len1%data%ln(len1%offset+j),errno)
+             call array_assign(context,lhs,j,rhs,j,errno)
              if(errno/=0) return
           enddo
        endif
     case(pm_elemref_type)
-       call vector_set_elems(context,lhs%data%ptr(lhs%offset+2_pm_p),&
-            lhs%data%ptr(lhs%offset+3_pm_p),rhs,ve,errno)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+       idx=vector_zero_unused(context,&
+            lhs%data%ptr(lhs%offset+pm_elemref_idx),ve,-1_pm_ln)
+       root=>pm_add_root(context,idx)
+       call array_vect_set_index(context,&
+            lhs%data%ptr(lhs%offset+pm_elemref_vect),&
+            idx,&
+            lhs%data%ptr(lhs%offset+pm_elemref_offset),&            
+            rhs,esize,errno)
+       call pm_delete_root(context,root)
+    case(pm_struct_type,pm_rec_type)
        do i=2,pm_fast_esize(lhs)
           call vector_assign(context,&
                lhs%data%ptr(lhs%offset+i),&
@@ -903,21 +1459,24 @@ contains
     case(pm_pointer)
        if(pm_fast_vkind(ve)==pm_null) then
           do j=0,esize
-             call assign_single(context,lhs%data%ptr(lhs%offset+j),&
-                  rhs%data%ptr(rhs%offset+j),errno)
+             call pm_ptr_assign(context,lhs,j,&
+                  copy_vector(context,rhs%data%ptr(rhs%offset+j),&
+                  pm_null_obj,0_pm_ln,-1_pm_ln))
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do j=0,esize
              if(ve%data%l(ve%offset+j)) then
-                call assign_single(context,lhs%data%ptr(lhs%offset+j),&
-                     rhs%data%ptr(rhs%offset+j),errno)
+                call pm_ptr_assign(context,lhs,j,&
+                     copy_vector(context,rhs%data%ptr(rhs%offset+j),&
+                     pm_null_obj,0_pm_ln,-1_pm_ln))
              endif
           enddo
        else
           do k=0,pm_fast_esize(ve)
              j=ve%data%ln(ve%offset+k)
-             call assign_single(context,lhs%data%ptr(lhs%offset+j),&
-                  rhs%data%ptr(rhs%offset+j),errno)
+             call pm_ptr_assign(context,lhs,j,&
+                  copy_vector(context,rhs%data%ptr(rhs%offset+j),&
+                  pm_null_obj,0_pm_ln,-1_pm_ln))
           enddo
        endif
     case(pm_int)
@@ -1013,7 +1572,7 @@ contains
     integer:: tno1,tno2
     integer(pm_ln):: i,j
     integer:: k
-    type(pm_ptr):: len1,off1,len2,off2
+    type(pm_ptr):: len1,off1,vec1,len2,off2,vec2
 
     tno1=pm_fast_typeof(v1)
     tno2=pm_fast_typeof(v2)
@@ -1023,12 +1582,14 @@ contains
     endif
     select case(tno1)
     case(pm_array_type)
-       call vector_eq(context,v1%data%ptr(v1%offset+pm_array_shape),&
-            v2%data%ptr(v2%offset+pm_array_shape),eq,esize,ve)
+       call vector_eq(context,v1%data%ptr(v1%offset+pm_array_dom),&
+            v2%data%ptr(v2%offset+pm_array_dom),eq,esize,ve)
        len1=v1%data%ptr(v1%offset+pm_array_length)
        len2=v2%data%ptr(v2%offset+pm_array_length)
        off1=v1%data%ptr(v1%offset+pm_array_offset)
        off2=v2%data%ptr(v2%offset+pm_array_offset)
+       vec1=v1%data%ptr(v1%offset+pm_array_vect)
+       vec2=v2%data%ptr(v2%offset+pm_array_vect)
        if(pm_fast_vkind(ve)==pm_null) then
           do j=0,esize
              if(eq%data%l(eq%offset+j)) then
@@ -1036,8 +1597,8 @@ contains
                    eq%data%l(eq%offset+j)=.false.
                 else
                    eq%data%l(eq%offset+j)=vector_all_eq(context,&
-                        v1%data%ptr(v1%offset+pm_array_vect),&
-                        v2%data%ptr(v2%offset+pm_array_vect),&
+                        vec1%data%ptr(vec1%offset+j),&
+                        vec2%data%ptr(vec2%offset+j),&
                         off1%data%ln(off1%offset+j),&
                         off2%data%ln(off2%offset+j),&
                         len1%data%ln(len1%offset+j))
@@ -1053,8 +1614,8 @@ contains
                       eq%data%l(eq%offset+j)=.false.
                    else
                       eq%data%l(eq%offset+j)=vector_all_eq(context,&
-                           v1%data%ptr(v1%offset+pm_array_vect),&
-                           v2%data%ptr(v2%offset+pm_array_vect),&
+                           vec1%data%ptr(vec1%offset+j),&
+                           vec2%data%ptr(vec2%offset+j),&
                            off1%data%ln(off1%offset+j),&
                            off2%data%ln(off2%offset+j),&
                            len1%data%ln(len1%offset+j))
@@ -1071,8 +1632,8 @@ contains
                    eq%data%l(eq%offset+j)=.false.
                 else
                    eq%data%l(eq%offset+j)=vector_all_eq(context,&
-                        v1%data%ptr(v1%offset+pm_array_vect),&
-                        v2%data%ptr(v2%offset+pm_array_vect),&
+                        vec1%data%ptr(vec1%offset+j),&
+                        vec2%data%ptr(vec2%offset+j),&
                         off1%data%ln(off1%offset+j),&
                         off2%data%ln(off2%offset+j),&
                         len1%data%ln(len1%offset+j))
@@ -1080,7 +1641,7 @@ contains
              endif
           enddo
        endif
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_struct_type,pm_rec_type)
        do k=2,pm_fast_esize(v1)
           call vector_eq(context,v1%data%ptr(v1%offset+k),&
                v2%data%ptr(v2%offset+k),eq,esize,ve)
@@ -1247,7 +1808,7 @@ contains
     integer:: tno1,tno2
     integer(pm_ln):: size1,size2,start1,start2
     integer:: k
-    type(pm_ptr):: len1,len2,off1,off2
+    type(pm_ptr):: len1,len2,off1,off2,vec1,vec2
     integer(pm_ln):: i,j
     esize=isize-1
     tno1=pm_fast_typeof(v1)
@@ -1258,8 +1819,8 @@ contains
     endif
     select case(tno1)
     case(pm_array_type)
-       if(.not.vector_all_eq(context,v1%data%ptr(v1%offset+pm_array_shape),&
-            v2%data%ptr(v2%offset+pm_array_shape),istart1,istart2,isize)) then
+       if(.not.vector_all_eq(context,v1%data%ptr(v1%offset+pm_array_dom),&
+            v2%data%ptr(v2%offset+pm_array_dom),istart1,istart2,isize)) then
           ok=.false.
           return
        endif
@@ -1267,19 +1828,22 @@ contains
        len2=v2%data%ptr(v2%offset+pm_array_length)
        off1=v1%data%ptr(v1%offset+pm_array_offset)
        off2=v2%data%ptr(v2%offset+pm_array_offset)
-       start1=off1%data%ln(off1%offset+istart1)
-       start2=off2%data%ln(off2%offset+istart2)
-       size1=off1%data%ln(off1%offset+istart1+esize)-&
-            start1+len1%data%ln(len1%offset+istart1+esize)
-       size2=off2%data%ln(off2%offset+istart2+esize)-&
-            start1+len2%data%ln(len2%offset+istart2+esize)
-       if(size1/=size2) then
-          ok=.false.
-          return
-       endif
-       ok=vector_all_eq(context,v1%data%ptr(v1%offset+pm_array_vect),&
-            v2%data%ptr(v2%offset+pm_array_vect),start1,start2,size1)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+       vec1=v1%data%ptr(v1%offset+pm_array_vect)
+       vec2=v2%data%ptr(v2%offset+pm_array_vect)
+       do j=0,esize
+          start1=off1%data%ln(off1%offset+j+istart1)
+          start2=off2%data%ln(off2%offset+j+istart2)
+          size1=len1%data%ln(len1%offset+j+istart1)
+          size2=len2%data%ln(len2%offset+j+istart2)
+          if(size1/=size2) then
+             ok=.false.
+             return
+          endif
+          ok=vector_all_eq(context,vec1%data%ptr(vec1%offset+j),&
+               vec2%data%ptr(vec2%offset+j),start1,start2,size1)
+          if(.not.ok) return
+       enddo
+    case(pm_struct_type,pm_rec_type)
        do k=2,pm_fast_esize(v1)
           if(.not.vector_all_eq(context,v1%data%ptr(v1%offset+k),&
                v2%data%ptr(v2%offset+k),istart1,istart2,isize)) then
@@ -1367,6 +1931,20 @@ contains
     include 'fesize.inc'
     include 'fisnull.inc'
   end function vector_iota
+
+  subroutine vector_indices(imp,idx)
+    type(pm_ptr):: imp,idx
+    integer(pm_ln):: i,j,k
+    k=idx%offset
+    do i=imp%offset+4,imp%offset+pm_fast_esize(imp)
+       do j=0,imp%data%ln(i)-1
+          idx%data%ln(k)=j
+          k=k+1
+       enddo
+    enddo
+  contains
+    include 'fesize.inc'
+  end subroutine vector_indices
   
   ! Get elements from a vector (indices start at 0)
   recursive function vector_get_elems(context,v,ix,errno) result(ptr)
@@ -1375,8 +1953,8 @@ contains
     integer,intent(out):: errno
     type(pm_ptr):: ptr
     integer:: tno
-    integer(pm_ln):: h,i,j,k,nsiz
-    type(pm_ptr),target:: vec,dom,shape,len,off
+    integer(pm_ln):: h,i,j,k,nsiz,esize
+    type(pm_ptr),target:: vec,dom,shape,len,off,oldvec,oldlen,oldoff
     type(pm_root),pointer:: root
     type(pm_reg),pointer:: reg
     tno=pm_fast_typeof(v)
@@ -1384,15 +1962,24 @@ contains
     case(pm_array_type,pm_const_array_type)
        reg=>pm_register(context,'vgetel',vec,dom,shape,len,off)
        dom=vector_get_elems(context,v%data%ptr(v%offset+pm_array_dom),ix,errno)
-       shape=vector_get_elems(context,v%data%ptr(v%offset+pm_array_shape),ix,errno)
-       len=vector_get_elems(context,v%data%ptr(v%offset+pm_array_length),ix,errno)
-       off=vector_get_elems(context,v%data%ptr(v%offset+pm_array_offset),ix,errno)
-       vec=v%data%ptr(v%offset+pm_array_vect)
-       ptr=make_array(context,pm_const_array_type,&
-            int(v%data%ptr(v%offset+pm_array_typeof)%offset,pm_i16),&
-            vec,dom,shape,len,off)
+       oldlen=v%data%ptr(v%offset+pm_array_length)
+       len=vector_get_elems(context,oldlen,ix,errno)
+       oldoff=v%data%ptr(v%offset+pm_array_offset)
+       off=pm_new(context,pm_long,esize+1_pm_ln)
+       off%data%ln(off%offset:off%offset+esize)=0
+       oldvec=v%data%ptr(v%offset+pm_array_vect)
+       esize=pm_fast_esize(ix)
+       vec=pm_new(context,pm_pointer,esize+1_pm_ln)
+       do j=0,esize
+          i=ix%data%ln(ix%offset+j)
+          vec%data%ptr(vec%offset+j)=copy_vector(context,&
+               oldvec%data%ptr(oldvec%offset+i),&
+               pm_null_obj,&
+               oldoff%data%ln(oldoff%offset+i),&
+               oldlen%data%ln(oldlen%offset+i))
+       enddo
        call pm_delete_register(context,reg)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_struct_type,pm_rec_type)
        root=>pm_new_as_root(context,pm_usr,pm_fast_esize(v)+1)
        ptr=root%ptr
        ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
@@ -1406,7 +1993,8 @@ contains
        root=>pm_new_as_root(context,pm_usr,3_pm_ln)
        ptr=root%ptr
        do i=0,pm_fast_esize(ix)
-          call pm_ptr_assign(context,ptr,i,v%data%ptr(v%offset+ix%data%ln(ix%offset+i)))
+          call pm_ptr_assign(context,ptr,i,&
+               v%data%ptr(v%offset+ix%data%ln(ix%offset+i)))
        enddo
        call pm_delete_root(context,root)
     case(pm_int)
@@ -1536,53 +2124,26 @@ contains
     endif
     select case(tno)
     case(pm_array_type,pm_const_array_type)
-       len=v%data%ptr(v%offset+pm_array_length)
-       off=v%data%ptr(v%offset+pm_array_offset)
-       avec=v%data%ptr(v%offset+pm_array_vect)
-       len2=e%data%ptr(e%offset+pm_array_length)
-       off2=e%data%ptr(e%offset+pm_array_offset)
-       avec2=e%data%ptr(e%offset+pm_array_vect)
+       call vector_set_elems(context,&
+            v%data%ptr(v%offset+pm_array_dom),&
+            ix,e%data%ptr(e%offset+pm_array_dom),ve,errno)
        if(pm_fast_isnull(ve)) then
           do i=0,pm_fast_esize(ix)
-             j=ix%data%ln(ix%offset+i)
-             siz=len%data%ln(len%offset+i)
-             if(len2%data%ln(len2%offset+i)/=siz) then
-                errno=vector_size_error
-                return
-             endif
-             call vector_copy_range(context,avec,&
-                  off%data%ln(off%offset+j),&
-                  avec2,off2%data%ln(off2%offset+i),siz,errno)
+             call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno)
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do i=0,pm_fast_esize(ix)
              if(ve%data%l(ve%offset+i)) then
-                j=ix%data%ln(ix%offset+i)
-                siz=len%data%ln(len%offset+i)
-                if(len2%data%ln(len2%offset+i)/=siz) then
-                   errno=vector_size_error
-                   return
-                endif
-                call vector_copy_range(context,avec,&
-                     off%data%ln(off%offset+j),&
-                     avec2,off2%data%ln(off2%offset+i),siz,errno)
+                call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno)
              endif
           enddo
        else
           do m=0,pm_fast_esize(ve)
              i=ve%data%ln(ve%offset+m)
-             j=ix%data%ln(ix%offset+i)
-             siz=len%data%ln(len%offset+i)
-             if(len2%data%ln(len2%offset+i)/=siz) then
-                errno=vector_size_error
-                return
-             endif
-             call vector_copy_range(context,avec,&
-                  off%data%ln(off%offset+j),&
-                  avec2,off2%data%ln(off2%offset+i),siz,errno)
+             call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno)
           enddo
        endif
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_struct_type,pm_rec_type)
        do k=2,pm_fast_esize(v)
           call vector_set_elems(context,v%data%ptr(v%offset+k),&
                ix,e%data%ptr(e%offset+k),ve,errno)
@@ -1590,21 +2151,24 @@ contains
     case(pm_pointer)
        if(pm_fast_isnull(ve)) then
           do i=0,pm_fast_esize(ix)
-             call assign_single(context,v%data%ptr(v%offset+ix%data%ln(ix%offset)),&
-                  e%data%ptr(e%offset+i),errno)
+             call pm_ptr_assign(context,v,ix%data%ln(ix%offset),&
+                  copy_vector(context,e%data%ptr(e%offset+i),&
+                  pm_null_obj,0_pm_ln,-1_pm_ln))
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do i=0,pm_fast_esize(ix)
              if(ve%data%l(ve%offset+i)) then
-                call assign_single(context,v%data%ptr(v%offset+ix%data%ln(ix%offset+i)),&
-                  e%data%ptr(e%offset+i),errno)
+                call pm_ptr_assign(context,v,ix%data%ln(ix%offset),&
+                  copy_vector(context,e%data%ptr(e%offset+i),&
+                  pm_null_obj,0_pm_ln,-1_pm_ln))
              endif
           enddo
        else
           do j=0,pm_fast_esize(ve)
              i=ve%data%ln(ve%offset+j)
-             call assign_single(context,v%data%ptr(v%offset+ix%data%ln(ix%offset+i)),&
-                  e%data%ptr(e%offset+i),errno)
+             call pm_ptr_assign(context,v,ix%data%ln(ix%offset),&
+                  copy_vector(context,e%data%ptr(e%offset+i),&
+                  pm_null_obj,0_pm_ln,-1_pm_ln))
           enddo
        endif
     case(pm_int)
@@ -1700,38 +2264,38 @@ contains
     include 'fvkind.inc'
   end subroutine vector_set_elems
 
-  recursive subroutine assign_single(context,v,e,errno)
+  recursive subroutine assign_single(context,v,j,e,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,e
+    integer(pm_ln),intent(in):: j
     integer,intent(out):: errno
     integer:: tno,k
     tno=pm_fast_typeof(v)
-    if(tno/=pm_polyref_type.and.full_type(v)/=full_type(e)) then
+    if(full_type(v)/=full_type(e)) then
        errno=vector_type_error
        return
     endif
     select case(tno)
     case(pm_array_type,pm_const_array_type)
-       call vector_assign(context,v,e,pm_null_obj,errno,0_pm_ln)
+       call assign_single(context,v%data%ptr(v%offset+pm_array_dom),j,&
+            e%data%ptr(e%offset+pm_array_dom),errno)
+       call array_assign(context,v,j,e,0_pm_ln,errno)
     case(pm_struct_type,pm_rec_type)
        do k=2,pm_fast_esize(v)
-          call assign_single(context,v%data%ptr(v%offset+k),e%data%ptr(e%offset+k),errno)
+          call assign_single(context,v%data%ptr(v%offset+k),j,e%data%ptr(e%offset+k),errno)
        enddo
-    case(pm_polyref_type)
-       call pm_ptr_assign(context,v%data%ptr(v%offset+2_pm_p),0_pm_ln,&
-            e%data%ptr(e%offset+2_pm_p))
     case(pm_pointer)
-       call assign_single(context,v%data%ptr(v%offset),e%data%ptr(e%offset),errno)
+       call assign_single(context,v%data%ptr(v%offset+j),0_pm_ln,e%data%ptr(e%offset),errno)
     case(pm_int)
-       v%data%i(v%offset)=e%data%i(e%offset)
+       v%data%i(v%offset+j)=e%data%i(e%offset)
     case(pm_long)
-       v%data%ln(v%offset)=e%data%ln(e%offset)
+       v%data%ln(v%offset+j)=e%data%ln(e%offset)
     case(pm_single)
-       v%data%r(v%offset)=e%data%r(e%offset)
+       v%data%r(v%offset+j)=e%data%r(e%offset)
     case(pm_double)
-       v%data%d(v%offset)=e%data%d(e%offset)
+       v%data%d(v%offset+j)=e%data%d(e%offset)
     case(pm_logical)
-       v%data%l(v%offset)=e%data%l(e%offset)
+       v%data%l(v%offset+j)=e%data%l(e%offset)
     end select
   contains
     include 'ftypeof.inc'
@@ -1757,30 +2321,22 @@ contains
     endif
     select case(tno)
     case(pm_array_type,pm_const_array_type)
-       len=v%data%ptr(v%offset+pm_array_length)
-       off=v%data%ptr(v%offset+pm_array_offset)
-       avec=v%data%ptr(v%offset+pm_array_vect)
-       len2=e%data%ptr(e%offset+pm_array_length)
-       off2=e%data%ptr(e%offset+pm_array_offset)
-       avec2=e%data%ptr(e%offset+pm_array_vect)
+       call vector_copy_elems(context,v%data%ptr(v%offset+pm_array_dom),&
+            e%data%ptr(e%offset+pm_array_dom),ix,iy,n,errno)
        do i=1,n
-          j=ix(i)
-          siz=len%data%ln(len%offset+i)
-          if(len2%data%ln(len2%offset+iy(i))/=siz) then
-             errno=vector_size_error
-             return
-          endif
-          call vector_copy_range(context,avec,&
-               off%data%ln(off%offset+j),&
-               avec2,off2%data%ln(off2%offset+iy(i)),siz,errno)
+          call array_assign(context,v,ix(i),e,iy(i),errno)
+          if(errno/=0) return
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_struct_type,pm_rec_type)
        do k=2,pm_fast_esize(v)
-          call vector_copy_elems(context,v%data%ptr(v%offset+k),e,ix,iy,n,errno)
+          call vector_copy_elems(context,&
+               v%data%ptr(v%offset+k),&
+               e%data%ptr(e%offset+k),&
+               ix,iy,n,errno)
        enddo
     case(pm_pointer)
        do i=1,n
-          call assign_single(context,v%data%ptr(v%offset+ix(i)),&
+          call assign_single(context,v%data%ptr(v%offset+ix(i)),0_pm_ln,&
                e%data%ptr(e%offset+iy(i)),errno)
        enddo
     case(pm_int)
@@ -1930,22 +2486,12 @@ contains
           errno=vector_index_error
           return
        endif
-       do j=start1,start1+siz-1
-          jj=j-start1+start2
-          p=v%data%ptr(v%offset+pm_array_offset)
-          start_1=p%data%ln(p%offset+j)
-          p=v%data%ptr(v%offset+pm_array_length)
-          size1=p%data%ln(p%offset+j)
-          p=e%data%ptr(e%offset+pm_array_offset)
-          start_2=p%data%ln(p%offset+jj)
-          p=e%data%ptr(e%offset+pm_array_length)
-          size2=p%data%ln(p%offset+jj)
-          if(size2/=size1) then
-             errno=vector_size_error
-             return
-          endif
-          call vector_copy_range(context,v%data%ptr(v%offset+pm_array_vect),start_1,&
-               e%data%ptr(e%offset+pm_array_vect),start_2,size1,errno)
+       call vector_copy_range(context,&
+            v%data%ptr(v%offset+pm_array_dom),start1,&
+            e%data%ptr(e%offset+pm_array_dom),start2,&
+            siz,errno)
+       do j=0,siz-1
+          call array_assign(context,v,j+start1,e,j+start2,errno)
           if(errno/=0) then
              return
           endif
@@ -1968,6 +2514,7 @@ contains
        if(start1<0.or.start1+siz-1>pm_fast_esize(v).or.&
             start2<0.or.start2+siz-1>pm_fast_esize(e)) then
           errno=vector_index_error
+          return
        else
           call pm_copy_obj(e,start2,v,start1,siz-1)
        endif
@@ -2004,19 +2551,17 @@ contains
        name=pm_name_val(context,int(pm_tv_name(name),pm_p))
        tno=name%data%i16(name%offset)
        if(k==pm_struct_type) then
-          write(*,*) spaces(1:depth*2),'struct ',trim(pm_name_as_string(context,int(tno,pm_p))),'('
+          write(*,*) spaces(1:depth*2),'struct ',&
+               trim(pm_name_as_string(context,int(tno,pm_p))),'('
        else
-          write(*,*) spaces(1:depth*2),'rec ',trim(pm_name_as_string(context,int(tno,pm_p))),'('
+          write(*,*) spaces(1:depth*2),'rec ',&
+               trim(pm_name_as_string(context,int(tno,pm_p))),'('
        endif
        do i=1,pm_fast_esize(name)
           tno=name%data%i16(name%offset+i)
           write(*,*) spaces(1:depth*2+2),trim(pm_name_as_string(context,int(tno,pm_p))),'='
           call vector_dump(context,v%data%ptr(v%offset+i+1),depth+2)
        enddo
-       write(*,*) spaces(1:depth*2),')'
-    case(pm_polyref_type)
-       write(*,*) spaces(1:depth*2),'<> ('
-       call vector_dump(context,v%data%ptr(v%offset+2_pm_p),depth+1)
        write(*,*) spaces(1:depth*2),')'
     case default
        call pm_dump_tree(context,6,v,depth)
@@ -2049,123 +2594,6 @@ contains
   contains
     include 'fesize.inc'
   end function all_equal
-
-  ! Make contiguous array element vector from potentially
-  ! non-contiguous vector
-  recursive function array_elem_vector(context,v,len,off,vsize) result(ptr)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: v,len,off
-    integer(pm_ln),intent(in):: vsize
-    type(pm_ptr):: ptr
-    integer:: tno,errno
-    type(pm_ptr):: lvec,ovec
-    integer(pm_ln):: h,i,j,k,siz,nsiz
-    type(pm_root),pointer:: root
-    siz=max(1_pm_ln,vsize)
-    tno=pm_fast_typeof(v)
-    select case(tno)
-    case(pm_array_type,pm_const_array_type)
-       root=>pm_new_as_root(context,pm_usr,int(pm_array_size,pm_ln))
-       ptr=root%ptr
-       ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
-       ptr%data%ptr(ptr%offset+pm_array_typeof)=&
-            v%data%ptr(v%offset+pm_array_typeof)
-       call pm_ptr_assign(context,ptr,int(pm_array_dom,pm_ln),&
-            array_elem_vector(context,&
-            v%data%ptr(v%offset+pm_array_dom),len,off,siz))
-       call pm_ptr_assign(context,ptr,int(pm_array_shape,pm_ln),&
-            array_elem_vector(context,&
-            v%data%ptr(v%offset+pm_array_shape),len,off,siz))
-       lvec=array_elem_vector(context,&
-            v%data%ptr(v%offset+pm_array_length),len,off,siz)
-       call pm_ptr_assign(context,ptr,int(pm_array_length,pm_ln),lvec)
-       ovec=array_elem_vector(context,&
-            v%data%ptr(v%offset+pm_array_offset),len,off,siz)
-       call pm_ptr_assign(context,ptr,int(pm_array_offset,pm_ln),ovec)
-       nsiz=total_size(lvec)
-       call pm_ptr_assign(context,ptr,int(pm_array_offset,pm_ln),&
-            array_elem_vector(context,v%data%ptr(v%offset+pm_array_offset),&
-            lvec,ovec,nsiz))
-       call set_offsets(ovec,lvec)
-       call pm_delete_root(context,root)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
-       root=>pm_new_as_root(context,pm_usr,pm_fast_esize(v)+1_pm_ln)
-       ptr=root%ptr
-       ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
-       ptr%data%ptr(ptr%offset+1_pm_p)=v%data%ptr(v%offset+1_pm_p)
-       do k=2,pm_fast_esize(v)
-          call pm_ptr_assign(context,ptr,k,&
-               array_elem_vector(context,v%data%ptr(v%offset+k),len,off,siz))
-       enddo
-       call pm_delete_root(context,root)
-    case(pm_pointer)
-       root=>pm_new_as_root(context,pm_pointer,siz)
-       ptr=root%ptr
-       k=0
-       do i=0,pm_fast_esize(len)
-          h=off%data%ln(off%offset+i)
-          do j=h,h+len%data%ln(len%offset+i)-1
-             call pm_ptr_assign(context,ptr,k,&
-                  copy_vector(context,v%data%ptr(v%offset+j),pm_null_obj))
-             k=k+1
-          enddo
-       enddo
-       call pm_delete_root(context,root)
-    case(pm_int)
-       ptr=pm_new(context,pm_int,siz)
-       k=0
-       do i=0,pm_fast_esize(len)
-          h=off%data%ln(off%offset+i)
-          do j=h,h+len%data%ln(len%offset+i)-1
-             ptr%data%i(ptr%offset+k)=v%data%i(v%offset+j)
-             k=k+1
-          enddo
-       enddo
-    case(pm_long)
-       ptr=pm_new(context,pm_long,siz)
-       k=0
-       do i=0,pm_fast_esize(len)
-          h=off%data%ln(off%offset+i)
-          do j=h,h+len%data%ln(len%offset+i)-1
-             ptr%data%ln(ptr%offset+k)=v%data%ln(v%offset+j)
-             k=k+1
-          enddo
-       enddo
-    case(pm_single)
-       ptr=pm_new(context,pm_single,siz)
-       k=0
-       do i=0,pm_fast_esize(len)
-          h=off%data%ln(off%offset+i)
-          do j=h,h+len%data%ln(len%offset+i)-1
-             ptr%data%r(ptr%offset+k)=v%data%r(v%offset+j)
-             k=k+1
-          enddo
-       enddo
-    case(pm_double)
-       ptr=pm_new(context,pm_double,siz)
-       k=0
-       do i=0,pm_fast_esize(len)
-          h=off%data%ln(off%offset+i)
-          do j=h,h+len%data%ln(len%offset+i)-1
-             ptr%data%d(ptr%offset+k)=v%data%d(v%offset+j)
-             k=k+1
-          enddo
-       enddo
-    case(pm_logical)
-       ptr=pm_new(context,pm_int,siz)
-       k=0
-       do i=0,pm_fast_esize(len)
-          h=off%data%ln(off%offset+i)
-          do j=h,h+len%data%ln(len%offset+i)-1
-             ptr%data%l(ptr%offset+k)=v%data%l(v%offset+j)
-             k=k+1
-          enddo
-       enddo
-    end select
-  contains
-    include 'ftypeof.inc'
-    include 'fesize.inc'
-  end function array_elem_vector
 
   ! Calculate array offsets vector for contiguous elements
   ! from array length vector
@@ -2312,7 +2740,6 @@ contains
     include 'fvkind.inc'
   end function index_vector_used
 
-  
   ! Compute indices for all elements in an array
   function index_vector_all(context,len,off) result(ptr)
     type(pm_context),pointer:: context
@@ -2394,26 +2821,21 @@ contains
     type(pm_ptr),target:: vec,len,off
     type(pm_reg),pointer:: reg
     reg=>pm_register(context,'make_string',vec,len,off)
- 
     vsize=pm_fast_esize(ve)
     esize=pm_fast_esize(v)
     len=pm_new(context,pm_long,esize+1)
     len%data%ln(len%offset:len%offset+esize)=0
     off=pm_new(context,pm_long,esize+1)
     off%data%ln(off%offset:off%offset+esize)=0
-    vec=pm_new(context,pm_string,(vsize+1)*buf_size)
+    vec=pm_new(context,pm_pointer,esize+1)
     j=0
     do i=0,vsize
        k=ve%data%ln(ve%offset+i)
-      call fmt(v,k,mess)
-       do jj=1,buf_size
-          vec%data%s(vec%offset+j+jj-1)=mess(jj:jj)
-       enddo
+       call fmt(v,k,mess)
+       vec%data%ptr(vec%offset+k)=pm_new_string(context,trim(mess))
        len%data%ln(len%offset+k)=len_trim(mess)
-       off%data%ln(off%offset+k)=j
-       j=j+buf_size
     enddo
-    str=make_array(context,pm_array_type,int(pm_string_type,pm_i16),vec,len,len,len,off)
+    str=make_array(context,pm_array_type,int(pm_string_type,pm_i16),vec,len,len,off)
     call pm_delete_register(context,reg)
   contains
     include 'fesize.inc'
@@ -2424,157 +2846,45 @@ contains
     type(pm_ptr),intent(in):: ve,v1,v2
     type(pm_ptr):: str
     type(pm_ptr),target:: vec,len,off
-    type(pm_ptr):: vec1,vec2,len1,len2,off1,off2
-    integer(pm_ln):: i,j,k,start,size,vsize,esize
+    type(pm_ptr):: vec1,vec2,len1,len2,off1,off2,s,s1,s2
+    integer(pm_ln):: i,j,k,start1,start2,size,size1,size2,vsize,esize
     type(pm_reg),pointer:: reg
     reg=>pm_register(context,'concat',vec,len,off)
     vsize=pm_fast_esize(ve)
+    vec1=v1%data%ptr(v1%offset+pm_array_vect)
+    vec2=v2%data%ptr(v2%offset+pm_array_vect)
     len1=v1%data%ptr(v1%offset+pm_array_length)
     len2=v2%data%ptr(v2%offset+pm_array_length)
+    off1=v1%data%ptr(v1%offset+pm_array_offset)
+    off2=v2%data%ptr(v2%offset+pm_array_offset)
     esize=pm_fast_esize(len1)
     len=pm_new(context,pm_long,esize+1)
     len%data%ln(len%offset:len%offset+esize)=0
-    k=0
-    do i=0,vsize
-       j=ve%data%ln(ve%offset+i)
-       size=&
-            len1%data%ln(len1%offset+j)+&
-            len2%data%ln(len2%offset+j)
-       len%data%ln(len%offset+j)=size
-       k=k+size
-    enddo
-    vec=pm_new(context,pm_string,k)
     off=pm_new(context,pm_long,esize+1)
     off%data%ln(off%offset:off%offset+esize)=0
-    off1=v1%data%ptr(v1%offset+pm_array_offset)
-    off2=v2%data%ptr(v2%offset+pm_array_offset)
-    vec1=v1%data%ptr(v1%offset+pm_array_vect)
-    vec2=v2%data%ptr(v2%offset+pm_array_vect)
-!!$    write(*,*) 'concat',vec1%data%s(vec1%offset:vec1%offset+pm_fast_esize(vec1)),&
-!!$         vec2%data%s(vec2%offset:vec2%offset+pm_fast_esize(vec2))
-!!$    write(*,*)'pff',off2%data%ln(off2%offset)
-    k=0
+    vec=pm_new(context,pm_pointer,esize+1)
     do i=0,vsize
        j=ve%data%ln(ve%offset+i)
-       off%data%ln(off%offset+j)=k
-       size=len1%data%ln(len1%offset+j)
-       start=off1%data%ln(off1%offset+j)
-       vec%data%s(vec%offset+k:vec%offset+k+size-1)=&
-            vec1%data%s(vec1%offset+start:vec1%offset+start+size-1)
-       k=k+size
-       size=len2%data%ln(len2%offset+j)
-       start=off2%data%ln(off2%offset+j)
-       vec%data%s(vec%offset+k:vec%offset+k+size-1)=&
-            vec2%data%s(vec2%offset+start:vec2%offset+start+size-1)
-       k=k+size
+       size1=len1%data%ln(len1%offset+j)
+       size2=len2%data%ln(len2%offset+j)
+       start1=off1%data%ln(off1%offset+j)
+       start2=off2%data%ln(off2%offset+j)
+       size=size1+size2
+       len%data%ln(len%offset+j)=size
+       s=pm_new(context,pm_string,size)
+       vec%data%ptr(vec%offset+j)=s
+       s1=vec1%data%ptr(vec1%offset+j)
+       s2=vec2%data%ptr(vec2%offset+j)
+       s%data%s(s%offset:s%offset+size1-1)=&
+            s1%data%s(s1%offset+start1:s1%offset+start1+size1-1)
+       s%data%s(s%offset+size1:s%offset+size1+size2-1)=&
+            s2%data%s(s2%offset+start2:s2%offset+start2+size2-1)
     enddo
-!!$    write(*,*) 'TO:{',vec%data%s(vec%offset:vec%offset+pm_fast_esize(vec)),'}'
-    str=make_array(context,pm_array_type,int(pm_string_type,pm_i16),vec,len,len,len,off)
+    str=make_array(context,pm_array_type,int(pm_string_type,pm_i16),vec,len,len,off)
     call pm_delete_register(context,reg)
   contains
     include 'fesize.inc'
   end function vector_concat_string
-
-  ! String assignment
-  ! Complicated by letting strings change length
-  subroutine vector_assign_string(context,lhs,rhs,ve,esize)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: lhs,rhs,ve
-    integer(pm_ln),intent(in):: esize
-    type(pm_ptr):: len1,len2,off1,off2,vec1,vec2,dom1,newvec
-    integer(pm_ln):: size,newsize,start,i,j,k
-    len1=lhs%data%ptr(lhs%offset+pm_array_length)
-    len2=rhs%data%ptr(rhs%offset+pm_array_length)
-    off1=lhs%data%ptr(lhs%offset+pm_array_offset)
-    off2=rhs%data%ptr(rhs%offset+pm_array_offset)
-    vec1=lhs%data%ptr(lhs%offset+pm_array_vect)
-    vec2=rhs%data%ptr(rhs%offset+pm_array_vect)
-    dom1=lhs%data%ptr(lhs%offset+pm_array_dom)
-    if(pm_fast_vkind(ve)==pm_null) then
-       vec1=pm_assign_new(context,lhs,int(pm_array_vect,pm_ln),&
-            pm_string,esize+1_pm_ln,.false.)
-       vec1%data%s(vec1%offset:vec1%offset+esize)=&
-            vec2%data%s(vec2%offset:vec2%offset+esize)
-       len1%data%ln(len1%offset:len1%offset+esize)=&
-            len2%data%ln(len2%offset:len2%offset+esize)
-       dom1%data%ln(dom1%offset:dom1%offset+esize)=&
-            len2%data%ln(len2%offset:len2%offset+esize)
-       off1%data%ln(off1%offset:off1%offset+esize)=&
-            off2%data%ln(off2%offset:off2%offset+esize)
-    elseif(pm_fast_vkind(ve)==pm_logical) then
-       where(ve%data%l(ve%offset:ve%offset+esize))
-          len1%data%ln(len1%offset:len1%offset+esize)=&
-               len2%data%ln(len2%offset:len2%offset+esize)
-       end where
-       newsize=total_size(len1)
-       newvec=pm_new(context,pm_string,newsize)
-       k=0
-       do i=0,esize
-          size=len1%data%ln(len1%offset+i)
-          if(.not.ve%data%l(ve%offset+i)) then
-             start=off1%data%ln(off1%offset+i)
-             newvec%data%s(newvec%offset+k:newvec%offset+k+size)=&
-                  vec1%data%s(vec1%offset+start:vec1%offset+start+size)
-          else
-             start=off2%data%ln(off2%offset+i)
-             newvec%data%s(newvec%offset+k:newvec%offset+k+size)=&
-                  vec2%data%s(vec2%offset+start:vec2%offset+start+size)
-          endif
-          k=k+size
-       enddo
-       call pm_ptr_assign(context,lhs,int(pm_array_vect,pm_ln),newvec)
-       call set_offsets(off1,len1)
-       dom1%data%ln(dom1%offset:dom1%offset+esize)=&
-            len1%data%ln(len1%offset:len1%offset+esize)
-    else
-       forall(j=0:pm_fast_esize(ve))
-          len1%data%ln(len1%offset+ve%data%ln(ve%offset+j))=&
-               len2%data%ln(len2%offset+ve%data%ln(ve%offset+j))
-       end forall
-       newsize=total_size(len1)
-       newvec=pm_new(context,pm_string,newsize)
-       j=0
-       do i=0,esize
-          size=len1%data%ln(len1%offset+i)
-          if(ve%data%ln(ve%offset+j)/=i) then
-             start=off1%data%ln(off1%offset+i)
-             newvec%data%s(newvec%offset+k:newvec%offset+k+size)=&
-                  vec1%data%s(vec1%offset+start:vec1%offset+start+size)
-          else
-             start=off2%data%ln(off2%offset+i)
-             newvec%data%s(newvec%offset+k:newvec%offset+k+size)=&
-                  vec2%data%s(vec2%offset+start:vec2%offset+start+size)
-             j=j+1
-          endif
-          k=k+size
-       enddo
-       call pm_ptr_assign(context,lhs,int(pm_array_vect,pm_ln),newvec)
-       call set_offsets(off1,len1)
-       dom1%data%ln(dom1%offset:dom1%offset+esize)=&
-            len1%data%ln(len1%offset:len1%offset+esize)
-    endif
-  contains
-    include 'fvkind.inc'
-    include 'fesize.inc'
-  end subroutine vector_assign_string
-
-  subroutine vector_print_string(context,v,ve)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: v,ve
-    integer(pm_ln):: i,j,start,size
-    type(pm_ptr):: vec,len,off
-    vec=v%data%ptr(v%offset+pm_array_vect)
-    len=v%data%ptr(v%offset+pm_array_length)
-    off=v%data%ptr(v%offset+pm_array_offset)
-    do i=0,pm_fast_esize(ve)
-       j=ve%data%ln(ve%offset+i)
-       start=off%data%ln(off%offset+j)
-       size=len%data%ln(len%offset+j)
-       write(*,*) vec%data%s(vec%offset+start:vec%offset+start+size-1)
-    enddo
-  contains
-      include 'fesize.inc'
-  end subroutine vector_print_string
 
   subroutine vector_get_string(context,v,ve,i,str)
     type(pm_context),pointer:: context
@@ -2591,6 +2901,7 @@ contains
     start=off%data%ln(off%offset+j)
     size=leng%data%ln(leng%offset+j)
     str=' '
+    vec=vec%data%ptr(vec%offset+i)
     do k=vec%offset+start,vec%offset+start+size-1
        m=k-vec%offset-start+1
        if(m>len(str)) exit
@@ -2605,14 +2916,16 @@ contains
     type(pm_ptr),intent(in):: val
     integer(pm_ln),intent(in):: esize
     type(pm_ptr):: str
-    type(pm_ptr):: len,off
+    type(pm_ptr),target:: len,off,vec
     type(pm_reg),pointer:: reg
-    reg=>pm_register(context,'make_str',len,off)
+    reg=>pm_register(context,'make_str',len,off,vec)
     len=pm_new(context,pm_long,esize+1)
-    len%data%ln(len%offset:len%offset+esize)=pm_fast_esize(val)+1
+    len%data%ln(len%offset:len%offset+esize)=pm_fast_esize(val)
     off=pm_new(context,pm_long,esize+1)
     off%data%ln(off%offset:off%offset+esize)=0
-    str=make_array(context,pm_array_type,int(pm_string_type,pm_i16),val,len,len,len,off)
+    vec=pm_new(context,pm_pointer,esize+1)
+    vec%data%ptr(vec%offset:vec%offset+esize)=val
+    str=make_array(context,pm_array_type,int(pm_string_type,pm_i16),vec,len,len,off)
     call pm_delete_register(context,reg)
   contains
     include 'fnewnc.inc'
@@ -2669,190 +2982,6 @@ contains
        str='false '
     endif
   end subroutine fmt_l
-
-  ! Create a polymorphic vector from polymorphic call result
-  ! vals contains list of component vectors
-  ! subs contains list of which vector to use for each location
-  ! Vector elements are drawn in order from indicated vectors 
-  function make_poly_vec(context,vals,subs) result(polyvec)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: vals,subs
-    type(pm_ptr):: polyvec
-    integer(pm_ln):: i,j,k,esize,vsize
-    type(pm_ptr):: p,q,pv,dv,poly,n
-    type(pm_root),pointer:: root,root2
-    esize=pm_fast_esize(subs)
-    vsize=pm_fast_esize(vals)
-    poly=pm_fast_newusr(context,int(pm_poly_type,pm_p),3_pm_p)
-    root=>pm_add_root(context,poly)
-    pv=pm_new(context,pm_pointer,esize+1_pm_ln)
-    poly%data%ptr(poly%offset+1_pm_p)=pv
-    dv=pm_new(context,pm_long,esize+1_pm_ln)
-    poly%data%ptr(poly%offset+2_pm_p)=dv
-    root2=>pm_new_as_root(context,pm_long,pm_fast_esize(vals)+1_pm_ln)
-    n=root2%ptr
-    n%data%ln(n%offset:n%offset+vsize)=0_pm_ln
-    do i=0,esize
-       j=subs%data%ln(subs%offset+i)
-       p=vals%data%ptr(vals%offset+j)
-       k=n%data%ln(n%offset+j)
-       n%data%ln(n%offset+j)=k+1_pm_ln
-       if(pm_fast_typeof(p)==pm_poly_type) then
-          q=p%data%ptr(p%offset+2_pm_p)
-          k=q%data%ln(q%offset+k)
-          q=p%data%ptr(p%offset+1_pm_p)
-          p=q%data%ptr(q%offset+k)
-       endif
-       pv%data%ptr(pv%offset+i)=p
-       dv%data%ln(dv%offset)=k
-    enddo
-    call pm_delete_root(context,root)
-    call pm_delete_root(context,root2)
-  contains
-    include 'fesize.inc'
-    include 'ftypeof.inc'
-    include 'fnewusr.inc'
-  end function make_poly_vec
-
-  function vec_separate(context,vec,ix,i) result(ptr)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: vec,ix
-    integer,intent(in)::i
-    type(pm_ptr):: ptr
-
-  end function vec_separate
-  
-  ! Separate nvec vectors by index numbers (0..vsize) in subs
-  subroutine separate_vecs(context,vecs,nvecs,subs,vsize)
-    type(pm_context),pointer:: context
-    integer,intent(in):: nvecs
-    type(pm_ptr),intent(inout),dimension(nvecs):: vecs
-    type(pm_ptr),intent(in)::subs
-    integer(pm_ln),intent(in):: vsize
-    integer(pm_ln):: i,j,k,esize
-    integer:: iv
-    integer(pm_i16),dimension(1):: key
-    type(pm_ptr),target:: pv,dv,vals,n
-    type(pm_ptr):: avec,dvec
-    type(pm_reg),pointer:: reg
-    reg=>pm_register(context,'separate poly',&
-         pv,dv,vals,n)
-    ! Count number of elts in each category
-    n=pm_new(context,pm_long,vsize+1_pm_ln)
-    n%data%ln(n%offset:n%offset+vsize-1_pm_ln)=0
-    do i=0,esize
-       j=subs%data%ln(subs%offset+i)
-       n%data%ln(n%offset+j)=n%data%ln(n%offset+j)+1
-    enddo
-    ! Work out starting point for each category
-    ! in re-arranged vector
-    j=0
-    do i=0,vsize-1
-       k=n%data%ln(n%offset+i)
-       n%data%ln(n%offset+i)=j
-       j=j+k
-    enddo
-    n%data%ln(n%offset+vsize)=esize+1
-    ! Re-arrange the vectors
-    pv=pm_new(context,pm_pointer,esize)
-    dv=pm_new(context,pm_pointer,esize)
-    do iv=1,nvecs
-       if(pm_fast_vkind(vecs(i))==pm_stack) cycle
-       if(pm_fast_typeof(vecs(i))==pm_poly_type) then
-          avec=vecs(iv)%data%ptr(vecs(iv)%offset+1_pm_p)
-          dvec=vecs(iv)%data%ptr(vecs(iv)%offset+2_pm_p)
-          do i=0,esize
-             j=subs%data%ln(subs%offset+i)
-             k=n%data%ln(n%offset+j)
-             pv%data%ptr(pv%offset+k)=&
-                  avec%data%ptr(avec%offset+i)
-             dv%data%ln(dv%offset+k)=&
-                  dvec%data%ln(dvec%offset+i)
-             n%data%ln(n%offset+j)=k+1
-          enddo
-       else
-          pv%data%ptr(pv%offset:pv%offset+esize)=vecs(iv)
-          do i=0,esize
-             j=subs%data%ln(subs%offset+i)
-             k=n%data%ln(n%offset+j)
-             dv%data%ln(dv%offset+k)=i
-             n%data%ln(n%offset+j)=k+1
-          enddo
-       endif
-       vals=pm_new(context,pm_pointer,vsize+1)
-       vals%data%ptr(vals%offset)=n
-       do i=1,vsize
-          call pm_ptr_assign(context,vals,i,&
-               ptr_vec_get_type(context,pv,dv,&
-               n%data%ln(n%offset+i),&
-               n%data%ln(n%offset+i+1)-1_pm_ln))
-       enddo
-       vecs(iv)=vals
-    enddo
-    call pm_delete_register(context,reg)
-  contains
-    include 'fvkind.inc'
-    include 'ftypeof.inc'
-    include 'fesize.inc'
-  end subroutine separate_vecs
-
-  ! Separate poly vector into list of non-poly vectors
-  ! and a vector of subscripts into that list
-  subroutine separate_poly_vec(context,poly,xsubs,vects)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: poly
-    type(pm_ptr),intent(out):: xsubs,vects
-    integer(pm_ln):: i,j,k,vsize,esize
-    integer(pm_i16),dimension(1):: key
-    type(pm_ptr),target:: subs,set,pv,dv,vals,n
-    type(pm_ptr):: avec,dvec
-    type(pm_reg),pointer:: reg
-    reg=>pm_register(context,'separate poly',&
-         set,pv,dv,subs,vals,n)
-    avec=poly%data%ptr(poly%offset+1_pm_p)
-    dvec=poly%data%ptr(poly%offset+2_pm_p)
-    esize=pm_fast_esize(avec)
-    set=pm_set_new(context,8_pm_ln)
-    subs=pm_new(context,pm_long,esize+1_pm_ln)
-    do i=0,esize
-       key(1)=pm_fast_typeof(avec%data%ptr(avec%offset+i))
-       subs%data%ln(subs%offset+i)=pm_iset_add(context,set,key,1)
-    enddo
-    vsize=pm_set_size(context,set)-1_pm_ln
-    set=pm_null_obj
-    xsubs=subs
-    n=pm_new(context,pm_long,vsize+2_pm_ln)
-    do i=0,esize
-       j=subs%data%ln(subs%offset+i)
-       n%data%ln(n%offset+j)=n%data%ln(n%offset+j)+1
-    enddo
-    n%data%ln(n%offset+vsize+1_pm_ln)=esize+1
-    j=0
-    do i=0,vsize
-       k=n%data%ln(n%offset+i)
-       n%data%ln(n%offset+i)=j
-       j=j+k
-    enddo
-    pv=pm_new(context,pm_pointer,esize)
-    dv=pm_new(context,pm_pointer,esize)
-    do i=0,esize
-       j=subs%data%ln(subs%offset+i)
-       pv%data%ptr(pv%offset+k)=avec%data%ptr(avec%offset+i)
-       dv%data%ln(dv%offset+k)=dvec%data%ln(dvec%offset+i)
-       n%data%ln(n%offset+j)=n%data%ln(n%offset+j)+1_pm_ln
-    enddo
-    vals=pm_new(context,pm_pointer,vsize+1_pm_ln)
-    do i=0,vsize
-       call pm_ptr_assign(context,vals,i,&
-            ptr_vec_get_type(context,pv,dv,&
-            n%data%ln(n%offset+i),n%data%ln(n%offset+i+1)-1_pm_ln))
-    enddo
-    vects=vals
-    call pm_delete_register(context,reg)
-  contains
-    include 'ftypeof.inc'
-    include 'fesize.inc'
-  end subroutine separate_poly_vec
 
   recursive function ptr_vec_get_type(context,&
        vec,disps,start,finish) result(outvec)
@@ -3060,6 +3189,5 @@ contains
   contains
     include 'ftypeof.inc'
   end function full_type
-
 
 end module pm_array

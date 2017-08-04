@@ -76,12 +76,65 @@ module pm_sysdep
                                       ! On some systems int64 may
                                       ! improve things slightly
 
+  ! ********* Vector Virtual Machine ********
+  
+  ! Proportion of live elements below which masking
+  ! is replaced by indexing
+  integer,parameter:: pm_shrink_thresh=4
+
+  ! For differnt operations on given types is a masked
+  ! operation (with >1/pm_shrink_thresh live elements)
+  ! faster than unmasked one
+  
+  logical,parameter:: pm_mask_intadd=.false.
+  logical,parameter:: pm_mask_intmul=.false.
+  logical,parameter:: pm_mask_intdiv=.true.
+  logical,parameter:: pm_mask_intpow=.true.
+  logical,parameter:: pm_mask_intmod=.true.
+  logical,parameter:: pm_mask_intmaxmin=.true.
+  logical,parameter:: pm_mask_intcmp=.true.
+  logical,parameter:: pm_mask_intabs=.false.
+  logical,parameter:: pm_mask_intbits=.false.
+  logical,parameter:: pm_mask_intmath=.true.
+
+  logical,parameter:: pm_mask_longadd=.false.
+  logical,parameter:: pm_mask_longmul=.false.
+  logical,parameter:: pm_mask_longdiv=.true.
+  logical,parameter:: pm_mask_longpow=.true.
+  logical,parameter:: pm_mask_longmod=.true.
+  logical,parameter:: pm_mask_longmaxmin=.true.
+  logical,parameter:: pm_mask_longcmp=.true.
+  logical,parameter:: pm_mask_longabs=.true.
+  logical,parameter:: pm_mask_longbits=.true.
+  logical,parameter:: pm_mask_longmath=.true.
+
+  logical,parameter:: pm_mask_realadd=.false.
+  logical,parameter:: pm_mask_realmul=.false.
+  logical,parameter:: pm_mask_realdiv=.true.
+  logical,parameter:: pm_mask_realpow=.true.
+  logical,parameter:: pm_mask_realmod=.true.
+  logical,parameter:: pm_mask_realmaxmin=.true.
+  logical,parameter:: pm_mask_realcmp=.true.
+  logical,parameter:: pm_mask_realabs=.false.
+  logical,parameter:: pm_mask_realmath=.true.
+
+  logical,parameter:: pm_mask_doubleadd=.false.
+  logical,parameter:: pm_mask_doublemul=.false.
+  logical,parameter:: pm_mask_doublediv=.true.
+  logical,parameter:: pm_mask_doublepow=.true.
+  logical,parameter:: pm_mask_doublemod=.true.
+  logical,parameter:: pm_mask_doublemaxmin=.true.
+  logical,parameter:: pm_mask_doublecmp=.true.
+  logical,parameter:: pm_mask_doubleabs=.false.
+  logical,parameter:: pm_mask_doublemath=.true.
+  logical,parameter:: pm_mask_logical=.true.
+  
   
   ! ********* Debugging settings ***********
   ! (for debugging compiler/VM not PM code)
   ! ****************************************
   
-  integer,parameter,public:: pm_debug_level=0
+  integer,parameter,public:: pm_debug_level=1
   ! 1= basic checks - slows things down
   ! 2= print short additional info
   ! 3= print substantial additional info
@@ -97,125 +150,30 @@ module pm_sysdep
   ! Long integers - big enough to address any array
   integer,parameter:: pm_ln=MPI_ADDRESS_KIND
 
-  integer,private,pointer:: crash_ptr 
-  logical:: pm_main_process
-  
+  ! Long long integers - big enough to address any file
+  integer,parameter:: pm_lln=MPI_OFFSET_KIND
+   
+
 contains
 
-  subroutine pm_stop(mess)
-    character(len=*),intent(in)::mess
-    integer:: ierror
-    if(pm_main_process) then
-       write(*,*) mess
-    endif
-    call mpi_finalize(ierror)
-    stop
-  end subroutine pm_stop
+  function pm_argc() result(n)
+    integer:: n
+    n=iargc()
+  end function pm_argc
 
-  subroutine pm_abort(mess)
-    character(len=*),intent(in)::mess
-    integer:: ierror
-    if(pm_main_process) then
-       write(*,*) mess
-    endif
-    call mpi_abort(MPI_COMM_WORLD,99,ierror)
-    stop
-  end subroutine pm_abort
+  subroutine pm_getarg(n,str)
+    integer,intent(in)::n
+    character(len=*):: str
+    call getarg(n,str)
+  end subroutine pm_getarg
   
-  subroutine pm_panic(emess)
-    character(len=*):: emess
-    integer:: ierror
-    write(*,*) 'Panic: '//trim(emess)
-    if(pm_crash_on_panic) then
-       crash_ptr=1
-    else
-           call mpi_abort(MPI_COMM_WORLD,99,ierror)
-    endif
-    stop 'System crash!'
-  end subroutine pm_panic
-
-  subroutine pm_init_compilation
-    integer:: irank,ierror
-    call mpi_comm_rank(MPI_COMM_WORLD,irank,ierror)
-    pm_main_process=irank==0
-  end subroutine pm_init_compilation
-
-  subroutine pm_read_line(iunit,buffer,ios)
-    character(len=*) buffer
-    integer,intent(in):: iunit
-    integer,intent(out):: ios
-    integer:: irank,ierror
-    if(pm_main_process) then
-       read(unit=iunit,fmt='(a1000)',&
-            iostat=ios,err=10,end=10) buffer
-       if(ios/=0) buffer=pm_eof_char
-    endif
-20  continue
-    call mpi_bcast(buffer,len(buffer),MPI_CHARACTER,0,MPI_COMM_WORLD,ierror)
-    !write(*,*) 'Rank:',irank,'gets (',trim(buffer),')'
-    ios=0
-    if(ierror/=MPI_SUCCESS) ios=-1
-    if(buffer(1:1)==pm_eof_char) ios=-1
-   return
-10 buffer=pm_eof_char
-   ios=-1
-   goto 20
- end subroutine pm_read_line
-
- function pm_get_cl_count() result(n)
-   integer:: n
-   integer:: ierror
-   if(pm_main_process) then
-      n=iargc()
-   endif
-   call mpi_bcast(n,1,MPI_INTEGER,0,MPI_COMM_WORLD,ierror)
- end function pm_get_cl_count
-   
- subroutine pm_get_cl_arg(i,str)
-   character(len=*):: str
-   integer,intent(in):: i
-   integer:: ierror
-   if(pm_main_process) then
-      call getarg(i,str)
-   endif
-   call mpi_bcast(str,len(str),MPI_CHARACTER,0,MPI_COMM_WORLD,ierror)
- end subroutine pm_get_cl_arg
-
- subroutine pm_open_file(iunit,filename,ok)
-   integer,intent(in):: iunit
-   character(len=*),intent(in):: filename
-   logical,intent(out):: ok
-   if(pm_main_process) then
-      open(unit=iunit,file=filename,err=10)
-   endif
-   ok=.true.
-   return
-10 continue
-   ok=.false.
- end subroutine pm_open_file
-
- subroutine pm_close_file(iunit)
-   integer:: iunit
-   if(pm_main_process) then
-      close(iunit)
-   endif
- end subroutine pm_close_file
-
- function pm_file_exists(filename) result(ok)
-   character(len=*):: filename
-   logical:: ok
-   integer:: ierror
-   if(pm_main_process) then
-      inquire(file=filename,exist=ok)
-   endif
-   call mpi_bcast(ok,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierror)
- end function pm_file_exists
- 
- subroutine pm_change_filename(buffer)
+  subroutine pm_module_filename(buffer)
    character(len=*):: buffer
    integer:: n,m
    n=len_trim(buffer)
-   if(buffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) return
+   if(n>len(pm_file_suffix)) then
+     if(buffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) return
+   endif
    if(buffer(1:4)=='lib.') then
       m=len(pm_file_prefix)
       buffer(m+1:m+n)=buffer(1:n)
@@ -227,6 +185,6 @@ contains
       endif
    enddo
    buffer(n+1:n+len(pm_file_suffix))=pm_file_suffix
- end subroutine pm_change_filename
+ end subroutine pm_module_filename
   
 end module pm_sysdep

@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2016
+! Copyright (c) Tim Bellerby, 2017
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -24,6 +24,9 @@
 ! THE SOFTWARE.
 
 program pm
+  use pm_kinds
+  use pm_sysdep
+  use pm_compbase
   use pm_memory
   use pm_parser
   use pm_linker
@@ -34,31 +37,39 @@ program pm
   use pm_parlib
   use pm_vm
   implicit none
+
+  ! Memory manager state
   type(pm_context),pointer:: context
+
+  ! Parser state
   type(parse_state),target:: parser
+
+  ! Code generator state
   type(code_state),target:: coder
+
+  ! Final stage state
   type(finaliser),target:: fs
-  type(pm_ptr):: root,prog,sptr,svec,p
+  
+  type(pm_ptr):: root,prog,sptr,svec
   type(pm_ptr),dimension(1):: arg
   type(pm_ptr),target:: ve
   integer:: name,err
   character(len=pm_max_filename_size):: str
   logical:: out_debug_files,ok
   integer(pm_p):: i
-  integer(pm_ln):: jj
   type(pm_reg),pointer:: reg
 
   ! ****** Initialise ******
-  
+
   call pm_check_kinds
-
-  call init_par
-
+  context=>pm_init_gc()
+  call init_par(context)
   call pm_init_compilation
+  call pm_init_names(context)
+  call init_typ(context)
 
   ! ****** Command line *****
-  
-  context=>pm_init_gc()
+
   reg=>pm_register(context,'main',ve)
 
   if(pm_get_cl_count()==1) then
@@ -73,8 +84,7 @@ program pm
      call usage()
   endif
 
-  call pm_change_filename(str)
-  !write(*,*) 'Input file:',trim(str)
+  call pm_module_filename(str)
   if(.not.pm_file_exists(str)) call usage()
 
   ! ************* Parser ********************
@@ -91,7 +101,8 @@ program pm
   endif
 
   ! Parse other modules
-  name=name_entry(parser,trim(str))
+  name=pm_name_entry(context,trim(str))
+  pm_main_module=name
   call new_modl(parser,name)
   root=parser%modls
   do
@@ -103,7 +114,7 @@ program pm
      str=' '
      call pm_name_string(context,&
           int(get_modl_name(parser%modl),pm_p),str)
-     call pm_change_filename(str)
+     call pm_module_filename(str)
      call pm_open_file(pm_comp_file_unit,str,ok)
      if(.not.ok) then
         if(pm_main_process) then
@@ -118,16 +129,14 @@ program pm
      call decl(parser)
      close(pm_comp_file_unit)
      call pm_gc(context,.false.)
-     do jj=0,pm_dict_size(context,parser%modl_dict)
-        p=pm_dict_val(context,parser%modl_dict,jj)
-     enddo
      if(out_debug_files) then
         open(unit=9,file=trim(str)//'.dmp')
         call dump_module(context,9,parser%modl)
         close(9)
      endif
   enddo
-  if(parser%error_count>0) call pm_stop('Parse errors')
+  if(parser%error_count>0) &
+       call pm_stop('Compilation terminated due to syntax errors')
   call pm_gc(context,.false.)
 
   ! ***************Linker*******************
@@ -147,59 +156,65 @@ program pm
   call init_coder(context,coder)
   call trav_prog(coder,prog)
   if(out_debug_files) then
-!!$     open(unit=pm_comp_file_unit,file='coder.out')
-!!$     call dump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
-!!$     write(pm_comp_file_unit,*) '------------------------'
-!!$     call dump_sigs(coder,pm_comp_file_unit)
-!!$     close(pm_comp_file_unit)
      open(unit=pm_comp_file_unit,file='codegen.out')
      call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
      call dump_sigs(coder,pm_comp_file_unit)
      close(pm_comp_file_unit)
-     
   endif
-  if(coder%num_errors>0) call pm_stop('Code generation errors')
+  if(coder%num_errors>0) &
+       call pm_stop('Compilation terminated due to semantic errors')
   
   ! *********** Type Inference *********************
   if(pm_debug_level>1) write(*,*) 'TYPE INFERENCE>>'
   call prc_prog(coder)
   if(out_debug_files) then
      open(unit=pm_comp_file_unit,file='infer.out')
-     call dump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
+     call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
      call dump_res_sigs(coder,pm_comp_file_unit)
      close(pm_comp_file_unit)
   endif
-  if(coder%num_errors>0) call pm_stop('Type inference errors')
-
-
+  if(coder%num_errors>0) &
+       call pm_stop('Compilation terminated due to type-inference errors')
+  
   !**************** Backend **********************
   if(pm_debug_level>1) write(*,*) 'FINAL STAGE>>'
   call init_fs(context,fs,coder%proc_cache)
   call finalise_prog(fs,coder%vstack(1))
   call finalise_procs(fs)
-  if(out_debug_files) then
+  if(out_debug_files.and..not.pm_is_compiling) then
      open(unit=pm_comp_file_unit,file='final.out')
      context%funcs=fs%code_cache
      call dump_wc(context,pm_comp_file_unit)
      close(pm_comp_file_unit)
   endif
-  if(coder%num_errors>0) call pm_stop('Errors in final coding stage')
+  if(fs%num_errors>0) &
+       call pm_stop(&
+       'Compilation terminated due to errors detected in final stage of analysis')
 
-  !********** Run interpreter ***********************
-  if(pm_debug_level>1) write(*,*) 'RUNNING...'
-  ! Pass over code from backend
-  context%funcs=pm_dict_vals(context,fs%code_cache)
-  ! Create intial vector engine structure
-  ve=simple_ve(context,1_pm_ln)
-  arg(1)=ve
-  ! Run the code
-  err=pm_run(context,pm_null_obj,pm_null_obj,&
-       pm_null_obj,op_call,0_pm_i16,arg,1)
-  call pm_delete_register(context,reg)
-  if(err/=0) then
-     call pm_abort('Runtime error')
+  if(.not.pm_is_compiling) then
+     
+     !********** Run interpreter ***********************
+     if(pm_debug_level>1) write(*,*) 'RUNNING...'
+     ! Pass over code from backend
+     context%funcs=pm_dict_vals(context,fs%code_cache)
+     ! Create intial vector engine structure
+     ve=simple_ve(context,1_pm_ln)
+     arg(1)=ve
+     ! Run the code
+     err=pm_run(context,pm_null_obj,pm_null_obj,&
+          pm_null_obj,op_call,0_pm_i16,arg,1)
+      call pm_delete_register(context,reg)
+
+      if(err<=0.or.pm_main_process) then
+        call mesg_q_cleanup()
+     else
+        call mesg_q_mess_finish()
+     endif
   endif
-  call finalise_par
+
+  ! Close down parallel subsystem
+  call finalise_par(context)
+  
 contains
   
   include 'fisnull.inc'

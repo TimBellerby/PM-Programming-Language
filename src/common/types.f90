@@ -1,18 +1,18 @@
 !
-!PM (Parallel Models) Programming Language
+! PM (Parallel Models) Programming Language
 !
-!Released under the MIT License (MIT)
+! Released under the MIT License (MIT)
 !
-!Copyright (c) Tim Bellerby, 2015
+! Copyright (c) Tim Bellerby, 2017
 !
-!Permission is hereby granted, free of charge, to any person obtaining a copy
+! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
 ! in the Software without restriction, including without limitation the rights
 ! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 ! copies of the Software, and to permit persons to whom the Software is
 ! furnished to do so, subject to the following conditions:
 !
-!The above copyright notice and this permission notice shall be included in
+! The above copyright notice and this permission notice shall be included in
 ! all copies or substantial portions of the Software.
 !
 ! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
@@ -27,27 +27,26 @@ module pm_types
   use pm_kinds
   use pm_memory
   use pm_lib
-  use pm_parser
+  use pm_symbol
   implicit none
 
   logical,parameter:: pm_typ_xtra_debug=.false.
+  logical,parameter:: pm_typ_show_membership=.false.
 
   integer(pm_i16),parameter:: pm_typ_is_user=1
-  integer(pm_i16),parameter:: pm_typ_is_any=2
-  integer(pm_i16),parameter:: pm_typ_is_struct=3
-  integer(pm_i16),parameter:: pm_typ_is_rec=4
-  integer(pm_i16),parameter:: pm_typ_is_array=5
-  integer(pm_i16),parameter:: pm_typ_is_opt=6
-  integer(pm_i16),parameter:: pm_typ_is_tuple=7
-  integer(pm_i16),parameter:: pm_typ_is_vtuple=8
-  integer(pm_i16),parameter:: pm_typ_is_single_name=9
-  integer(pm_i16),parameter:: pm_typ_is_single_proc=10
-  integer(pm_i16),parameter:: pm_typ_is_ambig=11
-  integer(pm_i16),parameter:: pm_typ_is_intersect=12
-  integer(pm_i16),parameter:: include_cache=13
-  integer(pm_i16),parameter:: intersect_cache=14
-  integer(pm_i16),parameter:: intersection_cache=15
-  
+  integer(pm_i16),parameter:: pm_typ_is_struct=2
+  integer(pm_i16),parameter:: pm_typ_is_rec=3
+  integer(pm_i16),parameter:: pm_typ_is_array=4
+  integer(pm_i16),parameter:: pm_typ_is_tuple=5
+  integer(pm_i16),parameter:: pm_typ_is_vtuple=6
+  integer(pm_i16),parameter:: pm_typ_is_single_name=7
+  integer(pm_i16),parameter:: pm_typ_is_single_proc=8
+  integer(pm_i16),parameter:: pm_typ_is_intersect=9
+  integer(pm_i16),parameter:: pm_typ_is_poly=10
+  integer(pm_i16),private,parameter:: include_cache=11
+  integer(pm_i16),private,parameter:: intersect_cache=12
+  integer(pm_i16),private,parameter:: intersection_cache=13
+   
   integer,private,parameter:: max_intersect_stack = 128
 
   integer,parameter:: pm_typ_equal=0
@@ -63,6 +62,10 @@ module pm_types
   integer(pm_p),parameter:: pm_intersect_open=-3
   integer(pm_p),parameter:: pm_intersect_closed=-2
   integer(pm_p),parameter:: pm_intersect_null=-1
+
+  integer,parameter:: pm_elem_found=0
+  integer,parameter:: pm_elem_not_found=1
+  integer,parameter:: pm_elem_clash=2
   
 contains
 
@@ -71,8 +74,8 @@ contains
     integer:: i,j
     integer(pm_i16),dimension(2):: key
     character(len=12),dimension(pm_last_libtype),parameter:: base_types= (/&
-    'PM__tinyint','type       ','proc       ','affirm     ',&
-    'null       ','int        ','long       ','int8       ',&
+    'PM__tinyint','proc       ','<type>     ','name       ',&
+    'null       ','int        ','long       ','long_long  ','int8       ',&
     'int16      ','int32      ','int64      ','int128     ',&
     'real       ','double     ','real32     ','real64     ',&
     'real128    ','cpx        ','double_cpx ','cpx64      ',&
@@ -214,35 +217,29 @@ contains
     uk=pm_tv_kind(u)
     tk=pm_tv_kind(t)
 
-    if(uk==pm_typ_is_single_proc.and.p==pm_proc) then
-       ok=.true.
-       return
-    else if(uk==pm_typ_is_single_name.and.p==pm_name) then
-       ok=.true.
-       return
-    else if(uk==pm_typ_is_tuple.and.p==pm_matched_type) then
-       if(pm_tv_numargs(u)==2) then
-          ok=pm_tv_arg(u,1)==pm_tv_arg(u,2)
-       else
-          ok=.false.
+    select case(uk)
+    case(pm_typ_is_single_proc)
+       if(p==pm_proc) then
+          ok=.true.
+          return
        endif
-       return
-    else if(uk==pm_typ_is_ambig) then
-       do i=1,pm_tv_numargs(u)
-          if(.not.pm_typ_includes(context,p,pm_tv_arg(u,i))) then
+    case(pm_typ_is_single_name)
+       if(p==pm_name) then
+          ok=.true.
+          return
+       endif
+    case(pm_typ_is_tuple)
+       if(p==pm_matched_type) then
+          if(pm_tv_numargs(u)==2) then
+             ok=pm_tv_arg(u,1)==pm_tv_arg(u,2)
+          else
              ok=.false.
-             return
           endif
-       enddo
-       ok=.true.
-       return
-    elseif(uk==pm_typ_is_intersect) then
+          return
+       endif
+    case(pm_typ_is_intersect)
        r=pm_dict_val(context,context%tcache,int(q,pm_ln))
        if(.not.pm_fast_isnull(r)) then
-!!$          if(r%data%i16(r%offset)==0) then
-!!$             ok=.false.
-!!$             return
-!!$          endif
           do i=1,r%data%i16(r%offset)
              if(.not.pm_typ_includes(context,p,r%data%i16(r%offset+i))) then
                 ok=.false.
@@ -252,7 +249,7 @@ contains
        endif
        ok=.true.
        return
-    endif
+    end select
  
     select case(tk)
     case(pm_typ_is_struct,pm_typ_is_rec)
@@ -272,29 +269,18 @@ contains
           endif
           ok=.true.
        enddo
-    case(pm_typ_is_opt)
-       if(uk==pm_typ_is_opt) then
-          ok=pm_typ_includes(context,&
-               pm_tv_arg(t,1),pm_tv_arg(u,1))
-       else
-          if(q==pm_null) then
-             ok=.true.
-          else
-             ok=pm_typ_includes(context,pm_tv_arg(t,1),q)
-          endif
-       endif
-    case(pm_typ_is_any)
-       if(uk==pm_typ_is_any) then
-          ok=pm_typ_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1))
-       else
-          ok=.false.
-       endif
     case(pm_typ_is_array)
        if(uk/=pm_typ_is_array) then
           ok=.false.
        else
           ok=pm_typ_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1)).and.&
                pm_typ_includes(context,pm_tv_arg(t,2),pm_tv_arg(u,2))
+       endif
+    case(pm_typ_is_poly)
+       if(uk/=pm_typ_is_poly) then
+          ok=.false.
+       else
+          ok=pm_typ_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1))
        endif
     case(pm_typ_is_tuple,pm_typ_is_vtuple)
        if(uk/=pm_typ_is_tuple.and.uk/=pm_typ_is_vtuple) then
@@ -310,7 +296,21 @@ contains
              ok=.false.
              return
           endif
-          do i=1,min(nt,nu)
+          j=1
+          if(nt==nu) then
+             do while(j<=nt)
+                if(pm_tv_arg(t,j)==pm_tv_arg(u,j)) then
+                   j=j+1
+                else
+                   exit
+                endif
+             enddo
+             if(j==nt+1) then
+                ok=pm_tv_name(t)<=pm_tv_name(u)
+                return
+             endif
+          endif
+          do i=j,min(nt,nu)
              if(.not.pm_typ_includes(context,pm_tv_arg(t,i),&
                   pm_tv_arg(u,i))) then
                 ok=.false.
@@ -338,11 +338,6 @@ contains
        endif
     case(pm_typ_is_user)
        r=pm_dict_val(context,context%tcache,int(p,pm_ln))
-       if(pm_fast_isnull(r)) then
-          ! Base types
-          ok=.false.
-          return
-       endif
        ! Check P(p1,p2) < Q(q1,q2) <=> p1<q1, p2<q2 if P==Q
        if(uk==pm_typ_is_user) then
           if(pm_tv_name(t)==pm_tv_name(u)) then
@@ -358,19 +353,16 @@ contains
              endif
           endif
        endif
+       if(pm_fast_isnull(r)) then
+          ! Base types
+          ok=.false.
+          return
+       endif
        ok=pm_tset_includes(context,r,q)
     case(pm_typ_is_intersect)
        r=pm_dict_val(context,context%tcache,int(p,pm_ln))
        ok=pm_tset_includes(context,r,q)
     case(pm_typ_is_single_name,pm_typ_is_single_proc)
-       ok=.false.
-    case(pm_typ_is_ambig)
-       do i=1,pm_tv_numargs(t)
-          if(pm_typ_includes(context,pm_tv_arg(t,i),q)) then
-             ok=.true.
-             return
-          endif
-       enddo
        ok=.false.
     case default
        write(*,*) 'Type=',p
@@ -411,32 +403,27 @@ contains
     t=pm_typ_vect(context,p)
     u=pm_typ_vect(context,q)
     uk=pm_tv_kind(u)
-    if(uk==pm_typ_is_opt.and.p==pm_null) then
-       ok=.true.
-       return
-    elseif(uk==pm_typ_is_single_proc.and.p==pm_proc) then
-       ok=.true.
-       return
-    else if(uk==pm_typ_is_single_name.and.p==pm_name) then
-       ok=.true.
-       return
-    elseif(uk==pm_typ_is_tuple.and.p==pm_matched_type) then
-       if(pm_tv_numargs(u)==2) then
-          ok=pm_typ_intersects(context,pm_tv_arg(u,1),pm_tv_arg(u,2))
-       else
-          ok=.false.
+    select case(uk)
+    case(pm_typ_is_single_proc)
+       if(p==pm_proc) then
+          ok=.true.
+          return
+       end if
+    case(pm_typ_is_single_name)
+       if(p==pm_name) then
+          ok=.true.
+          return
        endif
-       return
-    else if(uk==pm_typ_is_ambig) then
-       do i=1,pm_tv_numargs(u)
-          if(pm_typ_intersects(context,p,pm_tv_arg(u,i))) then
-             ok=.true.
-             return
+    case(pm_typ_is_tuple)
+       if(p==pm_matched_type) then
+          if(pm_tv_numargs(u)==2) then
+             ok=pm_typ_intersects(context,pm_tv_arg(u,1),pm_tv_arg(u,2))
+          else
+             ok=.false.
           endif
-       enddo
-       ok=.false.
-       return
-    else if(uk==pm_typ_is_user.or.uk==pm_typ_is_intersect) then
+          return
+       endif
+    case(pm_typ_is_user,pm_typ_is_intersect)
        r=pm_dict_val(context,context%tcache,int(q,pm_ln))
        if(.not.pm_fast_isnull(r)) then
           do i=1,r%data%i16(r%offset)
@@ -448,7 +435,7 @@ contains
           ok=.false.
           return
        endif
-    endif
+    end select
     tk=pm_tv_kind(t)
     select case(pm_tv_kind(t))
     case(pm_typ_is_struct,pm_typ_is_rec)
@@ -469,23 +456,6 @@ contains
        enddo
        ok=.true.
        return
-    case(pm_typ_is_any)
-       if(uk/=pm_typ_is_any) then
-          ok=.false.
-          return
-       endif
-       ok=pm_typ_intersects(context,pm_tv_arg(t,1),pm_tv_arg(u,1))
-       return
-    case(pm_typ_is_opt)
-       if(uk==pm_typ_is_opt) then
-          ok=pm_typ_intersects(context,pm_tv_arg(t,1),pm_tv_arg(u,1))
-       else
-          if(q==pm_null) then
-             ok=.true.
-          else
-             ok=pm_typ_intersects(context,pm_tv_arg(t,1),q)
-          endif
-       endif
     case(pm_typ_is_array)
        if(uk/=pm_typ_is_array) then
           ok=.false.
@@ -493,6 +463,14 @@ contains
        else
           ok=pm_typ_intersects(context,pm_tv_arg(t,1),pm_tv_arg(u,1)).and.&
                pm_typ_intersects(context,pm_tv_arg(t,2),pm_tv_arg(u,2))
+          return
+       endif
+    case(pm_typ_is_poly)
+       if(uk/=pm_typ_is_poly) then
+          ok=.false.
+          return
+       else
+          ok=pm_typ_intersects(context,pm_tv_arg(t,1),pm_tv_arg(u,1))
           return
        endif
     case(pm_typ_is_tuple,pm_typ_is_vtuple)
@@ -540,6 +518,22 @@ contains
           ok=.true.
        endif
     case(pm_typ_is_user,pm_typ_is_intersect)
+       if(uk==pm_typ_is_user) then
+          if(pm_tv_name(t)==pm_tv_name(u)) then
+             nt=pm_tv_numargs(t)
+             nu=pm_tv_numargs(u)
+             if(nt==nu) then
+                do i=1,nt
+                   if(.not.pm_typ_intersects(context,&
+                        pm_tv_arg(t,i),pm_tv_arg(u,i))) then
+                      ok=.false.
+                   endif
+                enddo
+                ok=.true.
+                return
+             endif
+          endif
+       endif
        r=pm_dict_val(context,context%tcache,int(p,pm_ln))
        if(pm_fast_isnull(r)) then
           ok=.false.
@@ -547,14 +541,6 @@ contains
        endif
        ok=pm_tset_intersect(context,r,q)
        return
-    case(pm_typ_is_ambig)
-       do i=1,pm_tv_numargs(t)
-          if(pm_typ_intersects(context,pm_tv_arg(t,i),q)) then
-             ok=.true.
-             return
-          endif
-       enddo
-       ok=.false.
     case(pm_typ_is_single_name)
        ok=q==pm_name
     case(pm_typ_is_single_proc)
@@ -663,7 +649,8 @@ contains
        call pm_dict_set_val(context,context%pcache,j,v)
        return
     endif
-    j=pm_idict_add(context,context%pcache,stack(1:),3,pm_fast_tinyint(context,int(tno,pm_p)))
+    j=pm_idict_add(context,context%pcache,stack(1:),3,&
+         pm_fast_tinyint(context,int(tno,pm_p)))
   contains
     include 'ftiny.inc'
   end function pm_typ_intersect
@@ -797,29 +784,27 @@ contains
     u=pm_typ_vect(context,q)
     uk=pm_tv_kind(u)
     tk=pm_tv_kind(t)
-    if(uk==pm_typ_is_opt.and.p==pm_null) then
-       call push(int(pm_null,pm_i16))
-       return
-    elseif(uk==pm_typ_is_single_proc.and.p==pm_proc) then
-       call push(q)
-       return
-    else if(uk==pm_typ_is_single_name.and.p==pm_name) then
-       call push(q)
-       return
-    else if(uk==pm_typ_is_ambig) then
-       do i=1,pm_tv_numargs(u)
-          call pm_calc_typ_intersect(context,p,pm_tv_arg(u,i),stack,nstack,top)
-       enddo
-       return
-    else if(uk==pm_typ_is_user.or.uk==pm_typ_is_intersect) then
+    select case(uk)
+    case(pm_typ_is_single_proc)
+       if(p==pm_proc) then
+          call push(q)
+          return
+       endif
+    case(pm_typ_is_single_name)
+       if(p==pm_name) then
+          call push(q)
+          return
+       endif
+    case(pm_typ_is_user,pm_typ_is_intersect)
        r=pm_dict_val(context,context%tcache,int(q,pm_ln))
        if(.not.pm_fast_isnull(r)) then
           do i=1,r%data%i16(r%offset)
-             call pm_calc_typ_intersect(context,p,r%data%i16(r%offset+i),stack,nstack,top)
+             call pm_calc_typ_intersect(context,p,&
+                  r%data%i16(r%offset+i),stack,nstack,top)
           enddo
           return
        endif
-    endif
+    end select
     
     select case(pm_tv_kind(t))
     case(pm_typ_is_struct,pm_typ_is_rec)
@@ -843,49 +828,36 @@ contains
        enddo
        call make_type(pm_tv_numargs(t)+2)
        return
-    case(pm_typ_is_any)
-       if(uk/=pm_typ_is_any) then
-          return
-       endif
-       base=top
-       call push(pm_typ_is_any)
-       call push(0_pm_i16)
-       tno=pm_typ_intersect(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
-            stack(top+1:),nstack-top,ok)
-       if(.not.ok) then
-          top=base
-          return
-       endif
-       call push(tno)
-       call make_type(3)
-       return
-    case(pm_typ_is_opt)
-       if(uk==pm_typ_is_opt) then
-          base=top
-          call push(pm_typ_is_opt)
-          call push(0_pm_i16)
-          tno=pm_typ_intersect(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
-               stack(top+1:),&
-               nstack-top,ok)
-          if(.not.ok) then
-             top=base
-             return
-          endif
-          call push(tno)
-          call make_type(3)
-       else
-          if(q==pm_null) then
-             call push(int(pm_null,pm_i16))
-          else
-             call pm_calc_typ_intersect(context,pm_tv_arg(t,1),q,stack,nstack,top)
-          endif
-       endif
     case(pm_typ_is_array)
        if(uk/=pm_typ_is_array) then
           return
        else
           base=top
           call push(pm_typ_is_array)
+          call push(0_pm_i16)
+          tno=pm_typ_intersect(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
+               stack(top+1:),nstack-top,ok)
+          if(.not.ok) then
+             top=base
+             return
+          endif
+          call push(tno)
+          tno=pm_typ_intersect(context,pm_tv_arg(t,2),pm_tv_arg(u,2),&
+               stack(top+1:),nstack-top,ok)
+          if(.not.ok) then
+             top=base
+             return
+          endif
+          call push(tno)
+          call make_type(4)
+          return
+       endif
+    case(pm_typ_is_poly)
+       if(uk/=pm_typ_is_poly) then
+          return
+       else
+          base=top
+          call push(pm_typ_is_poly)
           call push(0_pm_i16)
           tno=pm_typ_intersect(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
                stack(top+1:),nstack-top,ok)
@@ -933,7 +905,8 @@ contains
           endif
           call push(0_pm_i16)
           do i=1,nt
-             if(pm_typ_xtra_debug) write(*,*) 'INTER',i,nt,pm_tv_arg(t,i),pm_tv_arg(u,i),top
+             if(pm_typ_xtra_debug) &
+                  write(*,*) 'INTER',i,nt,pm_tv_arg(t,i),pm_tv_arg(u,i),top
              tno=pm_typ_intersect(context,&
                   pm_tv_arg(t,i),pm_tv_arg(u,i),stack(top+1:),nstack-top,ok)
              if(pm_typ_xtra_debug) write(*,*) 'IS',ok,tno,top
@@ -961,10 +934,6 @@ contains
                q,stack,nstack,top)
        enddo
        return
-    case(pm_typ_is_ambig)
-       do i=1,pm_tv_numargs(t)
-          call pm_calc_typ_intersect(context,pm_tv_arg(t,i),q,stack,nstack,top)
-       enddo
     case(pm_typ_is_single_name)
        if(q==pm_name) call push(p)
     case(pm_typ_is_single_proc)
@@ -1019,11 +988,13 @@ contains
     type(pm_ptr):: tv,r
     integer(pm_i16):: tk
     integer:: i
+    if(tno==0) then
+       ok=.false.
+       return
+    endif
     tv=pm_typ_vect(context,tno)
     tk=pm_tv_kind(tv)
     select case (tk)
-    case(pm_typ_is_ambig)
-       ok=.false.
     case(pm_typ_is_user)
       r=pm_dict_val(context,context%tcache,int(tno,pm_ln))
       if(pm_fast_isnull(r)) then
@@ -1055,7 +1026,8 @@ contains
     ok=.false.
     if(tno==0) return
     tv=pm_typ_vect(context,tno)
-    if(pm_tv_kind(tv)==pm_typ_is_user.or.pm_tv_kind(tv)==pm_typ_is_intersect) then
+    if(pm_tv_kind(tv)==pm_typ_is_user.or.&
+         pm_tv_kind(tv)==pm_typ_is_intersect) then
        r=pm_dict_val(context,context%tcache,int(tno,pm_ln))
        if(.not.pm_fast_isnull(r)) then
           do j=1,r%data%i16(r%offset)
@@ -1243,41 +1215,114 @@ contains
     type(pm_ptr):: tv,nv
 
     if(tno==0) then
-       offset=-1
+       offset=0
        etyp=0
        return
     endif
-
     tv=pm_typ_vect(context,tno)
-    offset=-1
+    offset=0
     etyp=0
     if(pm_tv_kind(tv)==pm_typ_is_struct.or.&
          ((.not.change).and.pm_tv_kind(tv)==pm_typ_is_rec)) then
        nv=pm_name_val(context,int(pm_tv_name(tv),pm_p))
-       if(nv%data%i16(nv%offset+1)>name) return
-       if(nv%data%i16(nv%offset+pm_fast_esize(nv))<name) return
-       lo=1
-       hi=pm_fast_esize(nv)
-       j=(lo+hi)/2
-       do
-          name2=nv%data%i16(nv%offset+j)
-          if(name2==name) then
-             etyp=pm_tv_arg(tv,j)
-             offset=j+1
-             return
-          endif
-          if(name2<name) then
-             lo=j+1
-          else
-             hi=j-1
-          endif
-          if(lo>hi) exit
+       if(abs(nv%data%i16(nv%offset+1))<=name.and.&
+            abs(nv%data%i16(nv%offset+pm_fast_esize(nv)))>=name) then
+          lo=1
+          hi=pm_fast_esize(nv)
           j=(lo+hi)/2
-       enddo
+          do
+             name2=abs(nv%data%i16(nv%offset+j))
+             if(name2==name) then
+                etyp=pm_tv_arg(tv,j)
+                offset=j+1
+                return
+             endif
+             if(name2<name) then
+                lo=j+1
+             else
+                hi=j-1
+             endif
+             if(lo>hi) exit
+             j=(lo+hi)/2
+          enddo
+       endif
+       offset=-1
     endif
   contains
     include 'fesize.inc'
   end subroutine pm_elem_offset
+
+  recursive subroutine pm_indirect_offset(context,tno,name,stack,&
+       maxstack,top,change,etype,status)
+    type(pm_context),pointer:: context
+    integer(pm_i16),intent(in):: tno,name
+    integer,intent(inout):: top
+    integer,intent(in):: maxstack
+    integer(pm_i16),dimension(maxstack),intent(inout):: stack
+    logical,intent(in):: change
+    integer(pm_i16),intent(out):: etype
+    integer,intent(out):: status
+    type(pm_ptr):: tv,nv
+    integer:: i
+    integer(pm_i16):: n,offset,etyp
+    integer(pm_p):: name2
+    logical:: found
+    tv=pm_typ_vect(context,tno)
+    name2=pm_tv_name(tv)
+    nv=pm_name_val(context,name2)
+    found=.false.
+    do i=1,pm_fast_esize(nv)
+       n=nv%data%i16(nv%offset+i)
+       if(n<0) then
+          call pm_elem_offset(context,pm_tv_arg(tv,i),name,change,offset,etyp)
+          if(offset>0) then
+             if(found) then
+                status=pm_elem_clash
+                return
+             endif
+             if(top+2>maxstack) call pm_panic('Structure embedding too complex')
+             top=top+1
+             stack(top)=i+1
+             top=top+1
+             stack(top)=-n
+             top=top+1
+             stack(top)=offset
+             top=top+1
+             stack(top)=name
+             etype=etyp
+             found=.true.
+          elseif(offset<0) then
+             if(top+1>maxstack) call pm_panic('Structure embedding too complex')
+             top=top+1
+             stack(top)=i+1
+             top=top+1
+             stack(top)=-n
+             call pm_indirect_offset(context,pm_tv_arg(tv,i),name,stack,&
+                  maxstack,top,change,etype,status)
+             if(status==pm_elem_found) then
+                if(found) then
+                   status=pm_elem_clash
+                   return
+                else
+                   found=.true.
+                endif
+             elseif(status==pm_elem_clash) then
+                top=top-2
+                return
+             else ! status==pm_elem_not_found
+                top=top-2
+             endif
+          endif
+       endif
+    enddo
+    if(found) then
+       status=pm_elem_found
+    else
+       status=pm_elem_not_found
+    endif
+  contains
+    include 'fesize.inc'
+  end subroutine pm_indirect_offset
 
   ! Find offset of element in "array of struct/rec" type
   subroutine pm_array_elem_offset(context,tno,name,change,offset,etyp)
@@ -1306,21 +1351,21 @@ contains
     integer(pm_i16),intent(in):: tno
     character(len=256):: str
     integer:: n
-    !write(0,*) '---:>>',tno
     str=''
     if(tno==0) then
        str='any'
     else
        n=1
-       call typ_to_str(context,tno,str,n)
+       call typ_to_str(context,tno,str,n,.false.)
     endif
   end function  pm_typ_as_string
 
-  recursive subroutine typ_to_str(context,tno,str,n)
+  recursive subroutine typ_to_str(context,tno,str,n,ignore_long)
     type(pm_context),pointer:: context
     integer(pm_i16),intent(in):: tno
     character(len=256),intent(inout):: str
     integer,intent(inout):: n
+    logical,intent(in):: ignore_long
     type(pm_ptr):: tv,nv,nv2
     integer:: tk,narg
     integer(pm_p):: name,name2
@@ -1331,52 +1376,52 @@ contains
     integer:: i,istart
     if(n>len(str)-10) return
     if(tno==0) return
+    if(ignore_long.and.tno==pm_long) return
     tv=pm_typ_vect(context,tno)
     tk=pm_tv_kind(tv)
-    ! write(0,*) '>>',tno,n,tk
-    !call dump_type(context,0,tno,2)
     select case(tk)
     case(pm_typ_is_intersect)
        nv=pm_dict_val(context,context%tcache,int(tno,pm_ln))
        !write(*,*) 'Inter #',nv%data%i16(nv%offset)
        do i=1,pm_tv_numargs(tv)-1
-          call typ_to_str(context,pm_tv_arg(tv,i),str,n)
-          if(add_char('^')) return
+          call typ_to_str(context,pm_tv_arg(tv,i),str,n,ignore_long)
+          if(add_char(' and ')) return
        enddo
-       call typ_to_str(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n)
-!!$       if(add_char('): {')) return
-!!$       if(.not.pm_fast_isnull(nv)) then
-!!$          do i=1,nv%data%i16(nv%offset)
-!!$             call typ_to_str(context,nv%data%i16(nv%offset+i),str,n)
-!!$             if(i<nv%data%i16(nv%offset)) then
-!!$                if(add_char(' or ')) return
-!!$             endif
-!!$          enddo
-!!$       endif
-!!$       if(add_char('}')) return
-    case(pm_typ_is_ambig)
-       nv=pm_dict_val(context,context%tcache,int(tno,pm_ln))
-       !write(*,*) 'Inter #',nv%data%i16(nv%offset)
-       do i=1,pm_tv_numargs(tv)
-          call typ_to_str(context,pm_tv_arg(tv,i),str,n)
-          if(add_char(' or ')) return
-       enddo
+       call typ_to_str(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n,ignore_long)
+       if(pm_typ_show_membership) then
+          if(add_char('): {')) return
+          if(.not.pm_fast_isnull(nv)) then
+             do i=1,nv%data%i16(nv%offset)
+                call typ_to_str(context,nv%data%i16(nv%offset+i),str,n,ignore_long)
+                if(i<nv%data%i16(nv%offset)) then
+                   if(add_char(' or ')) return
+                endif
+             enddo
+          endif
+          if(add_char('}')) return
+       endif
     case(pm_typ_is_user)
        name=pm_tv_name(tv)
        nv=pm_name_val(context,name)
        if(pm_fast_vkind(nv)==pm_int16) then
-          name=nv%data%i16(nv%offset)
-          nv=pm_name_val(context,name)
+          if(nv%data%i16(nv%offset)<0) then
+             name=nv%data%i16(nv%offset+1)
+             nv=pm_name_val(context,name)
+          endif
+          if(pm_fast_vkind(nv)==pm_int16) then
+                name=nv%data%i16(nv%offset)
+                nv=pm_name_val(context,name)
+          endif
        endif
        if(name==sym_array) then
-          call typ_to_str(context,pm_tv_arg(tv,1),str,n)
+          call typ_to_str(context,pm_tv_arg(tv,1),str,n,ignore_long)
           if(add_char(open_square)) return
           narg=pm_tv_numargs(tv)
           do i=2,narg-1
-             call typ_to_str(context,pm_tv_arg(tv,i),str,n)
+             call typ_to_str(context,pm_tv_arg(tv,i),str,n,ignore_long)
              if(add_char(',')) return
           enddo
-          call typ_to_str(context,pm_tv_arg(tv,narg),str,n)
+          call typ_to_str(context,pm_tv_arg(tv,narg),str,n,ignore_long)
           if(add_char(close_square)) return
        else
           if(pm_fast_vkind(nv)==pm_int) then
@@ -1390,10 +1435,10 @@ contains
           if(narg>0) then
              if(add_char(open_brace)) return
              do i=1,narg-1
-                call typ_to_str(context,pm_tv_arg(tv,i),str,n)
+                call typ_to_str(context,pm_tv_arg(tv,i),str,n,ignore_long)
                 if(add_char(',')) return
              enddo
-             call typ_to_str(context,pm_tv_arg(tv,narg),str,n)
+             call typ_to_str(context,pm_tv_arg(tv,narg),str,n,ignore_long)
              if(add_char(close_brace)) return
           endif
        endif
@@ -1405,10 +1450,10 @@ contains
           return
        endif
        do i=1,narg-1
-          call typ_to_str(context,pm_tv_arg(tv,i),str,n)
+          call typ_to_str(context,pm_tv_arg(tv,i),str,n,ignore_long)
           if(add_char(',')) return
        enddo
-       call typ_to_str(context,pm_tv_arg(tv,narg),str,n)
+       call typ_to_str(context,pm_tv_arg(tv,narg),str,n,ignore_long)
        if(tk==pm_typ_is_vtuple) then
           if(add_char(',...')) return
        endif
@@ -1419,7 +1464,8 @@ contains
        if(name/=0) then
           nv2=pm_name_val(context,name)
           if(pm_fast_vkind(nv2)==pm_int) then
-             if(pm_name_as_string(context,int(nv2%data%i(nv2%offset),pm_p))=='PM__system') then
+             if(pm_name_as_string(context,&
+                  int(nv2%data%i(nv2%offset),pm_p))=='PM__system') then
                 call sys_typ_str(nv2%data%i(nv2%offset+1_pm_p),tv)
                 return
              endif
@@ -1429,7 +1475,8 @@ contains
                 if(add_char('rec ')) return
              endif
              if(add_char('_')) return
-             call pm_name_string(context,int(nv2%data%i(nv2%offset+1_pm_p),pm_p),str(n:))
+             call pm_name_string(context,&
+                  int(nv2%data%i(nv2%offset+1_pm_p),pm_p),str(n:))
           else
              if(tk==pm_typ_is_struct) then
                 if(add_char('struct ')) return
@@ -1440,6 +1487,12 @@ contains
           endif
           n=len_trim(str)+1
           if(n>len(str)-10) return
+       else
+          if(tk==pm_typ_is_struct) then
+             if(add_char('struct')) return
+          else
+             if(add_char('rec')) return
+          endif
        endif
        if(add_char(open_brace)) return
        narg=pm_tv_numargs(tv)
@@ -1448,37 +1501,53 @@ contains
           nv2=pm_name_val(context,name)
           if(pm_fast_vkind(nv2)==pm_int) then
              if(add_char('_')) return
-             call pm_name_string(context,int(nv2%data%i(nv2%offset+1_pm_p),pm_p),str(n:))
+             call pm_name_string(context,&
+                  int(nv2%data%i(nv2%offset+1_pm_p),pm_p),str(n:))
           else   
              call pm_name_string(context,name,str(n:))
           endif
           n=len_trim(str)+1
           if(n>len(str)-10) return
           if(add_char(':')) return
-          call typ_to_str(context,pm_tv_arg(tv,i),str,n)
+          call typ_to_str(context,pm_tv_arg(tv,i),str,n,ignore_long)
           if(i<narg) then
              if(add_char(',')) return
           endif
        enddo
        if(add_char(close_brace)) return
-    case(pm_typ_is_opt)
-       if(add_char('opt ')) return
-       call typ_to_str(context,pm_tv_arg(tv,1),str,n)
-    case(pm_typ_is_any)
-       if(add_char('<')) return
-       call typ_to_str(context,pm_tv_arg(tv,1),str,n)
-       if(add_char('>')) return
+    case(pm_typ_is_single_name,pm_typ_is_single_proc)
+       if(tk==pm_typ_is_single_name) then
+          if(add_char('$')) return
+       else
+          if(add_char('proc.')) return
+       endif
+       name=pm_tv_name(tv)
+       nv2=pm_name_val(context,name)
+       if(pm_fast_vkind(nv2)==pm_int) then
+          if(add_char('_')) return
+          call pm_name_string(context,&
+               int(nv2%data%i(nv2%offset+1_pm_p),pm_p),str(n:))
+       else   
+          call pm_name_string(context,name,str(n:))
+       endif
+       n=len_trim(str)+1
+       if(n>len(str)-10) return
+       
     case(pm_typ_is_array)
-       call typ_to_str(context,pm_tv_arg(tv,1),str,n)
+       call typ_to_str(context,pm_tv_arg(tv,1),str,n,ignore_long)
        if(add_char(open_square)) return
-       if(add_char('=')) return
        istart=n
-       call typ_to_str(context,pm_tv_arg(tv,2),str,n)
+       call typ_to_str(context,pm_tv_arg(tv,2),str,n,ignore_long)
        if(str(istart:istart+3)=='grid') then
-          str=str(1:istart-1)//str(istart+4+len_trim(open_brace):n-len_trim(open_brace))
+          str=str(1:istart-1)//&
+               str(istart+4+len_trim(open_brace):n-len_trim(open_brace))
           n=len_trim(str)+1
        endif
        if(add_char(close_square)) return
+    case(pm_typ_is_poly)
+       if(add_char('<')) return
+       call typ_to_str(context,pm_tv_arg(tv,1),str,n,ignore_long)
+       if(add_char('>')) return
     case default
        if(add_char('?')) return
        write(str(n:n+3),'(i4)') tk
@@ -1506,36 +1575,61 @@ contains
       type(pm_ptr),intent(in):: tv
       character(len=100):: nam
       integer:: narg,i
+      integer(pm_i16):: tno2
+      logical:: ignore
+      type(pm_ptr):: tv2
+      ignore=ignore_long
       nam='     '
       nam=pm_name_as_string(context,int(name,pm_p))
       narg=pm_tv_numargs(tv)
-      if(nam=='grid') then
+      if(nam(1:4)=='grid') then
          narg=narg-1
-      elseif(nam=='tuple') then
-         continue
-      elseif(nam=='range') then
-         narg=1
-      elseif(nam=='seq') then
-         narg=1
-!!$      elseif(nam=='slice') then
-!!$         !!!
-!!$         call typ_to_str(context,pm_tv_arg(tv,3),str,n)
-!!$         return
-      elseif(nam=='opt') then
-         if(add_char('<opt ')) return
-         call typ_to_str(context,pm_tv_arg(tv,1),str,n)
-         if(add_char('>')) return
+         ignore=.true.
+      elseif(nam=='block') then
+         tno2=pm_tv_arg(tv,1)
+         tv2=pm_typ_vect(context,tno2)
+         i=len_trim(nam)
+         nam(i+1:i+1)=achar(iachar('0')+pm_tv_numargs(tv2))
+         nam(i+2:i+2)='d'
+         if(add_char(trim(nam))) return
          return
-      else
-         nam='_'//nam
+      elseif(nam(1:4)=='tuple') then
+         if(add_char(open_square)) return
+         do i=1,narg-1
+            call typ_to_str(context,pm_tv_arg(tv,i),str,n,ignore_long)
+            if(add_char(',')) return
+         enddo
+         call typ_to_str(context,pm_tv_arg(tv,narg),str,n,ignore_long)
+         if(add_char(close_square)) return
+         return
+      elseif(nam=='range'.or.nam=='seq') then
+         if(ignore_long) then
+            if(pm_tv_arg(tv,1)==pm_long) then
+               if(add_char(trim(nam))) return
+               return
+            endif
+         endif
+         narg=1
+      elseif(nam(1:5)=='slice') then
+         if(add_char('slice:')) return
+         call typ_to_str(context,pm_tv_arg(tv,2),str,n,.true.)
+         return
+      elseif(nam=='opt') then
+         if(add_char('opt{')) return
+         call typ_to_str(context,pm_tv_arg(tv,1),str,n,ignore_long)
+         if(add_char('}')) return
+         return
+      elseif(nam=='ddom') then
+         nam='distr'
+         narg=1
       endif
       if(add_char(trim(nam))) return
       if(add_char(open_brace)) return
       do i=1,narg-1
-         call typ_to_str(context,pm_tv_arg(tv,i),str,n)
+         call typ_to_str(context,pm_tv_arg(tv,i),str,n,ignore)
          if(add_char(',')) return
       enddo
-      call typ_to_str(context,pm_tv_arg(tv,narg),str,n)
+      call typ_to_str(context,pm_tv_arg(tv,narg),str,n,ignore)
       if(add_char(close_brace)) return
       
     end subroutine sys_typ_str
@@ -1549,10 +1643,10 @@ contains
     integer(pm_i16):: u
     character(len=100),parameter:: spaces=' '
     character(len=100):: str
-    character(len=6),dimension(12),parameter:: typ_names= (/ &
-         'user  ','any   ','struct','rec   ','array ',&
-         'null  ','tuple ','vtuple','name  ',&
-         'proc  ','ambig ','itsc  '/)
+    character(len=6),dimension(10),parameter:: typ_names= (/ &
+         'user  ','struct','rec   ','array ',&
+         'tuple ','vtuple','name  ',&
+         'proc  ','itsc  ','poly  '/)
     type(pm_ptr):: t
     integer:: i
     if(depth>25) then
@@ -1579,24 +1673,30 @@ contains
             str(len_trim(str)+2:))
     endif
     if(pm_fast_esize(t)<2) then
-       write(iunit,*) spaces(1:depth*2),trim(str),tno,pm_fast_esize(t),t%data%i16(t%offset+1)
+       write(iunit,*) &
+            spaces(1:depth*2),trim(str),tno,&
+            pm_fast_esize(t),t%data%i16(t%offset+1)
     else
-       write(iunit,*) spaces(1:depth*2),trim(str),' (',tno,pm_fast_esize(t),t%data%i16(t%offset+1)
+       write(iunit,*) &
+            spaces(1:depth*2),trim(str),' (',tno,pm_fast_esize(t),&
+            t%data%i16(t%offset+1)
        do i=2,pm_fast_esize(t)
           call dump_type(context,iunit,t%data%i16(t%offset+i),depth+1)
        enddo
        write(iunit,*) spaces(1:depth*2),')'
     endif
-    if(u==pm_typ_is_user.or.u==pm_typ_is_intersect) then
-       t=pm_dict_val(context,context%tcache,int(tno,pm_ln))
-       if(.not.pm_fast_isnull(t)) then
-          write(iunit,*) spaces(1:depth*2),'Includes(',t%data%i16(t%offset),pm_fast_vkind(t)
-          do i=1,t%data%i16(t%offset)
-             call dump_type(context,iunit,t%data%i16(t%offset+i),depth+1)
-          enddo
-          write(iunit,*) spaces(1:depth*2),')'
-       endif
-    endif
+!!$    if(u==pm_typ_is_user.or.u==pm_typ_is_intersect) then
+!!$       t=pm_dict_val(context,context%tcache,int(tno,pm_ln))
+!!$       if(.not.pm_fast_isnull(t)) then
+!!$          write(iunit,*) &
+!!$               spaces(1:depth*2),'Includes(',t%data%i16(t%offset),&
+!!$               pm_fast_vkind(t)
+!!$          do i=1,t%data%i16(t%offset)
+!!$             call dump_type(context,iunit,t%data%i16(t%offset+i),depth+1)
+!!$          enddo
+!!$          write(iunit,*) spaces(1:depth*2),')'
+!!$       endif
+!!$    endif
   contains
     include 'fvkind.inc'
     include 'fesize.inc'  

@@ -9,13 +9,16 @@ For a more complete project description see www.pm-lang.org
 
 The language specification (available in /doc) while incomplete in places, will give
 
-a good view of the features of the version 0.2 of the language.
+a good view of the features of the version 0.3 of the language.
     
 
-This is an initial (not stable) release of version 0.2 of the language.
+This is an initial (not stable) release of version 0.3 of the language.
 
 Some features are missing/incomplete - including
-integer and real types with defined bit size
-polymorphic types
+
+- integer and real types with defined bit size (int16, real32, etc.)
+
+- cyclic and block cyclic distributions
+
 
 Watch out for continuing updates.

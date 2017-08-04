@@ -24,6 +24,8 @@
 ! THE SOFTWARE.
 module pm_memory
   use pm_kinds
+  use pm_sysdep
+  use pm_compbase
   implicit none
 
   private
@@ -57,30 +59,31 @@ module pm_memory
   integer(pm_p),public,parameter:: pm_null=5
   integer(pm_p),public,parameter:: pm_int=6
   integer(pm_p),public,parameter:: pm_long=7
-  integer(pm_p),public,parameter:: pm_int8=8
-  integer(pm_p),public,parameter:: pm_int16=9  
-  integer(pm_p),public,parameter:: pm_int32=10
-  integer(pm_p),public,parameter:: pm_int64=11
-  integer(pm_p),public,parameter:: pm_int128=12
-  integer(pm_p),public,parameter:: pm_single=13
-  integer(pm_p),public,parameter:: pm_double=14
-  integer(pm_p),public,parameter:: pm_real32=15
-  integer(pm_p),public,parameter:: pm_real64=16
-  integer(pm_p),public,parameter:: pm_real128=17
-  integer(pm_p),public,parameter:: pm_single_complex=18
-  integer(pm_p),public,parameter:: pm_double_complex=19
-  integer(pm_p),public,parameter:: pm_complex64=20
-  integer(pm_p),public,parameter:: pm_complex128=21  
-  integer(pm_p),public,parameter:: pm_complex256=22
-  integer(pm_p),public,parameter:: pm_logical=23
-  integer(pm_p),public,parameter:: pm_packed_logical=24
-  integer(pm_p),public,parameter:: pm_ext=25
-  integer(pm_p),public,parameter:: pm_string=26
-  integer(pm_p),public,parameter:: pm_pointer=27
-  integer(pm_p),public,parameter:: pm_stack=28
-  integer(pm_p),public,parameter:: pm_usr=29
+  integer(pm_p),public,parameter:: pm_longlong=8
+  integer(pm_p),public,parameter:: pm_int8=9
+  integer(pm_p),public,parameter:: pm_int16=10  
+  integer(pm_p),public,parameter:: pm_int32=11
+  integer(pm_p),public,parameter:: pm_int64=12
+  integer(pm_p),public,parameter:: pm_int128=13
+  integer(pm_p),public,parameter:: pm_single=14
+  integer(pm_p),public,parameter:: pm_double=15
+  integer(pm_p),public,parameter:: pm_real32=16
+  integer(pm_p),public,parameter:: pm_real64=17
+  integer(pm_p),public,parameter:: pm_real128=18
+  integer(pm_p),public,parameter:: pm_single_complex=19
+  integer(pm_p),public,parameter:: pm_double_complex=20
+  integer(pm_p),public,parameter:: pm_complex64=21
+  integer(pm_p),public,parameter:: pm_complex128=22  
+  integer(pm_p),public,parameter:: pm_complex256=23
+  integer(pm_p),public,parameter:: pm_logical=24
+  integer(pm_p),public,parameter:: pm_packed_logical=25
+  integer(pm_p),public,parameter:: pm_ext=26
+  integer(pm_p),public,parameter:: pm_string=27
+  integer(pm_p),public,parameter:: pm_pointer=28
+  integer(pm_p),public,parameter:: pm_stack=29
+  integer(pm_p),public,parameter:: pm_usr=30
 
-  integer(pm_p),public,parameter:: pm_num_vkind=30
+  integer(pm_p),public,parameter:: pm_num_vkind=31
 
   ! Language Thread - offsets
   integer,public,parameter:: pm_thread_next=0
@@ -165,6 +168,7 @@ module pm_memory
      ! Data blocks for various types
      integer,allocatable,dimension(:):: i
      integer(pm_ln),allocatable,dimension(:):: ln
+     integer(pm_lln),allocatable,dimension(:):: lln
      integer(pm_i8),allocatable,dimension(:):: i8
      integer(pm_i16),allocatable,dimension(:):: i16
      integer(pm_i32),allocatable,dimension(:):: i32
@@ -190,11 +194,16 @@ module pm_memory
      type(pm_block),pointer:: p
   end type pm_block_ptr
 
+  type pm_mark_stack_entry
+     type(pm_block),pointer:: data
+     integer(pm_ln):: offset
+  end type pm_mark_stack_entry
+
   ! Per-system-process memory structure
   type,public::pm_context
      type(pm_context),pointer:: next,heap
      type(pm_block),pointer:: new_large, heap_large
-     type(pm_ptr),dimension(stack_size):: stack
+     type(pm_mark_stack_entry),dimension(stack_size):: stack
      type(pm_ptr),dimension(save_list_size):: save_list
      logical:: overflow
      integer:: top, next_save
@@ -538,7 +547,8 @@ contains
     endif
   end function pm_new
 
-  ! Create multiple new objects -- assign to locations loc,loc+1,...,loc+n-1 in vect
+  ! Create multiple new objects
+  ! -- assign to locations loc,loc+1,...,loc+n-1 in vect
   subroutine pm_new_multi(context,vkind,esize,loc,n,vect)
     type(pm_context),pointer:: context
     integer(pm_p),intent(in):: vkind
@@ -548,6 +558,7 @@ contains
     type(pm_ptr):: ptr
     type(pm_ptr),pointer:: ptr_p
     logical:: is_marked
+    context%temp_obj1=vect
     is_marked=marked(vect)
     if(esize<=pm_large_obj_size) then
        i=0
@@ -561,7 +572,7 @@ contains
                    j=loc+i+k
                    vect%data%ptr(vect%offset+j)=ptr
                    if(is_marked) call mark(ptr)
-                   ptr%offset=ptr%offset+1_pm_p
+                   ptr%offset=ptr%offset+int(esize,pm_p)+1_pm_p
                 enddo
                 i=i+m+1
                 ptr_p=ptr
@@ -583,6 +594,7 @@ contains
           if(is_marked) call mark(ptr)
        enddo
     endif
+    context%temp_obj1=pm_null_obj
   end subroutine pm_new_multi
 
   ! Return a new object as a root
@@ -618,6 +630,9 @@ contains
     endif
 
     ! Get allocation slot for kind and size
+    if(pm_debug_level>0.or..true.) then
+      if(esize<=0) call pm_panic('alloc-esize')
+    endif	
     ptr_p=>context%obj_list(esize,vkind)
     ptr=ptr_p
 
@@ -731,7 +746,8 @@ contains
     if(pm_debug_level>3) call pm_verify_heap(context)
 
     if(pm_debug_level>0) then
-       if(mod(nptr%offset-1,esize)/=0.or.nptr%offset+esize>nptr%data%size+1) then
+       if(mod(nptr%offset-1,esize)/=0&
+            .or.nptr%offset+esize>nptr%data%size+1) then
            call pm_panic('misaligned allocation')
        endif
     endif
@@ -809,9 +825,11 @@ contains
     n=max(1,len(string))
     ptr=pm_new(context,pm_string,int(n,pm_ln))
     ptr%data%s(ptr%offset)=' '
-    do i=1,n
-       ptr%data%s(ptr%offset+i-1)=string(i:i)
-    enddo
+    if(len(string)>0) then
+     do i=1,n
+        ptr%data%s(ptr%offset+i-1)=string(i:i)
+     enddo
+    endif
   end function pm_new_string
 
   ! Get FORTRAN string from PM string
@@ -863,7 +881,8 @@ contains
     else
        context%temp_obj1=obj
        ptr=pm_new(context,obj%data%vkind,obj%data%esize+1)
-       call pm_copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,context%temp_obj1%data%esize)
+       call pm_copy_obj(context%temp_obj1,0_pm_ln,ptr,&
+            0_pm_ln,context%temp_obj1%data%esize)
        context%temp_obj1=pm_null_obj
     endif
   end function pm_copy
@@ -908,7 +927,8 @@ contains
        context%temp_obj1=obj
        context%temp_obj2=obj2
        context%temp_obj3=pm_new(context,obj%data%vkind,obj%data%esize+1)
-       call pm_copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,context%temp_obj1%data%esize)
+       call pm_copy_obj(context%temp_obj1,0_pm_ln,ptr,0_pm_ln,&
+            context%temp_obj1%data%esize)
        context%temp_obj2%data%ptr(context%temp_obj2%offset+n)=&
             context%temp_obj3
        context%temp_obj1=pm_null_obj
@@ -956,10 +976,10 @@ contains
        write(iunit,*) spaces(1:depth*2),'Null: ',ptr%offset
     case(pm_int)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Small Int:',&
+          write(iunit,*) spaces(1:depth*2),'int:',&
                ptr%data%i(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Small Int',ptr%data%esize,'('
+          write(iunit,*) spaces(1:depth*2),'int',ptr%data%esize,'('
           do i=0,min(ptr%data%esize,19)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%i(ptr%offset+i)
           enddo
@@ -968,21 +988,33 @@ contains
        endif
     case(pm_long)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Large int:',&
+          write(iunit,*) spaces(1:depth*2),'long:',&
                ptr%data%ln(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Large Int('
+          write(iunit,*) spaces(1:depth*2),'long('
           do i=0,min(ptr%data%esize,19)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%ln(ptr%offset+i)
           enddo
           if(ptr%data%esize>19) write(iunit,*) spaces(1:depth*2+2),'...'
           write(iunit,*) spaces(1:depth*2),')'
        endif
+    case(pm_longlong)
+       if(ptr%data%esize==0) then
+          write(iunit,*) spaces(1:depth*2),'long_long:',&
+               ptr%data%lln(ptr%offset)
+       else
+          write(iunit,*) spaces(1:depth*2),'long_long('
+          do i=0,min(ptr%data%esize,19)
+             write(iunit,*) spaces(1:depth*2+2),ptr%data%lln(ptr%offset+i)
+          enddo
+          if(ptr%data%esize>19) write(iunit,*) spaces(1:depth*2+2),'...'
+          write(iunit,*) spaces(1:depth*2),')'
+       endif
     case(pm_int8)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Int8:',ptr%data%i8(ptr%offset)
+          write(iunit,*) spaces(1:depth*2),'int8:',ptr%data%i8(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Int8('
+          write(iunit,*) spaces(1:depth*2),'int8('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%i8(ptr%offset+i)
           enddo
@@ -991,9 +1023,9 @@ contains
        endif
     case(pm_int16)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Int16:',ptr%data%i16(ptr%offset)
+          write(iunit,*) spaces(1:depth*2),'int16:',ptr%data%i16(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Int16('
+          write(iunit,*) spaces(1:depth*2),'int16('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%i16(ptr%offset+i)
           enddo
@@ -1002,10 +1034,10 @@ contains
        endif
     case(pm_int32)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Int32:',&
+          write(iunit,*) spaces(1:depth*2),'int32:',&
                ptr%data%i32(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Int32('
+          write(iunit,*) spaces(1:depth*2),'int32('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%i32(ptr%offset+i)
           enddo
@@ -1014,10 +1046,10 @@ contains
        endif
     case(pm_int64)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Int64:',&
+          write(iunit,*) spaces(1:depth*2),'int64:',&
                ptr%data%i64(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Int64('
+          write(iunit,*) spaces(1:depth*2),'int64('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%i64(ptr%offset+i)
           enddo
@@ -1026,10 +1058,10 @@ contains
        endif
     case(pm_int128)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Int128:',&
+          write(iunit,*) spaces(1:depth*2),'int128:',&
                ptr%data%i128(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Int128('
+          write(iunit,*) spaces(1:depth*2),'int128('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%i128(ptr%offset+i)
           enddo
@@ -1038,9 +1070,9 @@ contains
        endif
     case(pm_single)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Single:',ptr%data%r(ptr%offset)
+          write(iunit,*) spaces(1:depth*2),'real:',ptr%data%r(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Single('
+          write(iunit,*) spaces(1:depth*2),'real(',ptr%data%hash,ptr%offset
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%r(ptr%offset+i)
           enddo
@@ -1060,10 +1092,10 @@ contains
        endif
     case(pm_real32)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Float32:',&
+          write(iunit,*) spaces(1:depth*2),'real32:',&
                ptr%data%r32(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Float32('
+          write(iunit,*) spaces(1:depth*2),'real32('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%r32(ptr%offset+i)
           enddo
@@ -1072,10 +1104,10 @@ contains
        endif
     case(pm_real64)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Float64:',&
+          write(iunit,*) spaces(1:depth*2),'real64:',&
                ptr%data%r64(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Float64('
+          write(iunit,*) spaces(1:depth*2),'real64('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%r64(ptr%offset+i)
           enddo
@@ -1084,10 +1116,10 @@ contains
        endif
     case(pm_real128)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Float128:',&
+          write(iunit,*) spaces(1:depth*2),'real128:',&
                ptr%data%r128(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Float128('
+          write(iunit,*) spaces(1:depth*2),'real128('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%r128(ptr%offset+i)
           enddo
@@ -1096,10 +1128,10 @@ contains
        endif
     case(pm_single_complex)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Single Complex:',&
+          write(iunit,*) spaces(1:depth*2),'cpx:',&
                ptr%data%c(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Single Complex('
+          write(iunit,*) spaces(1:depth*2),'cpx('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%c(ptr%offset+i)
           enddo
@@ -1108,10 +1140,10 @@ contains
        endif
     case(pm_double_complex)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Double Complex:',&
+          write(iunit,*) spaces(1:depth*2),'double_cpx:',&
                ptr%data%dc(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Double Complex('
+          write(iunit,*) spaces(1:depth*2),'double_cpx('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%dc(ptr%offset+i)
           enddo
@@ -1120,10 +1152,10 @@ contains
        endif
     case(pm_complex64)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Complex64:',&
+          write(iunit,*) spaces(1:depth*2),'cpx64:',&
                ptr%data%c64(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Complex64('
+          write(iunit,*) spaces(1:depth*2),'cpx64('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%c64(ptr%offset+i)
           enddo
@@ -1132,10 +1164,10 @@ contains
        endif
     case(pm_complex128)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Complex128:',&
+          write(iunit,*) spaces(1:depth*2),'cpx128:',&
                ptr%data%c128(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Complex128('
+          write(iunit,*) spaces(1:depth*2),'cpx128('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%c128(ptr%offset+i)
           enddo
@@ -1144,10 +1176,10 @@ contains
        endif
    case(pm_complex256)
        if(ptr%data%esize==0) then
-          write(iunit,*) spaces(1:depth*2),'Complex256:',&
+          write(iunit,*) spaces(1:depth*2),'cpx256:',&
                ptr%data%c256(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'Complex256('
+          write(iunit,*) spaces(1:depth*2),'cpx256('
           do i=0,min(ptr%data%esize,9)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%c256(ptr%offset+i)
           enddo
@@ -1156,31 +1188,31 @@ contains
        endif
     case(pm_string)
        if(ptr%data%esize<75-depth*2) then
-          write(iunit,*) spaces(1:depth*2),'String(',&
+          write(iunit,*) spaces(1:depth*2),'string(',&
                ptr%data%s(ptr%offset:ptr%offset+ptr%data%esize),')'
        else
-          write(iunit,*) spaces(1:depth*2),'String(',&
+          write(iunit,*) spaces(1:depth*2),'string(',&
                ptr%data%s(ptr%offset:ptr%offset+75-depth*2),'...)'
        endif
     case(pm_logical)
        if(ptr%data%esize*5<75-depth*2) then
-          write(iunit,*) spaces(1:depth*2),'Bool(',&
+          write(iunit,*) spaces(1:depth*2),'bool(',&
                ptr%data%l(ptr%offset:ptr%offset+ptr%data%esize),')'
        else
-          write(iunit,*) spaces(1:depth*2),'Bool(',&
+          write(iunit,*) spaces(1:depth*2),'bool(',&
                ptr%data%l(ptr%offset:ptr%offset+75-depth*2),'...)'
        endif
     case(pm_packed_logical)
        if(ptr%data%esize*5<75-depth*2) then
-          write(iunit,*) spaces(1:depth*2),'PackBool(',&
+          write(iunit,*) spaces(1:depth*2),'packbool(',&
                ptr%data%pl(ptr%offset:ptr%offset+ptr%data%esize),')'
        else
-          write(iunit,*) spaces(1:depth*2),'PackBool(',&
+          write(iunit,*) spaces(1:depth*2),'packbool(',&
                ptr%data%pl(ptr%offset:ptr%offset+75-depth*2),'...)'
        endif
     case(pm_pointer:pm_usr)
        if(ptr%data%vkind==pm_pointer) then
-          write(iunit,*) spaces(1:depth*2),'Pointer(',ptr%data%esize
+          write(iunit,*) spaces(1:depth*2),'Pointer(',ptr%data%esize,ptr%data%hash
        else if(ptr%data%vkind==pm_stack) then
           if(((ptr%offset-1)/(ptr%data%esize+1)*(ptr%data%esize+1)/=ptr%offset-1)) then
              write(iunit,*) spaces(1:depth*2),'Stackptr(',ptr%data%esize
@@ -1198,11 +1230,13 @@ contains
        if(depth>30.or.(is_single.and.depth>2)) then
           write(iunit,*) spaces,'>>more'
        else
-          do i=0,min(ptr%data%esize,19)
+          !!  do i=0,min(ptr%data%esize,19)
+          if(ptr%data%esize>19) write(iunit,*) spaces(1:depth*2+2),'...'
+          do i=max(0,ptr%data%esize-19),ptr%data%esize
              call pm_dump_tree(context,iunit,ptr%data%ptr(ptr%offset+i),&
                   depth+1,is_single)
           enddo
-          if(ptr%data%esize>19) write(iunit,*) spaces(1:depth*2+2),'...'
+          !!if(ptr%data%esize>19) write(iunit,*) spaces(1:depth*2+2),'...'
        endif
        write(iunit,*) spaces(1:depth*2),')'
     case default
@@ -1297,8 +1331,12 @@ contains
     type(pm_root),pointer:: root_obj
     type(pm_reg),pointer:: reg_obj
 
-    if(pm_debug_level>1) write(*,*) '==GC started=='
-
+    if(pm_debug_level>1) then
+       write(*,*) '==GC started=='
+       write(*,*) 'Blocks=',context%blocks_allocated,&
+            'Free=',context%free_block_count
+    endif
+    
     if(pm_debug_level>0) call pm_verify_heap(context)
 
     major_cycle=force_major_cycle.or.context%tick>max_ticks
@@ -1324,6 +1362,7 @@ contains
     else
        ! Process save list
        do i=1,context%next_save-1
+          if(gc_xtra_debug) write(*,*) 'MARKING sv',i
           call mark_from(context,context%save_list(i))
        enddo
     endif
@@ -1375,7 +1414,8 @@ contains
     ! Mark from roots
     root_obj=>context%roots%next
     do while(associated(root_obj))
-       if(pm_debug_level>3) write(*,*) 'Mark from:',root_obj%ptr%data%hash,root_obj%ptr%offset
+       if(pm_debug_level>3) &
+            write(*,*) 'Mark from:',root_obj%ptr%data%hash,root_obj%ptr%offset
        call mark_from(context,root_obj%ptr)
        root_obj=>root_obj%next
     enddo
@@ -1618,6 +1658,8 @@ contains
           allocate(blk%i(tsize),stat=status)       
        case(pm_long)
           allocate(blk%ln(tsize),stat=status)
+       case(pm_longlong)
+          allocate(blk%lln(tsize),stat=status)
        case(pm_int8)
           allocate(blk%i8(tsize),stat=status)
        case(pm_int16)
@@ -1691,8 +1733,8 @@ contains
     type(pm_context),pointer:: context
     type(pm_block),pointer:: blk
     integer:: i
-    if(pm_debug_level>1) write(*,*) 'Free block'
-    if(blk%size/block_size>context%free_cache_size/4) then
+    if(pm_debug_level>1) write(*,*) 'Free block',blk%hash,blk%vkind
+    if(blk%size/block_size>context%free_cache_size/4.or..true.) then
        deallocate(blk)
        return
     endif
@@ -1800,7 +1842,8 @@ contains
   subroutine mark_from(context,ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: ptr
-    type(pm_ptr):: ptr2,ptr3,ptr4
+    type(pm_mark_stack_entry):: ptr2
+    type(pm_ptr):: ptr3,ptr4
     integer(pm_ln):: i,n
     if(pm_debug_level>0) &
          call pm_verify_ptr(ptr,'entering mark_from')
@@ -1837,7 +1880,8 @@ contains
              if(gc_xtra_debug) write(*,*) 'RESET',ptr2%offset
              i=ptr2%data%esize+1
              ptr2%offset=((ptr2%offset-1)/i)*i+1
-             if(gc_xtra_debug) write(*,*) 'TO',ptr2%offset,'USING',ptr2%data%esize+1
+             if(gc_xtra_debug) &
+                  write(*,*) 'TO',ptr2%offset,'USING',ptr2%data%esize+1
              ptr3=ptr2%data%ptr(ptr2%offset+pm_stack_oldstack)
              if(associated(ptr3%data%context,context)) then
                 if(ptr3%data%vkind==pm_stack) then 
@@ -1870,9 +1914,7 @@ contains
           endif
        endif
        if(n>max_push) then
-          ptr3%data=>ptr2%data
-          ptr3%offset=-(ptr2%offset+max_push+1)
-          call push(ptr3)
+          call push_entry(ptr2%data,-(ptr2%offset+max_push+1))
           n=max_push
        endif
        do i=ptr2%offset,ptr2%offset+n
@@ -1888,11 +1930,13 @@ contains
                    call mark(ptr3)
                    call push(ptr3)
                    if(gc_xtra_debug) &
-                        write(*,*) 'MARK+PUSH>',ptr3%data%vkind,ptr3%data%hash,ptr3%offset
+                        write(*,*) 'MARK+PUSH>',&
+                        ptr3%data%vkind,ptr3%data%hash,ptr3%offset
                 endif
              else
                 if(gc_xtra_debug) &
-                     write(*,*) 'MARK>',ptr3%data%vkind,ptr3%data%hash,ptr3%offset
+                     write(*,*) 'MARK>',&
+                     ptr3%data%vkind,ptr3%data%hash,ptr3%offset
                 call mark(ptr3)
              endif
           endif
@@ -1904,6 +1948,12 @@ contains
     ! Push object onto mark stack
     subroutine push(ptr)
       type(pm_ptr):: ptr
+      call push_entry(ptr%data,int(ptr%offset,pm_ln))
+    end subroutine push
+    
+    subroutine push_entry(blk,offset)
+      type(pm_block),pointer:: blk
+      integer(pm_ln):: offset
       if(pm_debug_level>0) then
          if(ptr%data%vkind<pm_pointer) &
               call pm_panic('push onto mark stack')
@@ -1913,13 +1963,14 @@ contains
          context%overflow=.true.
          context%top=context%top-1
       else
-         context%stack(context%top)=ptr
+         context%stack(context%top)%data=>blk
+         context%stack(context%top)%offset=offset
       endif
-    end subroutine push
+    end subroutine push_entry
     
     ! Pop object from mark stack
     function pop() result(ptr)
-      type(pm_ptr):: ptr
+      type(pm_mark_stack_entry):: ptr
       ptr=context%stack(context%top)
       context%top=context%top-1
     end function pop
@@ -2058,68 +2109,71 @@ contains
     ! Copy over data between objects
     select case(ptr%data%vkind)  
     case(pm_int)
-       ptr2%data%i(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%i(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%i(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%i(ptr%offset+start:ptr%offset+start+esize)
     case(pm_long)
-       ptr2%data%ln(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%ln(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%ln(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%ln(ptr%offset+start:ptr%offset+start+esize)
+    case(pm_longlong)
+       ptr2%data%lln(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%lln(ptr%offset+start:ptr%offset+start+esize)
     case(pm_int8)
-       ptr2%data%i8(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%i8(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%i8(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%i8(ptr%offset+start:ptr%offset+start+esize)
     case(pm_int16)
-       ptr2%data%i16(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%i16(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%i16(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%i16(ptr%offset+start:ptr%offset+start+esize)
     case(pm_int32)
-       ptr2%data%i32(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%i32(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%i32(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%i32(ptr%offset+start:ptr%offset+start+esize)
     case(pm_int64)
-       ptr2%data%i64(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%i64(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%i64(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%i64(ptr%offset+start:ptr%offset+start+esize)
     case(pm_int128)
-       ptr2%data%i128(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%i128(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%i128(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%i128(ptr%offset+start:ptr%offset+start+esize)
     case(pm_single)
-       ptr2%data%r(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%r(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%r(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%r(ptr%offset+start:ptr%offset+start+esize)
     case(pm_double)
-       ptr2%data%d(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%d(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%d(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%d(ptr%offset+start:ptr%offset+start+esize)
     case(pm_real32)
-       ptr2%data%r32(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%r32(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%r32(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%r32(ptr%offset+start:ptr%offset+start+esize)
     case(pm_real64)
-       ptr2%data%r64(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%r64(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%r64(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%r64(ptr%offset+start:ptr%offset+start+esize)
     case(pm_real128)
-       ptr2%data%r128(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%r128(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%r128(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%r128(ptr%offset+start:ptr%offset+start+esize)
     case(pm_single_complex)
-       ptr2%data%c(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%c(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%c(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%c(ptr%offset+start:ptr%offset+start+esize)
     case(pm_double_complex)
-       ptr2%data%dc(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%dc(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%dc(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%dc(ptr%offset+start:ptr%offset+start+esize)
     case(pm_complex64)
-       ptr2%data%c64(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%c64(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%c64(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%c64(ptr%offset+start:ptr%offset+start+esize)
     case(pm_complex128)
-       ptr2%data%c128(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%c128(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%c128(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%c128(ptr%offset+start:ptr%offset+start+esize)
     case(pm_complex256)
-       ptr2%data%c256(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%c256(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%c256(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%c256(ptr%offset+start:ptr%offset+start+esize)
     case(pm_logical)
-       ptr2%data%l(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%l(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%l(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%l(ptr%offset+start:ptr%offset+start+esize)
     case(pm_packed_logical)
-       ptr2%data%pl(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%pl(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%pl(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%pl(ptr%offset+start:ptr%offset+start+esize)
     case(pm_string)
-       ptr2%data%s(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%s(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%s(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%s(ptr%offset+start:ptr%offset+start+esize)
     case(pm_pointer:pm_usr)
-       ptr2%data%ptr(ptr2%offset+start2:ptr2%offset+esize)= &
-            ptr%data%ptr(ptr%offset+start:ptr%offset+esize)
+       ptr2%data%ptr(ptr2%offset+start2:ptr2%offset+start2+esize)= &
+            ptr%data%ptr(ptr%offset+start:ptr%offset+start+esize)
     end select
   end subroutine pm_copy_obj
 
@@ -2133,7 +2187,9 @@ contains
     case(pm_int)
        ptr%data%i(ptr%offset+loc1:ptr%offset+loc2)= 0
     case(pm_long)
-       ptr%data%ln(ptr%offset+loc1:ptr%offset+loc2)= 0 
+       ptr%data%ln(ptr%offset+loc1:ptr%offset+loc2)= 0
+    case(pm_longlong)
+       ptr%data%lln(ptr%offset+loc1:ptr%offset+loc2)= 0
     case(pm_int8)
        ptr%data%i8(ptr%offset+loc1:ptr%offset+loc2)= 0
     case(pm_int16)
@@ -2191,7 +2247,9 @@ contains
     case(pm_int)
        ptr%data%i(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%i(ptr2%offset+loc3)
     case(pm_long)
-       ptr%data%ln(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%ln(ptr2%offset+loc3) 
+       ptr%data%ln(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%ln(ptr2%offset+loc3)
+    case(pm_longlong)
+       ptr%data%lln(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%lln(ptr2%offset+loc3)
     case(pm_int8)
        ptr%data%i8(ptr%offset+loc1:ptr%offset+loc2)= ptr2%data%i8(ptr2%offset+loc3)
     case(pm_int16)
@@ -2246,7 +2304,9 @@ contains
     case(pm_int)
        ptr%data%i(ptr%offset+loc1)= ptr2%data%i(ptr2%offset+loc2)
     case(pm_long)
-       ptr%data%ln(ptr%offset+loc1)= ptr2%data%ln(ptr2%offset+loc2) 
+       ptr%data%ln(ptr%offset+loc1)= ptr2%data%ln(ptr2%offset+loc2)
+    case(pm_longlong)
+       ptr%data%lln(ptr%offset+loc1)= ptr2%data%lln(ptr2%offset+loc2)
     case(pm_int8)
        ptr%data%i8(ptr%offset+loc1)= ptr2%data%i8(ptr2%offset+loc2)
     case(pm_int16)
@@ -2301,7 +2361,9 @@ contains
     case(pm_int)
        ptr%data%i(ptr%offset)= ptr2%data%i(ptr2%offset+loc)
     case(pm_long)
-       ptr%data%ln(ptr%offset)= ptr2%data%ln(ptr2%offset+loc) 
+       ptr%data%ln(ptr%offset)= ptr2%data%ln(ptr2%offset+loc)
+    case(pm_longlong)
+       ptr%data%lln(ptr%offset)= ptr2%data%lln(ptr2%offset+loc)
     case(pm_int8)
        ptr%data%i8(ptr%offset)= ptr2%data%i8(ptr2%offset+loc)
     case(pm_int16)
@@ -2356,7 +2418,9 @@ contains
     case(pm_int)
        ptr%data%i(ptr%offset+loc)= ptr2%data%i(ptr2%offset)
     case(pm_long)
-       ptr%data%ln(ptr%offset+loc)= ptr2%data%ln(ptr2%offset) 
+       ptr%data%ln(ptr%offset+loc)= ptr2%data%ln(ptr2%offset)
+    case(pm_longlong)
+       ptr%data%lln(ptr%offset+loc)= ptr2%data%lln(ptr2%offset)
     case(pm_int8)
        ptr%data%i8(ptr%offset+loc)= ptr2%data%i8(ptr2%offset)
     case(pm_int16)
@@ -2417,6 +2481,10 @@ contains
     case(pm_long)
        do i=0,nloc
           ptr%data%ln(ptr%offset+i)= ptr2%data%ln(ptr2%offset+loc(i))
+       enddo
+    case(pm_longlong)
+       do i=0,nloc
+          ptr%data%lln(ptr%offset+i)= ptr2%data%lln(ptr2%offset+loc(i))
        enddo
     case(pm_int8)
        do i=0,nloc
@@ -2515,6 +2583,10 @@ contains
        do i=0,nloc
           ptr%data%ln(ptr%offset+loc(i))= ptr2%data%ln(ptr2%offset+i)
        enddo
+    case(pm_longlong)
+       do i=0,nloc
+          ptr%data%lln(ptr%offset+loc(i))= ptr2%data%lln(ptr2%offset+i)
+       enddo
     case(pm_int8)
        do i=0,nloc
           ptr%data%i8(ptr%offset+loc(i))= ptr2%data%i8(ptr2%offset+i)
@@ -2611,6 +2683,10 @@ contains
     case(pm_long)
        do i=0,nloc
           ptr%data%ln(ptr%offset+loc(i))= ptr2%data%ln(ptr2%offset+loc2(i))
+       enddo
+    case(pm_longlong)
+       do i=0,nloc
+          ptr%data%lln(ptr%offset+loc(i))= ptr2%data%lln(ptr2%offset+loc2(i))
        enddo
     case(pm_int8)
        do i=0,nloc

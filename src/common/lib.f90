@@ -23,8 +23,10 @@
 ! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ! THE SOFTWARE.
 module pm_lib
+  use pm_sysdep
   use pm_kinds
   use pm_memory
+  use pm_compbase
   implicit none
   private
   
@@ -931,6 +933,9 @@ contains
     case(pm_long)
        eq=all(ptr2%data%ln(ptr2%offset:ptr2%offset+esize)== &
             ptr%data%ln(ptr%offset:ptr%offset+esize))
+    case(pm_longlong)
+       eq=all(ptr2%data%lln(ptr2%offset:ptr2%offset+esize)== &
+            ptr%data%lln(ptr%offset:ptr%offset+esize))
     case(pm_int8)
        eq=all(ptr2%data%i8(ptr2%offset:ptr2%offset+esize)== &
             ptr%data%i8(ptr%offset:ptr%offset+esize))
