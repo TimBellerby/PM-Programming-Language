@@ -1498,6 +1498,10 @@ contains
        narg=pm_tv_numargs(tv)
        do i=1,narg
           name=nv%data%i16(nv%offset+i)
+          if(name<0) then
+             if(add_char('include ')) return
+             name=-name
+          endif
           nv2=pm_name_val(context,name)
           if(pm_fast_vkind(nv2)==pm_int) then
              if(add_char('_')) return
@@ -1540,7 +1544,7 @@ contains
        call typ_to_str(context,pm_tv_arg(tv,2),str,n,ignore_long)
        if(str(istart:istart+3)=='grid') then
           str=str(1:istart-1)//&
-               str(istart+4+len_trim(open_brace):n-len_trim(open_brace))
+               str(istart+6+len_trim(open_brace):n-len_trim(open_brace)-1)
           n=len_trim(str)+1
        endif
        if(add_char(close_square)) return
@@ -1583,9 +1587,11 @@ contains
       nam=pm_name_as_string(context,int(name,pm_p))
       narg=pm_tv_numargs(tv)
       if(nam(1:4)=='grid') then
+         nam(5:6)=' '
          narg=narg-1
          ignore=.true.
-      elseif(nam=='block') then
+      elseif(nam=='block'.or.nam=='fblock'&
+           .or.nam=='cyclic'.or.nam=='block_cyclic') then
          tno2=pm_tv_arg(tv,1)
          tv2=pm_typ_vect(context,tno2)
          i=len_trim(nam)
@@ -1593,15 +1599,8 @@ contains
          nam(i+2:i+2)='d'
          if(add_char(trim(nam))) return
          return
-      elseif(nam(1:4)=='tuple') then
-         if(add_char(open_square)) return
-         do i=1,narg-1
-            call typ_to_str(context,pm_tv_arg(tv,i),str,n,ignore_long)
-            if(add_char(',')) return
-         enddo
-         call typ_to_str(context,pm_tv_arg(tv,narg),str,n,ignore_long)
-         if(add_char(close_square)) return
-         return
+      elseif(nam(1:5)=='tuple') then
+         nam(6:)=' '
       elseif(nam=='range'.or.nam=='seq') then
          if(ignore_long) then
             if(pm_tv_arg(tv,1)==pm_long) then
@@ -1622,6 +1621,13 @@ contains
       elseif(nam=='ddom') then
          nam='distr'
          narg=1
+      elseif(nam=='dim') then
+         if(add_char('dim{')) return
+         call typ_to_str(context,pm_tv_arg(tv,2),str,n,.true.)
+         if(add_char(',')) return
+         call typ_to_str(context,pm_tv_arg(tv,1),str,n,.true.)
+         if(add_char('}')) return
+         return
       endif
       if(add_char(trim(nam))) return
       if(add_char(open_brace)) return

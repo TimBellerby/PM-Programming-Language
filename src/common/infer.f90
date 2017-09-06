@@ -409,14 +409,14 @@ contains
        endif
        select case(-sig)
        case(sym_while)
-          list=cnode_arg(p,1)
-          list2=cnode_arg(p,3)
+          list=cnode_arg(p,2)
+          list2=cnode_arg(p,4)
           counter=0
           do
              call clear_cblock_mark(list)
              call clear_cblock_mark(list2)
              call prc_cblock(coder,list,base)
-             call check_logical(2)
+             call check_logical(3)
              call prc_cblock(coder,list2,base)
              if(.not.(cblock_marked(list).or.&
                   cblock_marked(list2))) exit
@@ -428,7 +428,7 @@ contains
              endif
           enddo
        case(sym_repeat)
-          list=cnode_arg(p,1)
+          list=cnode_arg(p,2)
           counter=0
           do 
              call clear_cblock_mark(list)
@@ -441,17 +441,17 @@ contains
                 exit
              endif
           enddo
-          call check_logical(2)
+          call check_logical(3)
        case(sym_if,sym_invar)
           call check_logical(1)
           list=cnode_arg(p,2)
           call prc_cblock(coder,list,base)
           list=cnode_arg(p,3)
           call prc_cblock(coder,list,base)
-       case(sym_do,sym_for,sym_pct,sym_colon,sym_also)
+       case(sym_do,sym_for,sym_pct,sym_also)
           call prc_cblock(coder,cnode_arg(p,1),base)
        case(sym_each)
-          call prc_cblock(coder,cnode_arg(p,1),base)
+          call prc_cblock(coder,cnode_arg(p,2),base)
        case(sym_hash)
           if(arg_type(2)/=pm_null) then
              call prc_cblock(coder,cnode_arg(p,1),base)
@@ -594,6 +594,24 @@ contains
           tno=cnode_get_num(cnode_arg(p,2),cnode_args)
           slot=get_slot(1)
           coder%stack(slot)=tno
+       case(sym_var)
+          tno=cnode_get_num(cnode_arg(p,2),cnode_args)
+          tno2=arg_type(1)
+          if(.not.pm_typ_includes(coder%context,tno,tno2)) then
+             if(tno2/=0) &
+                  call infer_error(coder,callnode,&
+                  'Initialisation expression does not match type constraint for var: ',&
+                  cnode_arg(p,3))
+          endif
+       case(sym_const)
+          tno=cnode_get_num(cnode_arg(p,2),cnode_args)
+          tno2=arg_type(1)
+          if(.not.pm_typ_includes(coder%context,tno,tno2)) then
+             if(tno2/=0) &
+                  call infer_error(coder,callnode,&
+                  'Initialisation expression does not match type constraint for const: ',&
+                  cnode_arg(p,3))
+          endif
        case(sym_lt)
           tno=cnode_get_num(cnode_arg(p,2),cnode_args)
           call get_slot_and_type(3,slot2,tno2)
@@ -785,7 +803,7 @@ contains
           call get_arg_types
           call make_type(coder,narg+2)
           coder%stack(base)=pop_word(coder)
-       case(sym_underscore,sym_sync)
+       case(sym_underscore,sym_sync,sym_colon)
           continue
        case default
           if(-sig>=0.and.-sig<=num_sym) then
@@ -960,6 +978,9 @@ contains
                endif
                
                rt=prc_proc(coder,proc,apars,pars,nkey>0,base,break)
+               if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
+                  coder%supress_errors=.false.
+               endif
                coder%loop_depth=coder%loop_depth-1
                if(break) then
                   if(pm_debug_level>2) &
@@ -1013,10 +1034,9 @@ contains
             do m=3,cnode_numargs(procs),2
                pars=cnode_get_num(procs,cnode_args+m-1)
                call print_proc_details(coder,&
-                    sig_name(coder,sig),&
+                    sig,&
                     .not.cnode_flags_clear(callnode,call_flags,&
                     ior(call_is_loop_call,call_is_reduce_call)),&
-                    cnode_get_num(callnode,call_nloop),&
                     pars)
             enddo
             call infer_trace(coder)
@@ -1554,11 +1574,15 @@ contains
     type(pm_ptr),intent(in),optional:: name
     character(len=100):: str
     type(pm_ptr):: modname
+    if(coder%supress_errors) return
+    if(cnode_get_name(node,cnode_modl_name)==sym_pm_system) then
+       coder%supress_errors=.true.
+    endif
     if(pm_main_process) then
        write(*,*)
        call pm_name_string(coder%context,&
             cnode_get_name(node,cnode_modl_name),str)
-       write(*,*) 'Error:',trim(str),' line:',cnode_get_num(node,cnode_lineno)
+       write(*,'(A,I4)') 'Error: '//trim(str)//' line:',cnode_get_num(node,cnode_lineno)
        if(present(name)) then
           call pm_name_string(coder%context,name%offset,str)
           str=trim(message)//' '//trim(str)
@@ -1578,6 +1602,7 @@ contains
     type(pm_ptr):: node,modname,tv
     integer:: k
     if(.not.pm_main_process) return
+    if(coder%loop_depth<1) return
     write(*,*)
     write(*,*) '-------------CALL TRACE---------------------------'
     do k=coder%loop_depth,1,-1
@@ -1586,9 +1611,11 @@ contains
           cycle
        endif
        node=coder%imports(k)
-       call print_call_details(coder,node,&
-            int(coder%import_cblock(k)%offset,pm_i16))
-       if(k>1) write(*,*)
+       if(cnode_get_name(node,cnode_modl_name)/=sym_pm_system) then
+          call print_call_details(coder,node,&
+               int(coder%import_cblock(k)%offset,pm_i16))
+          if(k>1) write(*,*)
+       endif
     enddo
     write(*,*) '--------------------------------------------------'
     write(*,*)
@@ -1600,19 +1627,28 @@ contains
     integer(pm_i16),intent(in):: tno
     integer:: i
     character(len=100):: str
-    character(len=2):: join
-    integer:: nloop,n
-    type(pm_ptr):: tv
+    character(len=2):: join,ampstr
+    integer:: n,k
+    integer(pm_p)::ampidx
+    type(pm_ptr):: tv,key,amp
+    k=0
+    key=pm_dict_key(coder%context,coder%sig_cache,int(cnode_get_num(node,call_sig),pm_ln))
+    ampidx=key%data%i16(key%offset+pm_fast_esize(key)-2)
+    if(ampidx==0) then
+       amp=pm_null_obj
+    else
+       amp=pm_name_val(coder%context,ampidx)
+    endif
     call pm_name_string(coder%context,&
          cnode_get_name(node,cnode_modl_name),str)
     tv=pm_typ_vect(coder%context,tno)
-    write(*,*) 'Call at: ',trim(str),&
+    write(*,'(A,A,A,I4)') 'Call at: ',trim(str),&
          ' line:',cnode_get_num(node,cnode_lineno)
+    n=0
     if(cnode_flags_clear(node,call_flags,&
          ior(call_is_loop_call,call_is_reduce_call))) then
        call more_error(coder%context,' '//trim(sig_name_str(coder,&
             cnode_get_num(node,call_sig)))//' (')
-       nloop=0
     else
        call more_error(coder%context,' '//trim(sig_name_str(coder,&
             cnode_get_num(node,call_sig)))//' <')
@@ -1623,74 +1659,89 @@ contains
              join=' '
           endif
           call more_error(coder%context,&
-               '     '//trim(syshook(i-num_sym))//'= '//&
+               '     '//trim(syshook(i-num_sym))//' = '//&
                trim(pm_typ_as_string(coder%context,&
                pm_tv_arg(tv,i-sym_this_dom+1)))//join)
        enddo
        n=sym_this_index-sym_this_dom+1
-       nloop=cnode_get_num(node,call_nloop)+n
-       if(nloop>n) then
-          call more_error(coder%context,&
-               ' > [')
-          do i=n+1,nloop
-             if(i<nloop) then
-                join=', '
-             else
-                join=' '
-             endif
-             call more_error(coder%context,&
-                  '     '//&
-                  trim(pm_typ_as_string(coder%context,&
-                  pm_tv_arg(tv,i)))//join)
-          enddo
-          if(nloop+1>pm_tv_numargs(tv)) then
-            call more_error(coder%context,&
-                  ' ]')
-          else
-             call more_error(coder%context,&
-                  ' ] (')
-          endif
+       call more_error(coder%context,&
+            ' > (')
+    endif
+    do i=1,pm_tv_numargs(tv)
+       if(i<pm_tv_numargs(tv)) then
+          join=', '
        else
-          if(nloop+1>pm_tv_numargs(tv)) then
-             call more_error(coder%context,&
-                  ' >')
-          else
-             call more_error(coder%context,&
-                  ' > (')
-          endif
+          join=' '
        endif
-    endif
-    if(nloop+1<=pm_tv_numargs(tv)) then
-       do i=nloop+1,pm_tv_numargs(tv)
-          if(i<pm_tv_numargs(tv)) then
-             join=', '
-          else
-             join=' '
-          endif
-          call more_error(coder%context,&
-               '     '//&
-               trim(pm_typ_as_string(coder%context,pm_tv_arg(tv,i)))//join)
-       enddo
-       call more_error(coder%context,' )')
-    endif
+       call check_amp
+       call more_error(coder%context,&
+            '   '//ampstr//&
+            trim(pm_typ_as_string(coder%context,pm_tv_arg(tv,i)))//join)
+    enddo
+    call more_error(coder%context,' )')
+  contains
+    include 'fesize.inc'
+    include 'fisnull.inc'
+    subroutine check_amp
+      if(pm_fast_isnull(amp)) then
+         ampstr='  '
+         return
+      endif
+      if(k>pm_fast_esize(amp)) then
+         ampstr='  '
+         return
+      endif
+      if(amp%data%i16(amp%offset+k)==i) then
+         ampstr=' &'
+         k=k+1
+      else
+         ampstr='  '
+      endif
+    end subroutine check_amp
   end subroutine print_call_details
 
-  subroutine print_proc_details(coder,name,isloop,nloop,tno)
+  subroutine print_proc_details(coder,sig,isloop,tno)
     type(code_state):: coder
-    integer(pm_p),intent(in):: name
+    integer:: sig
     logical,intent(in):: isloop
-    integer,intent(in):: nloop
     integer(pm_i16),intent(in):: tno
-    integer:: i,n,nx,narg
+    integer(pm_p):: name,ampidx
+    integer:: i,k,n,nx,narg
     integer(pm_i16):: typ
-    type(pm_ptr):: tv
+    type(pm_ptr):: tv,key,amp
     character(len=256):: str
     logical:: angles
+    k=0
+    key=pm_dict_key(coder%context,coder%sig_cache,int(sig,pm_ln))
+    name=key%data%i16(key%offset+pm_fast_esize(key))
+    ampidx=key%data%i16(key%offset+pm_fast_esize(key)-2)
+    if(ampidx==0) then
+       amp=pm_null_obj
+    else
+       amp=pm_name_val(coder%context,ampidx)
+    endif
     str=' '
     call pm_name_string(coder%context,name,str(2:))
     n=len_trim(str)+1
     if(.not.isloop) then
-       str(n:)=pm_typ_as_string(coder%context,tno)
+       if(pm_fast_isnull(amp)) then
+          str(n:)=pm_typ_as_string(coder%context,tno)
+       else
+          tv=pm_typ_vect(coder%context,tno)
+          narg=pm_tv_numargs(tv)
+          nx=0
+          if(add_char('(')) goto 777
+          do i=1,narg
+             call check_amp
+             typ=pm_tv_arg(tv,i)
+             call typ_to_str(coder%context,typ,str,n,.false.)
+             if(n>len(str)-10) goto 777
+             if(i<narg) then
+                if(add_char(',')) goto 777
+             endif
+          enddo
+          if(add_char(')')) goto 777
+       endif
     else
        tv=pm_typ_vect(coder%context,tno)
        angles=.false.
@@ -1704,6 +1755,8 @@ contains
              else
                 if(add_char(',')) goto 777
              endif
+             if(add_char(trim(syshook(i+sym_this_dom-1-num_sym)))) goto 777
+             if(add_char(':')) goto 777
              call typ_to_str(coder%context,typ,str,n,.false.)
              if(n>len(str)-10) goto 777
           endif
@@ -1711,35 +1764,26 @@ contains
        if(angles) then
           if(add_char('>')) goto 777
        endif
-       if(nloop>0) then
-          if(add_char('[')) goto 777
-          do i=nx+1,nx+nloop
-             typ=pm_tv_arg(tv,i)
-             call typ_to_str(coder%context,typ,str,n,.false.)
-             if(n>len(str)-10) goto 777
-             if(i<nx+nloop) then
-                if(add_char(',')) goto 777
-             endif
-          enddo
-          if(add_char(']')) goto 777
-       endif
        narg=pm_tv_numargs(tv)
-       if(narg>nx+nloop) then
-          if(add_char('(')) goto 777
-          do i=nx+nloop+1,narg
-             typ=pm_tv_arg(tv,i)
-             call typ_to_str(coder%context,typ,str,n,.false.)
-             if(n>len(str)-10) goto 777
-             if(i<narg) then
-                if(add_char(',')) goto 777
-             endif
-          enddo
-          if(add_char(')')) goto 777
-       endif
+       if(add_char('(')) goto 777
+       do i=nx+1,narg
+          call check_amp
+          typ=pm_tv_arg(tv,i)
+          call typ_to_str(coder%context,typ,str,n,.false.)
+          if(n>len(str)-10) goto 777
+          if(i<narg) then
+             if(add_char(',')) goto 777
+          endif
+       enddo
+       if(add_char(')')) goto 777
     endif
 777 continue
     call more_error(coder%context,trim(str))
   contains
+
+    include 'fesize.inc'
+    include 'fisnull.inc'
+    
     function add_char(c) result(term)
       character(len=*),intent(in):: c
       logical:: term
@@ -1752,6 +1796,16 @@ contains
          term=.false.
       endif
     end function add_char
+
+    subroutine check_amp
+      logical:: junk
+      if(pm_fast_isnull(amp)) return
+      if(k>pm_fast_esize(amp)) return
+      if(amp%data%i16(amp%offset+k)==i) then
+         k=k+1
+         junk=add_char('&')
+      endif
+    end subroutine check_amp
   end subroutine print_proc_details
 
 end module pm_infer

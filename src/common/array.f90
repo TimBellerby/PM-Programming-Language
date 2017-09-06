@@ -1932,6 +1932,61 @@ contains
     include 'fisnull.inc'
   end function vector_iota
 
+  ! Compute a vector of indices
+  ! start, start+step, .., 
+  ! Each index repeated elsize times
+  ! The sequence truncated to siz elements
+  function vector_iota_trunc(context,&
+       elsize,start,end,step,siz,import_vec) result(ptr)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: import_vec,elsize,start,end,siz,step
+    type(pm_ptr):: ptr
+    type(pm_ptr),target:: vec,offset
+    integer(pm_ln):: i,j,k,n,m,tstart,nstart,ielsize
+    integer(pm_ln):: istart,iend,isiz,istep,idx,rpt
+    type(pm_reg),pointer:: reg
+    n=import_vec%data%ln(import_vec%offset)+1_pm_ln
+    vec=pm_new(context,pm_long,n)
+    tstart=import_vec%data%ln(import_vec%offset+2)
+    nstart=import_vec%data%ln(import_vec%offset+1)
+    k=0
+    do i=nstart,pm_fast_esize(import_vec)-4_pm_ln+nstart
+        ielsize=elsize%data%ln(elsize%offset+i)
+        istart=start%data%ln(start%offset+i)
+        iend=end%data%ln(end%offset+i)
+        isiz=siz%data%ln(siz%offset+i)
+        istep=step%data%ln(step%offset+i)
+        if(tstart==0) then
+           rpt=ielsize
+           idx=istart
+        else
+           idx=mod(tstart,isiz)
+           rpt=ielsize-(idx-(idx/ielsize)*ielsize)
+           idx=istart+idx*istep
+        endif
+        m=0
+        do j=1,import_vec%data%ln(import_vec%offset+i-nstart+4_pm_ln)
+           vec%data%ln(vec%offset+k)=idx
+           k=k+1
+           rpt=rpt-1
+           if(rpt==0) then
+              rpt=ielsize
+              idx=idx+istep
+              m=m+1
+              if(idx>iend) idx=istart
+              if(m>=isiz) then
+                 idx=istart
+                 m=0
+              endif
+           endif
+        enddo
+    enddo
+    ptr=vec
+  contains
+    include 'fesize.inc'
+    include 'fisnull.inc'
+  end function vector_iota_trunc
+  
   subroutine vector_indices(imp,idx)
     type(pm_ptr):: imp,idx
     integer(pm_ln):: i,j,k

@@ -80,10 +80,18 @@ module pm_parlib
   integer(pm_ln),allocatable,dimension(:):: action_start,action_size
   integer(pm_ln):: action_stack_size,action_top
 
+  ! Buffers for small headers
+  type hdr_buf
+     type(hdr_buf),pointer:: next
+     integer(pm_ln),dimension(3):: hdr  
+  end type hdr_buf
+  type(hdr_buf),pointer:: hdr_bufs
+
   ! Data tags
   integer,parameter:: req_tag=1
   integer,parameter:: data_tag=2
   integer,parameter:: extra_tag=3
+  integer,parameter:: hdr_tag=4
 
   ! Message exchange
   integer:: pm_comm
@@ -140,6 +148,7 @@ contains
          pm_pointer,int(max_messages,pm_ln),.true.)
     v=pm_assign_new(context,action_ptrs%ptr,1_pm_ln,&
          pm_pointer,int(max_messages,pm_ln),.true.)
+    nullify(hdr_bufs)
     
     ! Initialise error communicator
     call mpi_comm_dup(MPI_COMM_WORLD,pm_comm,error)
@@ -662,7 +671,7 @@ contains
           call recv(context,prc,v%data%ptr(v%offset+i),off,offstart,noff,mess_tag)
        enddo
     case(pm_pointer)
-       call mpi_recv(buffer,1,MPI_CHARACTER,prc,mess_tag,comm,MPI_STATUS_IGNORE,errno)
+       call mpi_recv(buffer,0,MPI_CHARACTER,prc,mess_tag,comm,MPI_STATUS_IGNORE,errno)
        do j=offstart,noff-1
           k=off%data%ln(off%offset+offstart+j)
           call pm_ptr_assign(context,avec,k,recv_val(context,prc,extra_tag))
@@ -710,16 +719,17 @@ contains
     integer(pm_ln):: esize,j
     type(pm_ptr):: avec,w,len
     type(pm_root),pointer:: root
-    
+
     if(pm_debug_level>4) then
        write(*,*) sys_prc,'RECV VAL',prc,mess_tag
     endif
     
     if(prc==MPI_PROC_NULL) return
     comm=prc_frame(prc_depth)%this_comm
-    
+
     ! recv header: type/size/pm_type
-    call mpi_recv(hdr,3,MPI_AINT,prc,mess_tag,comm,MPI_STATUS_IGNORE,errno)
+    call mpi_recv(hdr,3,MPI_AINT,prc,mess_tag,comm,mpi_status_ignore,errno)
+
     tno=hdr(1)
     esize=hdr(2)
     if(pm_debug_level>4) then
@@ -792,6 +802,9 @@ contains
        call get_mpi_type(pm_logical,esize+1_pm_ln,tno,m)
        call mpi_recv(ptr%data%l(ptr%offset),m,&
             tno,prc,mess_tag,comm,MPI_STATUS_IGNORE,errno)
+    case default
+       write(*,*) 'HDR==',hdr
+       call pm_panic('recv_val')
     end select
     if(pm_debug_level>4) then
        write(*,*) 'RECV VAL DONE'
@@ -812,19 +825,23 @@ contains
     integer:: i,m,tno,mess,errno
     integer(pm_ln):: j,esize
     type(pm_ptr):: len,off,avec
-    integer(pm_ln),dimension(3):: hdr
     character(len=1):: buffer
+    type(hdr_buf),pointer:: hdr
     comm=prc_frame(prc_depth)%this_comm
     tno=pm_fast_typeof(v)
     ! Send header: type/size/pm_type
     esize=pm_fast_esize(v)
     if(pm_fast_vkind(v)/=pm_usr.and.siz>0) esize=siz-1
-    hdr(1)=tno
-    hdr(2)=pm_fast_esize(v)
+    allocate(hdr)
+    hdr%next=>hdr_bufs
+    hdr_bufs=>hdr
+    hdr%hdr(1)=tno
+    hdr%hdr(2)=pm_fast_esize(v)
     if(pm_fast_vkind(v)==pm_usr) then
-       hdr(3)=v%data%ptr(v%offset+1)%offset
+       hdr%hdr(3)=v%data%ptr(v%offset+1)%offset
     endif
-    call mpi_isend(hdr,3,MPI_AINT,prc,comm,mess_tag,mess,errno)
+    call mpi_isend(hdr%hdr,3,MPI_AINT,prc,mess_tag,comm,mess,errno)
+    call push_message(mess)
     select case(tno)
     case(pm_array_type,pm_const_array_type)
        call isend_val(prc,v%data%ptr(v%offset+pm_array_dom),start,siz,mess_tag)
@@ -838,7 +855,7 @@ contains
           esize=pm_fast_esize(avec)
        endif
        do j=start,esize
-          if(len%data%ln(len%offset)>0) then
+          if(len%data%ln(len%offset+j)>0) then
              call isend_val(prc,avec%data%ptr(avec%offset+j),&
                   off%data%ln(off%offset+j),&
                   len%data%ln(len%offset+j),mess_tag)
@@ -849,7 +866,7 @@ contains
           call isend_val(prc,v%data%ptr(v%offset+i),start,siz,mess_tag)
        enddo
     case(pm_pointer)
-       call mpi_isend(buffer,1,MPI_CHARACTER,prc,mess_tag,comm,mess,errno)
+       call mpi_isend(buffer,0,MPI_CHARACTER,prc,mess_tag,comm,mess,errno)
        call push_message(mess)
        if(siz>0) then
           esize=start+siz-1
@@ -925,7 +942,7 @@ contains
           call isend(prc,v%data%ptr(v%offset+i),off,offstart,noff,mess_tag)
        enddo
     case(pm_pointer)
-       call mpi_isend(buffer,1,MPI_CHARACTER,prc,mess_tag,comm,mess,errno)
+       call mpi_isend(buffer,0,MPI_CHARACTER,prc,mess_tag,comm,mess,errno)
        call push_message(mess)
        do j=0,noff-1
           k=off%data%ln(off%offset+offstart+j)
@@ -936,7 +953,7 @@ contains
        call mpi_isend(v%data%i(v%offset),1,&
             tno,prc,mess_tag,comm,mess,errno)
        call push_message_and_type(mess,tno)
-    case(pm_long)
+     case(pm_long)
        call get_mpi_disp_type(pm_long,off,offstart,noff,tno)
        call mpi_isend(v%data%ln(v%offset),1,&
             tno,prc,mess_tag,comm,mess,errno)
@@ -985,14 +1002,14 @@ contains
             v%data%ptr(v%offset+pm_array_length),&
             off,offstart,noff,mess_tag)
        call defer_recv(context,prc,v,off,&
-            offstart,noff,mess_tag)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+            offstart,noff,extra_tag)
+     case(pm_struct_type,pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call irecv(context,prc,v%data%ptr(v%offset+i),&
                off,offstart,noff,mess_tag)
        enddo
     case(pm_pointer)
-       call mpi_irecv(buffer,1,MPI_CHARACTER,prc,mess_tag,comm,mess,errno)
+       call mpi_irecv(buffer,0,MPI_CHARACTER,prc,mess_tag,comm,mess,errno)
        call push_message(mess)
        call defer_recv(context,prc,v,off,offstart,noff,mess_tag)
     case(pm_int)
@@ -1057,7 +1074,7 @@ contains
           call rsend(prc,v%data%ptr(v%offset+i),off,offstart,noff,mess_tag)
        enddo
     case(pm_pointer)
-       call mpi_rsend(buffer,1,MPI_CHARACTER,prc,mess_tag,comm,errno)
+       call mpi_rsend(buffer,0,MPI_CHARACTER,prc,mess_tag,comm,errno)
        do j=offstart,noff-1
           k=off%data%ln(off%offset+offstart+j)
           call send_val(prc,v%data%ptr(v%offset+k),&
@@ -1234,7 +1251,7 @@ contains
        do i=1,message_top
           call mpi_waitany(message_top,&
                message_stack,rq,istat,errno)
-          if(rq<=message_action_stack_size) then
+           if(rq<=message_action_stack_size) then
              if(message_action(rq)/=0) then
                 call complete_action(context,rq,&
                      istat(MPI_SOURCE))
@@ -1270,6 +1287,7 @@ contains
     type(pm_context),pointer:: context
     integer:: i,errno
     type(pm_ptr):: v
+    type(hdr_buf),pointer:: hdr
     do i=1,message_type_top
            call mpi_type_free(message_type(i),errno)
     enddo
@@ -1304,6 +1322,11 @@ contains
     message_type_top=0
     message_action_top=0
     action_top=0
+    do while(associated(hdr_bufs))
+       hdr=>hdr_bufs
+       hdr_bufs=>hdr%next
+       deallocate(hdr)
+    enddo
   end subroutine tidy_messages
 
   subroutine defer_recv(context,prc,v,off,offstart,noff,mess_tag)
@@ -1658,7 +1681,7 @@ contains
     integer,dimension(MPI_STATUS_SIZE):: istat
     type(pm_ptr):: from,rbuffer
     type(pm_root),pointer:: root,root2
-    logical:: shared
+    logical:: shared   
     
     if(pm_debug_level>4) then
        write(*,*) 'PUT REMOTE:',sys_prc

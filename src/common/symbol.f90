@@ -152,9 +152,10 @@ module pm_symbol
   integer,parameter:: sym_with = last_expr + 6   
   integer,parameter:: sym_local = last_expr + 7  
   integer,parameter:: sym_invar = last_expr + 8
-  integer,parameter:: sym_conc = last_expr + 9
-  integer,parameter:: sym_default = last_expr + 10
-  integer,parameter:: sym_global = last_expr + 11
+  integer,parameter:: sym_chan = last_expr + 9
+  integer,parameter:: sym_conc = last_expr + 10
+  integer,parameter:: sym_default = last_expr + 11
+  integer,parameter:: sym_global = last_expr + 12
   integer,parameter:: last_key = sym_global
 
   ! Declaration keywords
@@ -227,8 +228,8 @@ module pm_symbol
        'key         ','arg         ','argc        ','true        ',&
        'false       ','struct      ','rec         ','any         ',&
        'distr       ','over        ','present     ','reduce      ',&
-       'each        ','then        ','where       ',&
-       'is          ','with        ','local       ','invar       ',&
+       'each        ','then        ','where       ','is          ',&
+       'with        ','local       ','invar       ','chan        ',&
        'conc        ','default     ','global      ','include     ',&
        'proc        ','param       ','type        ',&
        'render      ','var         ','check       ','const       ',&
@@ -334,20 +335,17 @@ module pm_symbol
   integer,parameter:: sym_shape = hook + 70
   integer,parameter:: sym_yes= hook + 71
   integer,parameter:: sym_no = hook + 72
-  integer,parameter:: sym_make_chan = hook + 73
-  integer,parameter:: sym_chan = hook + 74
-  integer,parameter:: sym_channel = hook + 75
-  integer,parameter:: sym_get_over = hook + 76
-  integer,parameter:: sym_next_enum = hook + 77
-  integer,parameter:: sym_make_distr = hook + 78
-  integer,parameter:: sym_check_import = hook + 79
-  integer,parameter:: sym_check_return = hook + 80
-  integer,parameter:: sym_get_local = hook + 81
-  integer,parameter:: sym_get_distr = hook + 82
-  integer,parameter:: sym_get_darray = hook + 83
-  integer,parameter:: sym_par_dom = hook + 84
-  integer,parameter:: sym_seq_dom = hook + 85
-  integer,parameter:: num_syshook = 85 + hook-num_sym
+  integer,parameter:: sym_get_over = hook + 73
+  integer,parameter:: sym_next_enum = hook + 74
+  integer,parameter:: sym_make_distr = hook + 75
+  integer,parameter:: sym_check_import = hook + 76
+  integer,parameter:: sym_check_return = hook + 77
+  integer,parameter:: sym_get_local = hook + 78
+  integer,parameter:: sym_get_distr = hook + 79
+  integer,parameter:: sym_get_darray = hook + 80
+  integer,parameter:: sym_par_dom = hook + 81
+  integer,parameter:: sym_seq_dom = hook + 82
+  integer,parameter:: num_syshook = 82 + hook-num_sym
 
   integer,parameter:: loop_call_extra_args=sym_this_index -sym_this_dom+1
    
@@ -374,10 +372,9 @@ module pm_symbol
        'PM__exparray  ','PM__opt_num   ','PM__make_mask ','prc_for       ',&
        'PM__impscalar ','PM__setaelem  ','PM__assign_var','vector        ',&
        'matrix        ','PM__pdup      ','PM__do_dim    ','shape         ',&
-       'yes           ','no            ','PM__make_chan ','PM__chan      ',&
-       'PM__channel   ','PM__over      ','next_enum     ','PM__distr     ',&
-       'PM__checkimp  ','PM__checkrtn  ','PM__get_local ','PM__get_distr ',&
-       'PM__get_darray','PM__pardom    ','PM__seqdom    '&
+       'yes           ','no            ','PM__over      ','next_enum     ',&
+       'PM__distr     ','PM__checkimp  ','PM__checkrtn  ','PM__get_local ',&
+       'PM__get_distr ','PM__get_darray','PM__pardom    ','PM__seqdom    '&
        /)
   
 contains

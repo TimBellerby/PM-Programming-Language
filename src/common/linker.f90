@@ -149,15 +149,6 @@ contains
             call link_error(context,node,'Repeated definition:',elem)
        call pm_dict_set(context,&
             lcl_dict,elem,val,.true.,.false.,changed)
-    elseif(kind==modl_tag) then
-       old=pm_dict_lookup(context,dict,elem)
-       if(.not.pm_fast_isnull(old)) then
-          if(old%offset/=val%offset) then
-             call link_error(context,node,&
-              'struct/rec tag does not have consistent elements across modules: ',&
-               elem)
-          endif
-       endif 
     else
        ! Check existing entry
        old=pm_dict_lookup(context,dict,elem)

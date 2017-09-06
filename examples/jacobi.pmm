@@ -1,22 +1,32 @@
-const grid_size=50
-const tol=0.0001
-const model_grid=grid(1..grid_size,1..grid_size)
+! Solve steady state heat equation using Jacobi iteration
+param grid_size=50
+param model_grid=[1..grid_size,1..grid_size]
+
+param left_boundary=1.0
+param right_boundary=0.0
+param top_boundary=0.0
+param bottom_boundary=0.0
+param initial_value=0.5
+
+param tol=0.0001
+
 for point in model_grid do
-   x:=0.5
+   x:=initial_value
    repeat
-      xnew:=(x@{-1,0}|1.0+x@{1,0}|0.0+x@{0,1}|0.0+x@{0,-1}|0.0)/4.0
+      xnew:=(x@{-1,0}|left_boundary+x@{1,0}|right_boundary+
+         x@{0,1}|top_boundary+x@{0,-1}|bottom_boundary)/4.0
       diff:=(x-xnew)**2.0
-      !dump(diff)
-      !print("diff"//point.d1//","//point.d2//"="//x//","//xnew)
       maxdiff:=maxval::diff
-      if point==[1l,1l] then print("Max diff="//maxdiff) endif
+      if point==[1,1] then 
+          print("Max diff="//maxdiff) 
+      endif
       x=xnew
    until maxdiff<tol
 return
    outgrid::=gather::x
 endfor
+
 for each point in model_grid do
-!  print(point.d1//","//point.d2)
    print(point.d1//","//point.d2//"="//outgrid[point])
 endfor
 

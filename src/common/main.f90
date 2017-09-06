@@ -175,6 +175,8 @@ program pm
   endif
   if(coder%num_errors>0) &
        call pm_stop('Compilation terminated due to type-inference errors')
+
+  !write(*,*) 'TOTAL TYPES::',pm_dict_size(context,context%tcache)
   
   !**************** Backend **********************
   if(pm_debug_level>1) write(*,*) 'FINAL STAGE>>'

@@ -509,14 +509,17 @@ contains
     case(sym_if)
        if(restart) then
           break=restart_cblock(fs,new_ve)
-          if(restart_cblock(fs,new_ve2).neqv.break) then
-             call final_error(fs,callnode,&
-                  'Communicating operations do not match'//&
-                  ' in different branches of "if"/"select"')
+          arg=cnode_arg(args,3)
+          if(.not.pm_fast_isnull(arg)) then
+             if(restart_cblock(fs,new_ve2).neqv.break) then
+                call final_error(fs,callnode,&
+                     'Communicating operations do not match'//&
+                     ' in different branches of "if"/"select"')
+             endif
+             call release_var(fs,new_ve2)
           endif
           if(break) return
           call release_var(fs,new_ve)
-          call release_var(fs,new_ve2)
        else
           new_ve=alloc_var(fs)
           call wc_call(fs,callnode,op_and_jmp_none,&
@@ -556,9 +559,8 @@ contains
              endif
           else
              if(break2) then
-                call final_error(fs,callnode,&
-                     'Communicating operations do not match in'//&
-                     ' different branches of "if"/"select"')
+                break=.true.
+                return
              endif
           endif
           call release_var(fs,new_ve)
@@ -595,8 +597,8 @@ contains
        endif
     case(sym_while)
        if(restart) return
-       if(cblock_has_at(cnode_arg(args,1))&
-            .or.cblock_has_at(cnode_arg(args,3))) then
+       if(cblock_has_at(cnode_arg(args,2))&
+            .or.cblock_has_at(cnode_arg(args,4))) then
           break=.true.
           return
        endif
@@ -604,13 +606,13 @@ contains
        call wc_call(fs,callnode,op_clone_ve,new_ve,1,ve)
        i=wc_jump_call(fs,callnode,op_jmp,0_pm_i16,1,ve)
        j=fs%pc
-       break2=finalise_cblock(fs,cnode_arg(args,3),rv,new_ve)
+       break2=finalise_cblock(fs,cnode_arg(args,4),rv,new_ve)
        call set_jump_to_here(i)
-       break2=finalise_cblock(fs,cnode_arg(args,1),rv,new_ve)
+       break2=finalise_cblock(fs,cnode_arg(args,2),rv,new_ve)
        call wc_call(fs,callnode,op_and_jmp_any,&
             j,3,new_ve)
        call wc(fs,-new_ve)
-       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve)
        call release_var(fs,new_ve)
     case(sym_repeat)
        if(restart) return
@@ -621,15 +623,15 @@ contains
        new_ve=alloc_var(fs)
        call wc_call(fs,callnode,op_clone_ve,new_ve,1,ve)
        i=fs%pc
-       break2=finalise_cblock(fs,cnode_arg(args,1),rv,new_ve)
+       break2=finalise_cblock(fs,cnode_arg(args,2),rv,new_ve)
        call wc_call(fs,callnode,op_andnot_jmp_any,&
             i,3,new_ve)
        call wc(fs,-new_ve)
-       call wc_arg(fs,cnode_arg(args,2),.false.,rv,new_ve)
+       call wc_arg(fs,cnode_arg(args,3),.false.,rv,new_ve)
        call release_var(fs,new_ve)
     case(sym_each)
        if(restart) return
-       if(cblock_has_at(cnode_arg(args,1))) then
+       if(cblock_has_at(cnode_arg(args,2))) then
           break=.true.
           return
        endif
@@ -637,16 +639,12 @@ contains
        call wc_call(fs,callnode,op_clone_ve,new_ve,1,ve)
        i=wc_jump_call(fs,callnode,op_jmp,0_pm_i16,1,ve)
        j=fs%pc
-       if(sig==-sym_find) then
-          save_find_pc=fs%find_pc
-          fs%find_pc=wc_jump_call(fs,callnode,op_jmp,0_pm_i16,1,ve)
-       endif
-       break2=finalise_cblock(fs,cnode_arg(args,1),rv,new_ve)
+       break2=finalise_cblock(fs,cnode_arg(args,2),rv,new_ve)
        call set_jump_to_here(i)
        call wc_call(fs,callnode,op_and_jmp_any,&
             j,3,new_ve)
        call wc(fs,-new_ve)
-       call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+       call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve)
        call release_var(fs,new_ve)
     case(sym_do)
        if(restart) then
@@ -896,7 +894,7 @@ contains
     case(sym_default)
        call wc_call_args(fs,callnode,args,op_default,&
             check_arg_type(args,rv,1),1,1,rv,ve)
-    case(sym_open)
+    case(sym_open,sym_var,sym_const)
        continue ! Nothing to do
     case(sym_result)
        call wc_call_args(fs,callnode,args,op_return,&
@@ -907,13 +905,14 @@ contains
           write(*,*) sym_names(sig)
           call pm_panic('Unknown call type in final_call')
        endif
-       if(.not.cnode_flags_clear(callnode,call_flags,&
-            ior(call_is_reduce_call,call_is_loop_call))) then
-          if(.not.restart) break=.true.
-          return
+       if(cnode_flags_clear(callnode,call_flags,&
+            ior(call_is_loop_call,call_is_reduce_call))) then
+          call finalise_proc_call(fs,callnode,rv,ve,0_pm_i16,&
+               args,nargs,nret,sig)
+       else
+          call finalise_proc_call(fs,callnode,rv,fs%lstack(fs%ltop-1),ve,&
+               args,nargs,nret,sig)
        endif
-       call finalise_proc_call(fs,callnode,rv,ve,0_pm_i16,&
-            args,nargs,nret,sig)
     end select
   contains
     include 'fisnull.inc'
@@ -1214,19 +1213,12 @@ contains
           call combine_loops(fs,i,fs%costack(fs%cs,i)%p,out_ve,&
                loop_rv,loop_ve)
           return
-       case(sym_colon)
-          call combine_labels(fs,i,fs%costack(fs%cs,i)%p,out_ve,&
+       case(sym_colon,sym_sync)
+          call combine_labels(fs,sym,i,fs%costack(fs%cs,i)%p,out_ve,&
                loop_rv,loop_ve)
           return
        case default
-          if(sym<0.or.sym==sym_sync) then
-             call combine_calls(fs,i,fs%costack(fs%cs,i)%p,out_ve,&
-                  loop_rv,loop_ve)
-             return
-          else
-             write(*,*) sym_names(sym)
-             call pm_panic('combine ops')
-          endif
+          call pm_panic('combine ops')
        end select
     enddo
   end subroutine combine_ops
@@ -1242,11 +1234,12 @@ contains
     integer(pm_i16):: j,k
     logical:: break,anybreak,allbreak
     integer(pm_i16):: ve,new_ve,start
-    type(pm_ptr):: args,p,oldp,rv
+    type(pm_ptr):: args,p,oldp,rv,name,name2
     integer:: cotop,cs,numve
     numve=0
     cotop=fs%cotop(fs%cs)
     cs=fs%cs
+    name=cnode_arg(cnode_arg(cnode_get(first_p,call_args),1),1)
     do i=costart,cotop
        p=fs%costack(cs,i)%p
        sym=-cnode_get_num(p,call_sig)
@@ -1261,20 +1254,20 @@ contains
        select case(sym)
        case(sym_while)
           j=wc_jump_call(fs,p,op_jmp_empty_ve,0_pm_i16,1,ve)
-          if(finalise_cblock(fs,cnode_arg(args,1),rv,ve)) &
+          if(finalise_cblock(fs,cnode_arg(args,2),rv,ve)) &
                call final_error(fs,args,&
                'Communicating operation inside "while" test expression')
           call set_jump_to_here(j)
           k=wc_jump_call(fs,p,op_and_jmp_any,0_pm_i16,3,ve)
           call wc(fs,-new_ve)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve)
           call set_jump_to_here(k)
        case(sym_repeat) 
           call wc_call(fs,p,op_clone_ve,new_ve,1,ve)
        case(sym_each)
           k=wc_jump_call(fs,p,op_and_jmp_any,0_pm_i16,3,ve)
           call wc(fs,-new_ve)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve)
           call set_jump_to_here(k)
        case default
           if(sym==-sym_colon) then
@@ -1286,6 +1279,13 @@ contains
                   'single communicating operation')
           endif
        end select
+       name2=cnode_arg(cnode_arg(args,1),1)
+       if(name%offset/=name2%offset) then
+          call mismatch(fs,p,first_p,&
+               'Communicating loops have different labels: '//&
+               trim(pm_name_as_string(fs%context,name%offset))//' <> '//&
+               trim(pm_name_as_string(fs%context,name2%offset)))
+       endif
     enddo
     start=fs%pc
     anybreak=.false.
@@ -1300,24 +1300,17 @@ contains
        base=fs%costack(cs,i)%base
        rv=fs%costack(cs,i)%rv
        new_ve=fs%costack(cs,i)%new_ve
-       j=wc_jump_call(fs,p,op_jmp_empty_ve,0_pm_i16,1,new_ve)
-       k=fs%pc
        select case(sym)
        case(sym_while)
-          break=finalise_cblock(fs,cnode_arg(args,3),rv,new_ve)
+          break=finalise_cblock(fs,cnode_arg(args,4),rv,new_ve)
           n=n+1
        case(sym_repeat) 
-          break=finalise_cblock(fs,cnode_arg(args,1),rv,new_ve)
+          break=finalise_cblock(fs,cnode_arg(args,2),rv,new_ve)
           n=n+1
        case(sym_each) 
-          break=finalise_cblock(fs,cnode_arg(args,1),rv,new_ve)
+          break=finalise_cblock(fs,cnode_arg(args,2),rv,new_ve)
           n=n+1
        end select
-       if(k==fs%pc) then
-          fs%pc=j
-       else
-          call set_jump_to_here(j)
-       endif
        anybreak=anybreak.or.break
        allbreak=allbreak.and.break
        if(anybreak.and..not.allbreak) then
@@ -1362,22 +1355,20 @@ contains
        if(sym==sym_if.or.sym==sym_do.or.sym==sym_for) cycle
        select case(sym)
        case(sym_while)
-          j=wc_jump_call(fs,p,op_jmp_empty_ve,0_pm_i16,1,new_ve)
-          break=finalise_cblock(fs,cnode_arg(args,1),rv,ve)
-          call set_jump_to_here(j)
+          break=finalise_cblock(fs,cnode_arg(args,2),rv,ve)
           k=wc_jump_call(fs,p,op_and_jmp_any,0_pm_i16,3,ve)
           call wc(fs,-ve)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve)
           call set_jump_to_here(k)
        case(sym_repeat) 
           k=wc_jump_call(fs,p,op_andnot_jmp_any,0_pm_i16,3,ve)
           call wc(fs,-ve)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve)
           call set_jump_to_here(k)
        case(sym_each) 
           k=wc_jump_call(fs,p,op_and_jmp_any,0_pm_i16,3,ve)
           call wc(fs,-ve)
-          call wc_arg(fs,cnode_arg(args,2),.false.,rv,ve)
+          call wc_arg(fs,cnode_arg(args,3),.false.,rv,ve)
           call set_jump_to_here(k)
        end select
     enddo
@@ -1398,16 +1389,21 @@ contains
   end subroutine combine_loops
 
 
-  subroutine combine_labels(fs,costart,first_p,out_ve,&
+  subroutine combine_labels(fs,sig,costart,first_p,out_ve,&
        loop_rv,loop_ve)
     type(finaliser),intent(inout):: fs
-    integer,intent(in):: costart
+    integer,intent(in):: sig,costart
     type(pm_ptr),intent(in):: first_p,loop_rv
     integer(pm_i16),intent(in):: loop_ve,out_ve
-    type(pm_ptr):: p,n
+    type(pm_ptr):: p,n,colon_p
     integer(pm_p):: name,name2
-    integer:: j,sig2
-    n=cnode_arg(cnode_arg(cnode_get(p,call_args),1),1)
+    integer:: j,sig2,ncolon
+    ncolon=0
+    if(sig==sym_colon) then
+       ncolon=1
+       colon_p=first_p
+    endif
+    n=cnode_arg(cnode_arg(cnode_get(first_p,call_args),1),1)
     name=n%offset
     do j=costart+1,fs%cotop(fs%cs)
        p=fs%costack(fs%cs,j)%p
@@ -1415,136 +1411,30 @@ contains
        select case(sig2)
        case(sym_if,sym_for,sym_do)
           cycle
-       case(sym_colon)
+       case(sym_colon,sym_sync)
+          if(sig2==sym_colon) then
+             ncolon=ncolon+1
+             if(ncolon>1) then
+                call mismatch(fs,colon_p,p,'More than one matching non-sync statement')
+             else
+                colon_p=p
+             endif
+          endif
           n=cnode_arg(cnode_arg(cnode_get(p,call_args),1),1)
           name2=n%offset
           if(name/=name2) then
              call mismatch(fs,first_p,p,&
                   'labels do not match:'//&
                   trim(pm_name_as_string(fs%context,name))//' / '//&
-                  trim(pm_name_as_string(fs%context,name)))
+                  trim(pm_name_as_string(fs%context,name2)))
           endif
        case(sym_while,sym_each,sym_repeat)
           call mismatch(fs,first_p,p,&
-               'label matched to communicating loop')
-       case default
-          call mismatch(fs,first_p,p,&
-               'label matched to communicating operation')
+               'labelled statement matched to communicating loop')
        end select
     enddo
   end subroutine combine_labels
 
-  recursive subroutine combine_calls(fs,costart,first_p,out_ve,&
-       loop_rv,loop_ve)
-    type(finaliser),intent(inout):: fs
-    integer,intent(in):: costart
-    type(pm_ptr),intent(in):: first_p,loop_rv
-    integer(pm_i16),intent(in):: loop_ve,out_ve
-
-    integer:: i,j,n,nret,nargs,nkeys,nloop
-    integer:: nret2,nargs2,nkeys2,nloop2,start,start2
-    integer(pm_i16):: sig,sig2,call_pos
-    type(pm_ptr):: p,rv,args,args2,vv1,vv2
-    type(pm_ptr):: name1,name2
-    
-    ! First stacked operation - passed into routine
-    sig=cnode_get_num(first_p,call_sig)
-    args=cnode_get(first_p,call_args)
-    nargs=cnode_numargs(args)
-    nret=cnode_get_num(first_p,call_nret)
-    nkeys=cnode_get_num(first_p,call_nkeys)
-    nloop=cnode_get_num(first_p,call_nloop)
-    n=cnode_numargs(args)
-
-    ! Is first stacked operation a call?
-    if(sig>0) then
-       call_pos=costart
-       start=loop_call_extra_args+nret+nkeys
-    else
-       call_pos=-1
-       start=0
-       nloop=nargs
-    endif
-
-    ! Check all calls have same number of loop args
-    do j=costart+1,fs%cotop(fs%cs)
-       p=fs%costack(fs%cs,j)%p
-       sig2=cnode_get_num(p,call_sig)
-       if(sig2==-sym_if.or.sig2==-sym_for.or.sig2==-sym_do) cycle
-       nloop2=cnode_get_num(p,call_nloop)
-       args2=cnode_get(p,call_args)
-       nargs2=cnode_numargs(args2)
-       nret2=cnode_get_num(p,call_nret)
-       nkeys2=cnode_get_num(p,call_nkeys)
-       
-       ! Cannot match two calls together
-       if(sig2>0) then
-          if(call_pos>0) then
-             call mismatch(fs,fs%costack(fs%cs,call_pos)%p,p,&
-                  'two loop calls/operators matched together')
-             return
-          else
-             call_pos=j
-             start2=loop_call_extra_args+nkeys2
-          endif
-       elseif(sig2==-sym_sync) then
-          nloop2=nargs2
-          start2=0
-       else
-          if(sig2==sym_colon) then
-             call mismatch(fs,first_p,p,&
-                  'communicating operation matched to label')
-             return
-          else
-             call mismatch(fs,first_p,p,&
-                  'communicating operation'//&
-                  ' matched to communicating loop')
-             return
-          endif
-       endif
-
-       if(nloop/=nloop2) then
-          call mismatch(fs,first_p,p,&
-               'different number of loop arguments')
-          return
-       else
-          do i=1,nloop
-             vv1=cnode_arg(args,i+start)
-             vv2=cnode_arg(args2,i+start2)
-             if(.not.(vv1==vv2)) then
-                write(*,*) cnode_get_kind(vv1),cnode_get_kind(vv2)
-                name1=cnode_get(vv1,var_name)
-                name2=cnode_get(vv2,var_name)
-                call mismatch(fs,first_p,p,&
-                      'loop arguments are not the same variable: '//&
-                      trim(pm_name_as_string(fs%context,name1%offset))//&
-                      ' <> '//&
-                      trim(pm_name_as_string(fs%context,name2%offset)))
-                write(*,*) '_===>',start,start2
-                return
-             endif
-          enddo
-       endif
-    enddo
-    
-    if(call_pos>=0) then
-       p=fs%costack(fs%cs,call_pos)%p
-       sig=cnode_get_num(p,call_sig)
-       args=cnode_get(p,call_args)
-       nargs=cnode_numargs(args)
-       nret=cnode_get_num(p,call_nret)
-       nkeys=cnode_get_num(p,call_nkeys)
-       nloop=cnode_get_num(p,call_nloop)
-       call finalise_proc_call(fs,p,&
-            fs%costack(fs%cs,call_pos)%rv,out_ve,&
-            fs%costack(fs%cs,call_pos)%ve,&
-            args,nargs,nret,sig)
-    else
-       call final_error(fs,first_p,&
-            '"sync" operation does not match a loop call or operator')
-    endif
-
-  end subroutine combine_calls
 
   ! Code call to a jump operator
   function wc_jump_call(fs,callnode,op_s,op_a,nargs,ve) result(pc)
@@ -2011,8 +1901,8 @@ contains
     character(len=100):: str
     if(pm_main_process) then
        call pm_name_string(fs%context,cnode_get_name(node,cnode_modl_name),str)
-       write(*,*) 'Error:',trim(str),' line:',cnode_get_num(node,cnode_lineno)
-       write(*,*) mess
+       write(*,'(A,A,A,I4)') 'Error:',trim(str),' line:',cnode_get_num(node,cnode_lineno)
+       write(*,*) trim(mess)
     endif
     fs%num_errors=fs%num_errors+1
     if(fs%num_errors>max_final_errors) &

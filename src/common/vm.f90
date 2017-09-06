@@ -749,9 +749,15 @@ contains
     case(op_get_dom)
        call set_arg(2,array_dom(context,arg(3),esize))
     case(op_iota)
-       call set_arg(2,vector_iota(context,&
-            arg(3),arg(4),arg(5),arg(6),&
-            arg(7)%data%ptr(arg(7)%offset+1)))
+       if(nargs==7) then
+          call set_arg(2,vector_iota(context,&
+               arg(3),arg(4),arg(5),arg(6),&
+               arg(7)%data%ptr(arg(7)%offset+1)))
+       else
+          call set_arg(2,vector_iota_trunc(context,&
+               arg(3),arg(4),arg(5),arg(6),arg(7),&
+               arg(8)%data%ptr(arg(8)%offset+1)))
+       endif
     case(op_indices)
        v=alloc_arg(pm_long,2)
        call vector_indices(arg(1)%data%ptr(arg(1)%offset+1),v)
@@ -1464,7 +1470,8 @@ contains
                   arg(3)%data%ln(arg(3)%offset+ve%data%ln(ve%offset+j))
           end forall
        endif
-   case(op_add_ln)
+    case(op_add_ln)
+       esize=pm_fast_esize(arg(3))
        v=alloc_arg(pm_long,2)
        if(pm_fast_vkind(ve)==pm_logical.and.pm_mask_longadd) then
           where(ve%data%l(ve%offset:ve%offset+esize))
