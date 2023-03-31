@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2017
+! Copyright (c) Tim Bellerby, 2019
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -28,12 +28,14 @@
 module pm_compbase
   use mpi
   use pm_sysdep
+  use pm_kinds
   implicit none
 
   integer,private,pointer:: crash_ptr
   logical:: pm_main_process
   integer:: pm_main_process_no
   logical,parameter:: pm_is_compiling=.false.
+  integer,parameter:: pm_wc=pm_i16
   integer:: pm_main_module
   
 contains
@@ -42,6 +44,7 @@ contains
     character(len=*),intent(in)::mess
     integer:: ierror
     if(pm_main_process) then
+       write(*,*)
        write(*,*) mess
     endif
     call mpi_finalize(ierror)
@@ -52,6 +55,7 @@ contains
     character(len=*),intent(in)::mess
     integer:: ierror
     if(pm_main_process) then
+       write(*,*)
        write(*,*) mess
     endif
     call mpi_abort(MPI_COMM_WORLD,99,ierror)
@@ -122,7 +126,7 @@ contains
    character(len=*),intent(in):: filename
    logical,intent(out):: ok
    if(pm_main_process) then
-      open(unit=iunit,file=filename,err=10)
+      open(unit=iunit,file=filename,err=10,status='OLD')
    endif
    ok=.true.
    return
@@ -146,5 +150,7 @@ contains
    endif
    call mpi_bcast(ok,1,MPI_LOGICAL,0,MPI_COMM_WORLD,ierror)
  end function pm_file_exists
+
+
   
 end module pm_compbase

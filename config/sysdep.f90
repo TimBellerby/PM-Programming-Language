@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2016
+! Copyright (c) Tim Bellerby, 2019
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,14 @@ module pm_sysdep
   ! ********** These you may want/need to change ******************
   ! ***************************************************************
 
+  ! ********* Error messages ****************
+  ! Error messages in colour
+  logical:: pm_colour_messages=.true.
+  character(len=*),parameter:: pm_error_start=achar(27)//'[31;1m'
+  character(len=*),parameter:: pm_error_end=achar(27)//'[39;22m'
+  character(len=*),parameter:: pm_loc_start=achar(27)//'[1m'
+  character(len=*),parameter:: pm_loc_end=achar(27)//'[22m'
+  
   ! ********* File settings *****************
   ! Standard output
   integer,parameter:: pm_stdout_unit=6
@@ -55,6 +63,11 @@ module pm_sysdep
   character(len=1),parameter:: pm_eof_char=achar(0)
 
 
+  ! ************ Compiler defaults ****************
+  integer,parameter:: pm_default_ftn_dims=15
+  logical,parameter:: pm_default_ftn_has_contiguous=.true.
+
+
   ! ************ Memory model *********************
   
   ! If PM fails on startup and ask you to 
@@ -67,10 +80,9 @@ module pm_sysdep
   
   ! Types used by memory model (block offsets,object sizes,bitmap flags)
   
-  integer,parameter:: pm_p=kind(1)    ! Pointer offsets (0..4095)
-                                      ! No point in making this int16
-                                      ! unless it somehow reduces storage
-                                      ! without performance penalty
+ ! integer,parameter:: pm_p=kind(1)    ! Pointer offsets, object types +
+                                       ! flags  (>~24 bits, typically int)
+integer,parameter:: pm_p=8
   
   integer,parameter:: pm_f=kind(1)    ! Bitmap storage  (integer word)
                                       ! On some systems int64 may
@@ -133,7 +145,9 @@ module pm_sysdep
   ! ********* Debugging settings ***********
   ! (for debugging compiler/VM not PM code)
   ! ****************************************
-  
+ 
+  logical,parameter:: pm_debug_checks=.true.
+ 
   integer,parameter,public:: pm_debug_level=1
   ! 1= basic checks - slows things down
   ! 2= print short additional info
@@ -166,10 +180,24 @@ contains
     character(len=*):: str
     call getarg(n,str)
   end subroutine pm_getarg
-  
-  subroutine pm_module_filename(buffer)
-   character(len=*):: buffer
+
+  function pm_isatty(l) result(ok)
+    integer,intent(in)::l
+    logical:: ok
+    ok=isatty(l)
+  end function pm_isatty
+
+ ! Replacement for above if you don't have isatty()
+ !function pm_isatty(l) result(ok)
+ !   integer,intent(in)::l
+ !   logical:: ok
+ !   ok=pm_colour_messages
+ ! end function pm_isatty
+
+  subroutine pm_module_filename(inbuffer,buffer)
+   character(len=*):: inbuffer,buffer
    integer:: n,m
+   buffer=inbuffer
    n=len_trim(buffer)
    if(n>len(pm_file_suffix)) then
      if(buffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) return

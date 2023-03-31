@@ -46,7 +46,7 @@ module pm_memory
   public pm_add_root, pm_delete_root
   public pm_numroot, pm_delete_numroot
   public pm_register, pm_delete_register 
-  public pm_verify_ptr, pm_dump_tree, pm_copy_val, pm_copy_val_to0
+  public pm_verify_ptr, pm_verify_heap, pm_dump_tree, pm_copy_val, pm_copy_val_to0
   public pm_copy_val_from0,pm_copy_from_slots, pm_copy_to_slots, pm_copy_slots
   public marked
 
@@ -214,11 +214,10 @@ module pm_memory
      type(pm_reg),pointer:: regs
      type(pm_reg),pointer:: free_regs
      integer:: num_free_regs
-     type(pm_ptr):: temp_obj1,temp_obj2,temp_obj3
+     type(pm_ptr):: temp_obj1,temp_obj2,temp_obj3,temp_obj4
      type(pm_ptr),&
           dimension(pm_large_obj_size,pm_int:pm_num_vkind):: obj_list
-     type(pm_ptr):: threads_start,threads_end,running,wait_start,wait_end
-     type(pm_ptr):: tcache,pcache,names,lnames,funcs,null_ve
+     type(pm_ptr):: tcache,pcache,vcache,names,lnames,funcs,null_ve
      type(pm_block_ptr),dimension(pm_int:pm_num_vkind):: &
           free_blocks, old_free_blocks,free_large_blocks,&
           old_free_large_blocks
@@ -226,10 +225,11 @@ module pm_memory
      type(numroot),dimension(:),pointer:: numroots
      integer(pm_ln):: last_numroot, max_numroots, free_numroots
      integer(pm_ln):: hash
+     integer:: call_depth
   end type pm_context
 
   type(pm_ptr),public:: pm_undef_obj,pm_null_obj,pm_tinyint_obj,pm_name_obj
-  type(pm_ptr),public:: pm_true_obj,pm_false_obj
+  type(pm_ptr),public:: pm_typeno_obj,pm_procname_obj,pm_true_obj,pm_false_obj
 
 contains
 
@@ -630,7 +630,7 @@ contains
     endif
 
     ! Get allocation slot for kind and size
-    if(pm_debug_level>0.or..true.) then
+    if(pm_debug_level>0) then
       if(esize<=0) call pm_panic('alloc-esize')
     endif	
     ptr_p=>context%obj_list(esize,vkind)
@@ -968,8 +968,14 @@ contains
        return
     endif
     select case(ptr%data%vkind)
+    case(pm_undef)
+       write(iunit,*) spaces(1:depth*2),'Undefined'
     case(pm_name)
        write(iunit,*) spaces(1:depth*2),'Name: ',ptr%offset
+    case(pm_proc)
+       write(iunit,*) spaces(1:depth*2),'Procname: ',ptr%offset
+    case(pm_type)
+       write(iunit,*) spaces(1:depth*2),'Type number: ',ptr%offset
     case(pm_tiny_int)
        write(iunit,*) spaces(1:depth*2),'Tiny int: ',ptr%offset
     case(pm_null)
@@ -979,7 +985,7 @@ contains
           write(iunit,*) spaces(1:depth*2),'int:',&
                ptr%data%i(ptr%offset)
        else
-          write(iunit,*) spaces(1:depth*2),'int',ptr%data%esize,'('
+          write(iunit,*) spaces(1:depth*2),'int',ptr%data%esize,'(','  #',ptr%offset
           do i=0,min(ptr%data%esize,19)
              write(iunit,*) spaces(1:depth*2+2),ptr%data%i(ptr%offset+i)
           enddo
@@ -1188,7 +1194,7 @@ contains
        endif
     case(pm_string)
        if(ptr%data%esize<75-depth*2) then
-          write(iunit,*) spaces(1:depth*2),'string(',&
+          write(iunit,*) spaces(1:depth*2),'string("',&
                ptr%data%s(ptr%offset:ptr%offset+ptr%data%esize),')'
        else
           write(iunit,*) spaces(1:depth*2),'string(',&
@@ -1212,7 +1218,7 @@ contains
        endif
     case(pm_pointer:pm_usr)
        if(ptr%data%vkind==pm_pointer) then
-          write(iunit,*) spaces(1:depth*2),'Pointer(',ptr%data%esize,ptr%data%hash
+          write(iunit,*) spaces(1:depth*2),'Pointer(',ptr%data%esize,ptr%data%hash,ptr%offset
        else if(ptr%data%vkind==pm_stack) then
           if(((ptr%offset-1)/(ptr%data%esize+1)*(ptr%data%esize+1)/=ptr%offset-1)) then
              write(iunit,*) spaces(1:depth*2),'Stackptr(',ptr%data%esize
@@ -1331,12 +1337,13 @@ contains
     type(pm_root),pointer:: root_obj
     type(pm_reg),pointer:: reg_obj
 
+
     if(pm_debug_level>1) then
        write(*,*) '==GC started=='
        write(*,*) 'Blocks=',context%blocks_allocated,&
             'Free=',context%free_block_count
     endif
-    
+   
     if(pm_debug_level>0) call pm_verify_heap(context)
 
     major_cycle=force_major_cycle.or.context%tick>max_ticks
@@ -1373,12 +1380,15 @@ contains
     call mark_from(context,context%temp_obj1)
     call mark_from(context,context%temp_obj2)
     call mark_from(context,context%temp_obj3)
+    call mark_from(context,context%temp_obj4)
+
    
     if(pm_debug_level>1) write(*,*) 'Marking caches'
 
     ! Mark caches
     call mark_from(context,context%tcache)
     call mark_from(context,context%pcache)
+    call mark_from(context,context%vcache)
     call mark_from(context,context%names)
     call mark_from(context,context%lnames)
     call mark_from(context,context%null_ve)
@@ -1428,13 +1438,6 @@ contains
           call mark_from(context,context%numroots(j)%ptr)
        enddo
     endif
-
-    if(pm_debug_level>1) write(*,*) 'Mark from threads'
-
-    ! Mark from threads
-    call mark_threads_from(context,context%threads_start)
-    call mark_threads_from(context,context%wait_start)
-    call mark_threads_from(context,context%running)
 
     if(pm_debug_level>1) write(*,*) 'Check stack overflow'
 
@@ -1531,6 +1534,11 @@ contains
        pm_tinyint_obj%offset=0
        pm_name_obj%data=>new_block(context,pm_name,0_pm_ln)
        pm_name_obj%offset=0
+       pm_typeno_obj%data=>new_block(context,pm_type,0_pm_ln)
+       pm_typeno_obj%offset=0
+       pm_procname_obj%data=>new_block(context,pm_proc,0_pm_ln)
+       pm_procname_obj%offset=0
+
        pm_true_obj%data=>new_block(context,pm_logical,1_pm_ln)
        pm_false_obj%data=>pm_true_obj%data
        deallocate(pm_true_obj%data%l)
@@ -1582,13 +1590,10 @@ contains
     context%temp_obj1=pm_null_obj
     context%temp_obj2=pm_null_obj
     context%temp_obj3=pm_null_obj
-    context%threads_start=pm_null_obj
-    context%threads_end=pm_null_obj
-    context%running=pm_null_obj
-    context%wait_start=pm_null_obj
-    context%wait_end=pm_null_obj
+    context%temp_obj4=pm_null_obj
     context%tcache=pm_null_obj
     context%pcache=pm_null_obj
+    context%vcache=pm_null_obj
     context%names=pm_null_obj
     context%lnames=pm_null_obj
     context%null_ve=pm_null_obj
@@ -1739,7 +1744,7 @@ contains
        return
     endif
     if(context%free_block_count>context%free_cache_size) then
-       do i=1,pm_num_vkind
+       do i=pm_int,pm_num_vkind
           if(associated(context%old_free_blocks(i)%p)) &
                call purge(context%old_free_blocks(i)%p)
           context%old_free_blocks(i)%p=>context%free_blocks(i)%p
@@ -1801,7 +1806,7 @@ contains
        o=ptr%offset
     endif
     n=(o-1)/pm_mark_size
-    m=iand(o-1,pm_mark_size-1)+1
+    m=iand(o-1,int(pm_mark_size-1))+1
     ptr%data%marks(m)=ibset(ptr%data%marks(m),n)
   end subroutine  mark
   
@@ -2240,7 +2245,7 @@ contains
     type(pm_ptr):: ptr,ptr2
     integer(pm_ln):: loc1,loc2,loc3
     if(pm_debug_level>0) then
-       call pm_verify_ptr(ptr,'pm_set_obj1')
+       call pm_verify_ptr(ptr,'pm_set_obj1',.true.)
        call pm_verify_ptr(ptr,'pm_set_obj2')
     endif
     select case(ptr%data%vkind)  

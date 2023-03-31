@@ -3,7 +3,7 @@
 !
 !Released under the MIT License (MIT)
 !
-!Copyright (c) Tim Bellerby, 2015
+!Copyright (c) Tim Bellerby, 2019
 !
 !Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@
 ! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 ! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ! THE SOFTWARE.
-module pm_lib
+module pm_hash
   use pm_sysdep
   use pm_kinds
   use pm_memory
@@ -37,26 +37,11 @@ module pm_lib
   public:: pm_set_new, pm_set_lookup, pm_set_add, &
        pm_set_keys,pm_set_key,pm_set_size,pm_set_merge
   public:: pm_ivect_lookup,pm_iset_add,pm_idict_add
-  public:: pm_obj_set_new, pm_obj_set_lookup, pm_obj_set_add, &
-       pm_obj_set_keys,pm_obj_set_key,pm_obj_set_size,pm_obj_set_from
-  public:: pm_deep_copy
   
   integer(pm_p),public,parameter:: pm_first_libtype=pm_usr+1
-  integer(pm_p),public,parameter:: pm_matched_type=pm_first_libtype
-  integer(pm_p),public,parameter:: pm_dict_type = pm_first_libtype+1
-  integer(pm_p),public,parameter:: pm_set_type = pm_first_libtype+2
-  integer(pm_p),public,parameter:: pm_obj_set_type = pm_first_libtype+3
-  integer(pm_p),public,parameter:: pm_prc_type = pm_first_libtype+4
-  integer(pm_p),public,parameter:: pm_string_type=pm_first_libtype+5
-  integer(pm_p),public,parameter:: pm_poly_type=pm_first_libtype+6
-  integer(pm_p),public,parameter:: pm_struct_type=pm_first_libtype+7
-  integer(pm_p),public,parameter:: pm_rec_type=pm_first_libtype+8
-  integer(pm_p),public,parameter:: pm_polyref_type=pm_first_libtype+9
-  integer(pm_p),public,parameter:: pm_array_type=pm_first_libtype+10
-  integer(pm_p),public,parameter:: pm_const_array_type=pm_first_libtype+11
-  integer(pm_p),public,parameter:: pm_elemref_type=pm_first_libtype+12
-
-  integer(pm_p),public,parameter:: pm_last_libtype=pm_elemref_type
+  integer(pm_p),public,parameter:: pm_dict_type = pm_first_libtype
+  integer(pm_p),public,parameter:: pm_set_type = pm_first_libtype+1
+  integer(pm_p),public,parameter:: pm_last_lib_type = pm_set_type
   
   integer,parameter:: max_count=1000
 
@@ -68,7 +53,7 @@ contains
     integer(pm_ln),intent(in):: initsize
     type(pm_ptr):: ptr
     type(pm_ptr):: p
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(initsize<0) call pm_panic('New dictionary size')
     endif
     ptr=pm_fast_newusr(context,pm_dict_type,4_pm_p)
@@ -88,7 +73,7 @@ contains
     integer(pm_ln),intent(out),optional:: n_out
     type(pm_ptr):: ptr
     integer(pm_ln):: h,n
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict lookup - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
@@ -115,7 +100,8 @@ contains
     logical,intent(out):: ok
     type(pm_ptr):: ptr
     integer(pm_ln):: n,h,newsize
-    if(pm_debug_level>0) then
+    context%temp_obj4=val
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict set - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
@@ -157,7 +143,7 @@ contains
     logical:: changed
     type(pm_ptr):: keys,vals
     integer(pm_ln):: i,siz,n
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict merge obj1 - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
@@ -190,7 +176,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
     type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict keys - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
@@ -204,7 +190,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
     type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict vals - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
@@ -219,13 +205,16 @@ contains
     type(pm_ptr),intent(in):: obj
     integer(pm_ln),intent(in)::n
     type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict key - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
             call pm_panic('Dict key - not dict type')
     endif
     ptr=obj%data%ptr(obj%offset+2)
+    if(pm_debug_checks) then
+       if(n<1) call pm_panic('n<1')
+    endif
     ptr=ptr%data%ptr(ptr%offset+n-1)
   end function pm_dict_key
 
@@ -235,7 +224,7 @@ contains
     type(pm_ptr),intent(in):: obj
     integer(pm_ln),intent(in):: n
     type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict val - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
@@ -252,7 +241,7 @@ contains
     integer(pm_ln),intent(in):: n
     type(pm_ptr),intent(in):: val
     type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict set val - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
@@ -267,7 +256,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
     integer(pm_ln)::n
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Dict size - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_dict_type) &
@@ -295,7 +284,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj,key
     integer(pm_ln):: h,n
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Set lookup - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_set_type) &
@@ -306,18 +295,21 @@ contains
   end function pm_set_lookup
   
   ! Add value to set object
-  function pm_set_add(context,obj,key) result(n) 
+  function pm_set_add(context,obj,key,isnew) result(n) 
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
     type(pm_ptr),intent(in)::key
+    logical,optional:: isnew
     type(pm_ptr):: ptr
     integer(pm_ln):: n,h,newsize
-    if(pm_debug_level>0) then
+    logical:: added
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Set add - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_set_type) &
             call pm_panic('Set add - not set type')
     endif
+    added=.false.
     h=pm_val_hash(context,key)
     n=hash_lookup(context,obj,key,h,test_obj_eq)
     if(n==0) then
@@ -328,8 +320,11 @@ contains
        n=hash_add(context,obj,h)
        ptr=obj%data%ptr(obj%offset+2)
        call pm_ptr_assign(context,ptr,n-1,key)
+       added=.true.
     endif
+    if(present(isnew)) isnew=added
   end function pm_set_add
+
 
   ! Create copy of set object
   function pm_set_copy(context,obj) result(ptr)
@@ -338,7 +333,7 @@ contains
     type(pm_ptr):: ptr
     type(pm_ptr):: keys
     integer(pm_ln):: i,siz,n
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Set copy - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_set_type) &
@@ -356,12 +351,14 @@ contains
   end function pm_set_copy
 
   ! Merge one set into another
-  subroutine pm_set_merge(context,obj,obj2)
+  subroutine pm_set_merge(context,obj,obj2,changed)
     type(pm_context),pointer:: context
     type(pm_ptr):: obj,obj2
+    logical,optional:: changed
     type(pm_ptr):: keys
     integer(pm_ln):: i,siz,n
-    if(pm_debug_level>0) then
+    logical:: added
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Set merge obj1 - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_set_type) &
@@ -371,10 +368,14 @@ contains
        if(obj2%data%ptr(obj2%offset)%offset/=pm_set_type) &
             call pm_panic('Set merge obj2 - not set type')
     endif
+    if(present(changed)) changed=.false.
     keys=pm_set_keys(context,obj2)
     siz=pm_fast_esize(keys)
     do i=0_pm_ln,hash_size(obj2)-1_pm_ln
-       n=pm_set_add(context,obj,keys%data%ptr(keys%offset+i))
+       n=pm_set_add(context,obj,keys%data%ptr(keys%offset+i),added)
+       if(present(changed)) then
+          if(added) changed=.true.
+       endif
     enddo
   contains
     include 'fesize.inc'
@@ -385,7 +386,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj,obj2
     type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Set union obj1 - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_set_type) &
@@ -411,7 +412,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
     type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Set keys - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_set_type) &
@@ -426,7 +427,7 @@ contains
     type(pm_ptr),intent(in):: obj
     integer(pm_ln),intent(in):: n
     type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Set key  - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_set_type) &
@@ -441,7 +442,7 @@ contains
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
     integer(pm_ln)::n
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(obj%data%vkind/=pm_usr) &
             call pm_panic('Set size - not ptr')
        if(obj%data%ptr(obj%offset)%offset/=pm_set_type) &
@@ -450,18 +451,18 @@ contains
     n=hash_size(obj)
   end function pm_set_size
 
-  ! Lookup in set/dictionary key of i16 values (diverse system uses)
+  ! Lookup in set/dictionary key of integer values (diverse system uses)
   function pm_ivect_lookup(context,hashtab,ikey,m) result(k)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: hashtab
     integer,intent(in):: m
     integer(pm_ln):: k
     type(pm_ptr):: ptr
-    integer(pm_i16),dimension(m):: ikey
+    integer,dimension(m):: ikey
     integer(pm_ln):: hash,p,kp
     type(pm_ptr):: tab,keys,vals,lkey
     integer:: i
-    if(pm_debug_level>0) then
+    if(pm_debug_checks) then
        if(hashtab%data%vkind/=pm_usr) &
             call pm_panic('Ivect lookup - not use')
        if(hashtab%data%ptr(hashtab%offset)%offset/=pm_dict_type.and.&
@@ -483,7 +484,7 @@ contains
           kp=tab%data%ln(tab%offset+p+2)
           lkey=keys%data%ptr(keys%offset+kp-1)
           if(pm_fast_esize(lkey)==m-1) then
-             if(all(lkey%data%i16(lkey%offset:lkey%offset+m-1)== &
+             if(all(lkey%data%i(lkey%offset:lkey%offset+m-1)== &
                   ikey(1:m))) then
                 vals=hashtab%data%ptr(hashtab%offset+3)
                 k=kp
@@ -502,38 +503,43 @@ contains
   end function pm_ivect_lookup
 
   ! Add an entry with integer vector key
-  function pm_iset_add(context,obj,key,m) result(k)
+  function pm_iset_add(context,obj,key,m,isnew) result(k)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj
-    integer(pm_i16),dimension(m),intent(in):: key
+    integer,dimension(m),intent(in):: key
     integer,intent(in):: m
+    logical,optional:: isnew
     integer(pm_ln):: k
     type(pm_ptr):: ptr
     type(pm_root),pointer:: root
     logical:: ok
     k=pm_ivect_lookup(context,obj,key,m)
-    if(k>0) return
-    ptr=pm_fast_newnc(context,pm_int16,int(m,pm_p))
-    ptr%data%i16(ptr%offset:ptr%offset+m-1)=key(1:m)
+    if(k>0) then
+       if(present(isnew)) isnew=.false.
+       return
+    endif
+    ptr=pm_fast_newnc(context,pm_int,m)
+    ptr%data%i(ptr%offset:ptr%offset+m-1)=key(1:m)
     root=>pm_add_root(context,ptr)
-    k=pm_set_add(context,obj,ptr)
+    k=pm_set_add(context,obj,ptr,isnew)
     call pm_delete_root(context,root)
   contains
     include 'fnewnc.inc'
   end function pm_iset_add
 
+
   ! Add an entry with integer vector key
   function pm_idict_add(context,obj,key,m,val) result(k)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: obj,val
-    integer(pm_i16),dimension(m),intent(in):: key
+    integer,dimension(m),intent(in):: key
     integer,intent(in):: m
     integer(pm_ln):: k
     type(pm_ptr):: ptr
     type(pm_root),pointer:: root
     logical:: ok
-    ptr=pm_fast_newnc(context,pm_int16,int(m,pm_p))
-    ptr%data%i16(ptr%offset:ptr%offset+m-1)=key(1:m)
+    ptr=pm_fast_newnc(context,pm_int,m)
+    ptr%data%i(ptr%offset:ptr%offset+m-1)=key(1:m)
     root=>pm_add_root(context,ptr)
     call pm_dict_set(context,obj,ptr,val,.true.,.true.,ok,k)
     call pm_delete_root(context,root)
@@ -541,182 +547,13 @@ contains
     include 'fnewnc.inc'
   end function pm_idict_add
 
- ! Create a new object-value dictionary
-  function pm_obj_set_new(context,initsize) result(ptr)
-    type(pm_context),pointer:: context
-    integer(pm_ln),intent(in):: initsize
-    type(pm_ptr):: ptr
-    type(pm_ptr):: p
-    if(pm_debug_level>0) then
-       if(initsize<0) call pm_panic('New obj dictionary size')
-    endif
-    ptr=pm_fast_newusr(context,pm_obj_set_type,3_pm_p)
-    call hash_new_table(context,ptr,initsize,0_pm_ln)
-    p=pm_assign_new(context,ptr,2_pm_ln, &
-         pm_pointer,initsize,.true.)
-  contains
-    include 'fnewusr.inc'
-  end function pm_obj_set_new
-
-  ! Lookup value in object-value dictionary
-  function pm_obj_set_lookup(context,obj,key) result(n)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: obj,key
-    integer(pm_ln):: n
-    type(pm_ptr):: ptr
-    integer(pm_ln):: h
-    if(pm_debug_level>0) then
-       if(obj%data%vkind/=pm_usr) &
-            call pm_panic('Obj dict lookup - not ptr')
-       if(obj%data%ptr(obj%offset)%offset/=pm_obj_set_type) &
-            call pm_panic('Obj dict lookup - not obj set type')
-    endif
-    h=pm_obj_hash(context,key)
-    n=hash_lookup(context,obj,key,h,test_same_obj)
-  end function pm_obj_set_lookup
-
-  ! Add value to object/value dictionary - return index
-  function pm_obj_set_add(context,obj,key) result(n)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: obj
-    type(pm_ptr),intent(in)::key
-    integer(pm_ln):: n
-    type(pm_ptr):: ptr
-    integer(pm_ln):: h,newsize
-    if(pm_debug_level>0) then
-       if(obj%data%vkind/=pm_usr) &
-            call pm_panic('Obj set add - not ptr')
-       if(obj%data%ptr(obj%offset)%offset/=pm_obj_set_type) &
-            call pm_panic('Obj set add - not obj set type')
-    endif
-    if(hash_full(obj)) then
-       newsize=resize(context,obj)
-       call pm_expand(context,obj,2_pm_ln,newsize)
-    endif
-    h=pm_obj_hash(context,key)
-    n=hash_add(context,obj,h)
-    ptr=obj%data%ptr(obj%offset+2_pm_p)
-    call pm_ptr_assign(context,ptr,n-1_pm_ln,key)
-  end function pm_obj_set_add
-
-  ! Size of a set object
-  function pm_obj_set_size(context,obj) result(n)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: obj
-    integer(pm_ln)::n
-    if(pm_debug_level>0) then
-       if(obj%data%vkind/=pm_usr) &
-            call pm_panic('Obj set size - not ptr')
-       if(obj%data%ptr(obj%offset)%offset/=pm_obj_set_type) &
-            call pm_panic('Obj set size - not set type')
-    endif
-    n=hash_size(obj)
-  end function pm_obj_set_size
-
-  ! Keys of an object set
-  function pm_obj_set_keys(context,obj) result(ptr)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: obj
-    type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
-       if(obj%data%vkind/=pm_usr) &
-            call pm_panic('Obj set keys - not ptr')
-       if(obj%data%ptr(obj%offset)%offset/=pm_obj_set_type) &
-            call pm_panic('Obj set keys - not obj set type')
-    endif
-    ptr=obj%data%ptr(obj%offset+2)
-  end function pm_obj_set_keys
-
- ! Keys of a set object
-  function pm_obj_set_key(context,obj,n) result(ptr)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: obj
-    integer(pm_ln),intent(in):: n
-    type(pm_ptr):: ptr
-    if(pm_debug_level>0) then
-       if(obj%data%vkind/=pm_usr) &
-            call pm_panic('Obj set key - not ptr')
-       if(obj%data%ptr(obj%offset)%offset/=pm_obj_set_type) &
-            call pm_panic('Obj Set key - not obj set type')
-    endif
-    ptr=obj%data%ptr(obj%offset+2)
-    ptr=ptr%data%ptr(ptr%offset+n-1)
-  end function pm_obj_set_key
-
-  ! Create object set of all nodes following from ptr
-  function pm_obj_set_from(context,ptr) result(objset)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: ptr
-    type(pm_ptr):: objset
-    type(pm_ptr):: p,q
-    integer(pm_ln):: i,n,m
-    type(pm_root),pointer:: root
-    p=pm_obj_set_new(context,32_pm_ln)
-    root=>pm_add_root(context,p)
-    m=pm_obj_set_add(context,root%ptr,ptr)
-    n=0
-    do while(n<m)
-       n=n+1
-       p=pm_obj_set_key(context,root%ptr,n)
-       if(pm_fast_vkind(p)>=pm_pointer) then
-          do i=0,pm_fast_esize(p)
-             q=p%data%ptr(p%offset+i)
-             if(pm_obj_set_lookup(context,root%ptr,q)<=0) then
-                m=pm_obj_set_add(context,root%ptr,q)
-             endif
-          enddo
-       endif
-    enddo
-    objset=root%ptr
-    call pm_delete_root(context,root)
-  contains
-    include 'fvkind.inc'
-    include 'fesize.inc'
-  end function pm_obj_set_from
-
-  ! Deep copy based on object hash
-  function pm_deep_copy(context,ptr) result(copy)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: ptr
-    type(pm_ptr):: copy
-    integer(pm_ln):: i,j,n
-    type(pm_ptr),target:: dict,q,r,pending
-    type(pm_ptr):: p,keys
-    type(pm_reg),pointer:: reg
-    reg=>pm_register(context,'deep copy',dict,p,q,pending)
-    dict=pm_obj_set_from(context,ptr)
-    keys=pm_obj_set_keys(context,dict)
-    n=pm_obj_set_size(context,dict)
-    q=pm_new(context,pm_pointer,n)
-    do i=0,n-1
-       r=keys%data%ptr(keys%offset+i)
-       q%data%ptr(q%offset+i)=pm_copy(context,r)
-    enddo
-    do i=0,n-1
-       r=q%data%ptr(q%offset+i)
-       if(pm_fast_vkind(r)>=pm_pointer) then
-          do j=0,pm_fast_esize(r)
-             r%data%ptr(r%offset+j)=&
-                  q%data%ptr(q%offset+&
-                  pm_obj_set_lookup(context,dict,r%data%ptr(r%offset+j))-1_pm_ln)
-          enddo
-       endif
-    enddo
-    copy=q%data%ptr(q%offset)
-    call pm_delete_register(context,reg)
-  contains
-    include 'fesize.inc'
-    include 'fisnull.inc'
-    include 'fvkind.inc'
-  end function pm_deep_copy
-
   ! Hash table size
   function hash_size(obj) result(n)
     type(pm_ptr),intent(in):: obj
     integer(pm_ln):: n
     type(pm_ptr):: hashtab
     hashtab=obj%data%ptr(obj%offset+1)
-    n=hashtab%data%ln(hashtab%offset)    
+    n=hashtab%data%ln(hashtab%offset)
   end function hash_size
 
   ! New hash table
@@ -754,20 +591,26 @@ contains
     tab=hashtab%data%ptr(hashtab%offset+1)
     mask=tab%data%ln(tab%offset+2)
     p=iand(hash,mask)*3+3
+    call check_p(p)
     if(tab%data%ln(tab%offset+p+2)/=0) then
        p2=iand(tab%data%ln(tab%offset+p+1),mask)*3+3
+       call check_p(p2)
        if(p==p2) then
           p=free_pos(tab)
+          call check_p(p)
           tab%data%ln(tab%offset+p)=tab%data%ln(tab%offset+p2)
           tab%data%ln(tab%offset+p2)=p
        else
           do while(tab%data%ln(tab%offset+p2)/=p)
              p2=tab%data%ln(tab%offset+p2)
+             call check_p(p2)
           enddo
           p3=free_pos(tab)
+          call check_p(p3)
           tab%data%ln(tab%offset+p3)=tab%data%ln(tab%offset+p)
           tab%data%ln(tab%offset+p3+1)=tab%data%ln(tab%offset+p+1)
           tab%data%ln(tab%offset+p3+2)=tab%data%ln(tab%offset+p+2)
+          call check_p(p2)
           tab%data%ln(tab%offset+p2)=p3
           tab%data%ln(tab%offset+p)=0
        endif
@@ -778,6 +621,11 @@ contains
     kp=tab%data%ln(tab%offset)+1
     tab%data%ln(tab%offset)=kp
     tab%data%ln(tab%offset+p+2)=kp
+  contains
+    subroutine check_p(p)
+      integer(pm_ln)::p
+      if(p<3.or.p>tab%data%esize-2) call pm_panic('Wrong p')
+    end subroutine check_p
   end function  hash_add
 
   ! Lookup position in hash table
@@ -1227,5 +1075,4 @@ contains
     newhash=newhash+ishftc(newhash,15)
   end function hashfn
 
-
-end module pm_lib
+end module pm_hash
