@@ -1,0 +1,13 @@
+#!/bin/sh
+while IFS= read -r line
+do
+  case $line in
+  '!>'*)
+  echo  ${line:2}
+  ;; 
+  *)
+  echo "write(i,'(A)') \"$line\""
+  ;;
+  esac
+done <$1
+
