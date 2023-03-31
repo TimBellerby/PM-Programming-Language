@@ -1,0 +1,114 @@
+/*
+ ******************************************
+ An example of how the PM type system works
+ to facilitate (not require) object-oriented
+ programming
+ *******************************************
+*/
+
+// Shape is a generic type
+type shapes
+
+/* 
+  Common information to all shapes
+  Names starting with "_" are local
+  to this module 
+*/
+type shape_base is rec {_npoints:int}
+
+// Specific types conforming to shape
+type triangle : shapes is rec {
+       use base: shape_base,
+       point1: tuple2d,
+       point2: tuple2d,
+       point3: tuple2d
+}
+
+type square : shapes is rec {
+       use base: shape_base,
+       point1: tuple2d,
+       point2: tuple2d
+}
+
+// Type value creation - just normal procedures
+proc base(npoints:int)=new shape_base{_npoints=npoints}
+
+proc triangle(p:tuple2d,q:tuple2d,r:tuple2d)=new  triangle{
+  base=base(3),point1=p,point2=q,point3=r
+}
+
+proc square(ll:tuple2d,ur:tuple2d)=new square{
+  base=base(4),point1=ll,point2=ur
+}
+
+// Draw is a generic procedure specialised by argument type
+proc draw(s:triangle) {
+  start_shape()
+  draw(s.point1)
+  draw(s.point2)
+  draw(s.point3)
+}
+
+proc draw(s:square) {
+  start_shape()
+  draw(s.point1)
+  draw([s.point1.1,s.point2.2])
+  draw(s.point2)
+  draw([s.point1.2,s.point2.1])
+}
+
+proc draw(s:tuple2d) {
+  print(s.1++","++s.2)
+}
+
+proc start_shape() {
+  print("SHAPE:")
+}
+
+/*
+ An included record or structure
+ exposes its elements at the top
+ level of the structure or record
+ into which it is embedded
+ (allows code inheritance)
+*/
+
+proc npoints(s:shapes)=s._npoints
+
+proc do_shape(s:*shapes) {print("Done")}
+
+/* 
+ ********************************************
+ End of definitions - here is the program
+ ********************************************
+*/
+
+// Array of polymorphic values
+var shapes={
+   triangle([1,1],[1,2],[2,2]) as <*shapes>,
+   square([1,1],[2,2]) as <*shapes>,
+   triangle([3,2],[2,2],[1,3]) as <*shapes>
+}
+
+
+var np=0
+foreach shape in shapes {
+  // "any" statement does dynamic dispatch on a body
+  // of code - PM does not dispatch individual calls
+  any shape {
+   np:=np+npoints(shape)
+   draw(shape)
+  }
+}
+print("Total points= "++np)
+
+print("Triangle at [0] is:")
+draw(get(shapes[0],triangle([0,0],[0,0],[0,0])))
+
+print("Shape at [1] is:")
+any s=shapes[1] {draw(s)}
+
+z=triangle([0,0],[0,0],[0,0]) as shapes[1]
+
+do_shape(z)
+
