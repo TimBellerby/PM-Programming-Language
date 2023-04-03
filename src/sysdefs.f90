@@ -4903,11 +4903,11 @@ contains
     ! Distributed I/O
     call dcl_uproc(parser,'partition%(f:filesystem)=f:test "Partition not yet implemented"=>''false',line)
     call dcl_uproc(parser,&
-         'read%(&f:shared file,&x:io_type)'//&
+         'read%(&f:shared file,&x:complete io_type)'//&
          '{err=_read_file_tile%(f._f,&x,index(dims(region._mshape),here),size(region._mshape));'//&
          'return _make_file_error(err)}',line)
     call dcl_uproc(parser,&
-         'write%(&f:shared file,x:io_type)'//&
+         'write%(&f:shared file,x:complete io_type)'//&
          '{err=_write_file_tile%(f._f,x,index(dims(region._mshape),here),size(region._mshape));'//&
          'return _make_file_error(err)}',line)
 
