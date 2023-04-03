@@ -1646,20 +1646,20 @@ contains
        call out_simple(g,'CALL PM__SYNC_FILE_WRITE($2,$1)',l)
     case(op_read_file_tile,op_write_file_tile)
        call gen_loop(g,l,.true.)
-       call out_get_mpi_base_type(g,g_type(g,g%codes(a+5)))
-       call out_simple(g,'CALL PM__FILE_SET_VIEW($4,JBASE,$#6,N$N,$7,$1,OFFSET)',l,&
+       call out_get_mpi_base_type(g,g_type(g,g%codes(a+3)))
+       call out_simple(g,'CALL PM__FILE_SET_VIEW($2,JBASE,$#4,N$N,$5,$1,OFFSET)',l,&
             n=g%lthis)
        call out_simple(g,'IF($1==0) THEN',l)
        call out_get_mpi_base_type(g,g_type(g,g%codes(a+5)))
        call out_simple(g,'CALL PM__GET_MPI_TYPE(JBASE,N$N,JTYPE,JN,LNEW)',l,n=g%lthis)
        if(opcode==op_read_file_tile) then
-          call out_simple(g,'CALL MPI_FILE_READ_ALL($4,$#5,JN,JTYPE,MPI_STATUS_IGNORE,$1)',l)
+          call out_simple(g,'CALL MPI_FILE_READ_ALL($2,$#3,JN,JTYPE,MPI_STATUS_IGNORE,$1)',l)
        else
-          call out_simple(g,'CALL MPI_FILE_WRITE_ALL($4,$#5,JN,JTYPE,MPI_STATUS_IGNORE,$1)',l)
+          call out_simple(g,'CALL MPI_FILE_WRITE_ALL($2,$#3,JN,JTYPE,MPI_STATUS_IGNORE,$1)',l)
        endif
        call out_line(g,'IF(LNEW) CALL MPI_TYPE_FREE(JTYPE,JERRNO)')
        call out_line(g,'ENDIF')
-       call out_simple(g,'CALL PM__FILE_RESET_VIEW($4,OFFSET,$1)',l)
+       call out_simple(g,'CALL PM__FILE_RESET_VIEW($2,OFFSET,$1)',l)
     case(op_io_error_string)
        call out_simple_scalar(g,'$1=PM__IO_ERROR_STRING($2)',l)
        
@@ -4689,7 +4689,7 @@ contains
     case(v_is_vect_wrapped)
        call out_arg(g,g_v1(g,var),ior(opts,arg_wrapped))
     case(v_is_elem)
-       call out_elem(g,g_v1(g,var),g_v2(g,var))
+       call out_elem(g,g_v1(g,var),g_v2(g,var),opts)
     case(v_is_unit_elem)
        call out_arg(g,g_v1(g,var),opts)
     case(v_is_chan_vect)
@@ -4752,10 +4752,10 @@ contains
     endif
   end subroutine out_loop_index
   
-  recursive subroutine out_elem(g,var,n)
+  recursive subroutine out_elem(g,var,n,opts)
     type(gen_state):: g
-    integer,intent(in):: var,n
-    call out_arg(g,var,0)
+    integer,intent(in):: var,n,opts
+    call out_arg(g,var,opts)
     call out_char(g,'%')
     call out_char_idx(g,'E',n)
   end subroutine out_elem
