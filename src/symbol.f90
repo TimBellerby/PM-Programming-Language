@@ -296,9 +296,10 @@ module pm_symbol
   integer,parameter:: sym_vdim = node0 + 42
   integer,parameter:: sym_sync_assign = node0 + 43
   integer,parameter:: sym_get_filesystem = node0 + 44
+  integer,parameter:: sym_nested_loop = node0 + 45
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 45
+  integer,parameter:: hook = node0 + 46
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -651,7 +652,7 @@ module pm_symbol
   data sym_names(sym_dot_sub)          /'<dot-sub>'/
   data sym_names(sym_unused_node)      /'<unused_node>'/
   data sym_names(sym_array_former)     /'<array-former>'/
-  data sym_names(sym_matrix_former)    /'<matrix-former>'/
+  data sym_names(sym_matrix_former)    /'PM__matrix'/
   data sym_names(sym_do_stmt)          /'<do-statement>'/
   data sym_names(sym_loop)             /'<loop>'/
   data sym_names(sym_start_loop)       /'<start-loop>'/
@@ -682,6 +683,7 @@ module pm_symbol
   data sym_names(sym_vdim)             /'PM__vdim'/
   data sym_names(sym_sync_assign)      /'<sync-assign>'/
   data sym_names(sym_get_filesystem)   /'PM__filesys'/
+  data sym_names(sym_nested_loop)      /'PM__nested_loop'/
   
   ! Misc. symbols referenced by compiler
   
@@ -770,7 +772,7 @@ module pm_symbol
   data sym_names(sym_this)             /'this'/
   data sym_names(sym_here)             /'here'/
   data sym_names(sym_here_in_tile)     /'here_in_tile'/
-  data sym_names(sym_subregion)        /'subregion'/
+  data sym_names(sym_subregion)        /'schedule'/
   data sym_names(sym_region)           /'region'/
   data sym_names(sym_distr_tag)        /'PM__distr_tag'/
   data sym_names(sym_tag)              /'PM__tag'/

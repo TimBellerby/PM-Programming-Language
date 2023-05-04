@@ -292,9 +292,9 @@ contains
     endif
     
     
-    if(coder%num_errors>0) then
-       call pm_stop('Compilation terminated due to type-inference errors')
-    endif
+    !if(coder%num_errors>0) then
+    !   call pm_stop('Compilation terminated due to type-inference errors')
+    !endif
  
     if(out_debug_files) then
        open(unit=pm_comp_file_unit,file='infer.out')

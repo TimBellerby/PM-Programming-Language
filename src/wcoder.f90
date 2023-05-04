@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2022
+! Copyright (c) Tim Bellerby, 2023
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -1239,7 +1239,7 @@ contains
        call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)     ! x-new
        call wc_arg(wcd,cnode_arg(args,2),.true.,rv,ve)     ! y-new
        call wc_arg(wcd,cnode_arg(args,3),.false.,rv,ve)    ! x
-       call wc_arg(wcd,cnode_arg(args,4),.false.,rv,ve) ! y
+       call wc_arg(wcd,cnode_arg(args,4),.false.,rv,ve)    ! y
        call wc_arg(wcd,cnode_arg(args,5),.false.,rv,ve)    ! p
        break2=wcode_cblock(wcd,cnode_arg(args,6),rv,new_ve)
        if(pm_is_compiling) call comp_finish_block(wcd,pc)

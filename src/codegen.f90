@@ -207,7 +207,8 @@ module pm_codegen
   integer,parameter:: par_state_cond=6
   integer,parameter:: par_state_par=7
   integer,parameter:: par_state_masked=8
-  integer,parameter:: par_state_labelled=9
+  integer,parameter:: par_state_over=9
+  integer,parameter:: par_state_labelled=10
 
   ! Reference flags
   integer,parameter:: ref_is_val=1
@@ -479,6 +480,7 @@ contains
  
     ! Sort signatures
     call sort_sigs(coder)
+
     
   contains
     include 'fnewnc.inc'
@@ -768,11 +770,11 @@ contains
                   'Labelled statement not allowed outside of any parallel statement')
           case(par_state_nhd)
              call code_error(coder,node,&
-                  'Labelled statement not allowed outside of any parallel statement')
+                  'Labelled statement not allowed in a "nhd" statement')
           case(par_state_cond_loop)
              call code_error(coder,node,&
                   'Labelled statement in unlabelled loop')
-          case(par_state_for,par_state_loop,par_state_masked)
+          case(par_state_for,par_state_loop,par_state_masked,par_state_over)
              if(.not.pm_fast_isnull(node_arg(node,1))) then
                 call trav_open_stmt_list(coder,cblock,node,node_arg(node,1))
              endif
@@ -1602,7 +1604,7 @@ contains
     type(pm_ptr),intent(in):: cblock,pnode,node
     integer,intent(in):: base
     type(pm_ptr):: list,namelist,loop,cblock2,cblock3,edges
-    integer:: i,j,k,iter,var,nhd_base,join_base,expr_base,nvar_base,block_base,nlist,nvars
+    integer:: i,j,k,iter,var,nhd_base,join_base,expr_base,nvar_base,block_base,over_base,nlist,nvars
     integer:: save_par_state
 
     ! node for nhd statement is
@@ -1765,13 +1767,20 @@ contains
        call make_comm_sys_call(coder,cblock,node_arg(node,2),sym_blocking,1,0)
     endif
     
-    call make_sys_var(coder,cblock2,node,sym_bounds,var_is_shadowed)
+    call make_sys_var(coder,cblock2,node,sym_subregion,var_is_shadowed)
+    call var_set_par_depth(coder,top_code(coder),coder%par_depth-1)
+    over_base=coder%top
+    call make_comm_call_args(coder,cblock,node)
+    call make_temp_var(coder,cblock,node)
+    call var_set_par_depth(coder,top_code(coder),coder%par_depth-1)
+    call dup_code(coder)
     call code_val(coder,coder%var(coder%par_base+lv_distr))
     call code_val(coder,coder%var(coder%par_base+lv_tile))
     call code_val(coder,coder%var(nvar_base))
     call code_val(coder,coder%var(iter+lv_idx))
     call make_sys_call(coder,cblock2,node,sym_get_chunk,4,1,aflags=proc_run_shared)
-    call make_do_over(coder,cblock2,node,node,node_arg(node,4),coder%top)
+    call make_comm_sys_call(coder,cblock2,node_arg(node,4),sym_make_over,1,1)
+    call make_do_over(coder,cblock2,node,node,node_arg(node,4),over_base)
     
     call code_val(coder,coder%var(var))
 
@@ -1816,7 +1825,7 @@ contains
     endif
 
     coder%vtop=nhd_base
-   
+    coder%par_state=save_par_state
   contains
     include 'fisnull.inc'    
   end subroutine trav_nhd_stmt
@@ -2168,9 +2177,17 @@ contains
     logical:: ok
     
     if(coder%par_state==par_state_outer)then
-       call code_error(coder,node,'Cannot have "over" statement outside of a parallel context')
+       call code_error(coder,node,&
+            'Cannot have "over" statement outside of a parallel context')
+    elseif(coder%par_state/=par_state_for.and.coder%par_state/=par_state_over.and.&
+         coder%par_state/=par_state_nhd) then
+       call code_error(coder,node,&
+            'Cannot have "over" statement in a conditional context')
     endif
+    save_par_state=coder%par_state
+    coder%par_state=par_state_for
     call make_sys_var(coder,cblock,node,sym_subregion,var_is_shadowed)
+    call var_set_par_depth(coder,top_code(coder),coder%par_depth-1)
     base=coder%top
     call hide_vars(coder,base,base)
     call make_comm_call_args(coder,cblock,node)
@@ -2183,10 +2200,9 @@ contains
     coder%run_flags=save_run_flags
     call make_comm_sys_call(coder,cblock,node,sym_make_over,1,1)
     call reveal_vars(coder,base,base)
-
-    stmt_list=node_arg(node,2)
-    
+    stmt_list=node_arg(node,2)    
     call make_do_over(coder,cblock,pnode,node,stmt_list,base)
+    coder%par_state=save_par_state
   contains
     include 'fisnull.inc'
   end subroutine trav_over_stmt
@@ -2204,13 +2220,20 @@ contains
     
     save_par_state=coder%par_state
     save_over_base=coder%over_base
+    
     coder%over_base=base
-    if(coder%par_state/=par_state_nhd) coder%par_state=par_state_masked
+    if(coder%par_state/=par_state_nhd) coder%par_state=par_state_over
     if(pm_is_compiling) then
        cblock2=make_cblock(coder,cblock,node,sym_using)
-       call make_comm_call_args(coder,cblock2,node)
+       call make_sys_var(coder,cblock2,node,sym_nested_loop,var_is_shadowed)
+       call var_set_par_depth(coder,top_code(coder),coder%par_depth-1)
+       call dup_code(coder)
        call code_val(coder,coder%var(base))
-       call make_comm_sys_call(coder,cblock2,node,sym_do_over,1,0)
+       call code_val(coder,coder%var(coder%par_base+lv_distr))
+       call make_basic_sys_call(coder,cblock2,node,sym_do_over,2,1,&
+            coder%par_depth-1,call_inline_when_compiling+proc_run_shared)
+       call make_basic_sys_call(coder,cblock2,node,sym_nested_loop,1,0,&
+            coder%par_depth-1,call_inline_when_compiling)
        call close_cblock(coder,cblock2)
        call trav_stmt_list(coder,cblock,node,statlist,sym_over)
        call make_sp_call(coder,cblock,node,sym_over,2,0)
@@ -2685,7 +2708,7 @@ contains
     type(pm_ptr):: list
     integer:: i
     select case(coder%par_state)
-    case(par_state_for,par_state_loop,par_state_masked,&
+    case(par_state_for,par_state_loop,par_state_masked,par_state_over,&
          par_state_labelled,par_state_sync)
        continue
     case(par_state_outer)
@@ -2721,7 +2744,7 @@ contains
     do
        call cnode_set(coder,list,cblock_last_loop_call,&
             cnode_get(list,cblock_last_call))
-       if(i==sym_for.or.i==sym_for_stmt) then
+       if(i==sym_for.or.i==sym_for_stmt.or.i==sym_nhd) then
           exit
        endif
        if(cnode_flags_set(list,cblock_flags,cblock_is_comm)) exit
@@ -4099,6 +4122,10 @@ contains
        call make_sp_call(coder,cblock,node,sym_type_val,1,1)
     case(sym_array_former,sym_matrix_former)
        i=node_get_num(node,node_args+2)
+       if(sym==sym_matrix_former) then
+          call make_temp_var(coder,cblock,node)
+          call dup_code(coder)
+       endif
        call make_temp_var(coder,cblock,node)
        call dup_code(coder)
        call make_temp_var(coder,cblock,node)
@@ -4106,22 +4133,17 @@ contains
        call array_span(node_get_num(node,node_args+3),node_get_num(node,node_args+1))
        if(i/=1) then
           call array_span(node_get_num(node,node_args+4),i)
-         if(sym==sym_matrix_former) then
-             call make_sys_call(coder,cblock,node,sym_matrix,2,1)
-          else
-             call make_sys_call(coder,cblock,node,sym_array,2,1)
-          endif
+          call make_sys_call(coder,cblock,node,sym_array,2,1)
        else
-          if(sym==sym_matrix_former) then
-             call make_sys_call(coder,cblock,node,sym_vector,1,1)
-          else
-             call make_sys_call(coder,cblock,node,sym_array,1,1)
-          endif
+          call make_sys_call(coder,cblock,node,sym_array,1,1)
        endif
        list=node_arg(node,1)
        call trav_expr(coder,cblock,list,node_arg(list,1))
        call swap_code(coder)
        call make_sys_call(coder,cblock,list,sym_do_dim,2,1)
+       if(sym==sym_matrix_former) then
+          call make_sys_call(coder,cblock,node,sym_matrix_former,1,1)
+       endif
        do i=2,node_numargs(list)
           call dup_code(coder)
           call make_long_const(coder,cblock,node,int(i-1,pm_ln))
@@ -5443,8 +5465,8 @@ contains
             call pm_panic('Pop type vars  - no end record')
     endif 
     coder%top=coder%top-1
-     call pop_vars_to(coder,base)
-     if(pm_debug_checks) then
+    call pop_vars_to(coder,base)
+    if(pm_debug_checks) then
        if(coder%stack(coder%top)/=typevar_start) &
             call pm_panic('Pop type vars  - not at start record')
     endif
@@ -5465,7 +5487,9 @@ contains
     coder%link(coder%top)=0
     coder%var(coder%top)=pm_null_obj
     do i=base+1,top-1
-       call make_var_tab_entry(coder,coder%stack(i),coder%var(i))
+       if(coder%stack(i)/=0) then
+          call make_var_tab_entry(coder,coder%stack(i),coder%var(i))
+       endif
     enddo
     coder%top=coder%top+1
     coder%stack(coder%top)=typevar_end
@@ -5626,7 +5650,6 @@ contains
   contains
     include 'fisnull.inc'
   end subroutine complete_type_checks
-
 
   
   !********************************************************
@@ -5886,8 +5909,8 @@ contains
          iand(flags,proc_run_complete+proc_run_shared+proc_run_local)==0) then
        flags=ior(flags,call_is_cond)
     endif
-    if(coder%par_state>=par_state_cond.and.&
-         coder%par_state/=par_state_labelled) then
+    if(coder%par_state==par_state_cond.or.&
+         coder%par_state==par_state_par) then
        flags=ior(flags,call_is_unlabelled)
     endif
     
@@ -6602,9 +6625,14 @@ contains
 
       if(pm_is_compiling) then
          ! Call PM__do_over to set-up subset loops
+         call make_sys_var(coder,cblock3,node,sym_nested_loop,var_is_shadowed)
+         call dup_code(coder)
          call code_val(coder,coder%var(coder%over_base))
-         call code_val(coder,coder%var(iter+lv_tile))
-         call make_sys_call(coder,cblock3,node,sym_do_over,2,0)
+         call code_val(coder,coder%var(iter+lv_distr))
+         call make_basic_sys_call(coder,cblock3,node,sym_do_over,2,1,&
+              coder%par_depth-1,call_inline_when_compiling)
+         call make_basic_sys_call(coder,cblock3,node,sym_nested_loop,1,0,&
+              coder%par_depth-1,call_inline_when_compiling)
       endif
       
     end subroutine  code_loop_startup
@@ -7767,8 +7795,15 @@ contains
     integer:: index
     integer:: i
     type(pm_ptr):: node
+
     index=0
     i=coder%hash(var_hash(n))
+    if(pm_debug_checks) then
+       if(i>coder%top) then
+          write(*,*) '#',i,coder%top,var_hash(n)
+          call pm_panic('bad hash')
+       endif
+    endif
     do while(i>base)
        if(coder%stack(i)==n) then
           index=i
@@ -7816,7 +7851,8 @@ contains
     flags=0
     if(coder%par_state>=par_state_cond) then
        flags=ior(flags,var_is_incomplete)
-    elseif(coder%par_state==par_state_par) then
+    endif
+    if(coder%par_state==par_state_par) then
        flags=ior(flags,var_is_par_var)
     endif
     call code_num(coder,flags)
@@ -7897,7 +7933,8 @@ contains
     vflags=flags
     if(coder%par_state>=par_state_cond) then
        vflags=ior(vflags,var_is_incomplete)
-    elseif(coder%par_state==par_state_par) then
+    endif
+    if(coder%par_state==par_state_par) then
        vflags=ior(vflags,var_is_par_var)
     endif
     
@@ -7951,6 +7988,7 @@ contains
     type(pm_ptr),intent(in):: var
     integer:: i,j
 
+    if(name==0) return
     if(coder%top>=max_code_stack) then
        call pm_panic('Program too complex')
     endif
@@ -7976,7 +8014,7 @@ contains
     endif
     do i=coder%top,newbase+1,-1
        j=coder%stack(i)
-       if(j/=0) then
+       if(j/=0) then 
           if(pm_debug_checks) then
              if(j==typevar_start.or.j==typevar_end) then
                 write(*,*) 'i=',i,j
@@ -8001,6 +8039,7 @@ contains
     integer,intent(in):: n
     integer:: h
     h=iand(abs(int(n)),code_local_hash-1)+1
+    h=1
   end function var_hash
 
   !=========================================

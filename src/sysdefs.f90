@@ -727,7 +727,7 @@ contains
     call dcl_type(parser,'masked(x) is '//&
          'rec {_val:x,_there:bool}',line)
     call dcl_uproc(parser,'|(x:masked,y)=if(x._there=>x._val,y)'//&
-         'check "Right operand of ""|"" does not match masked type on the left"=>same_type(x.val,y)',line)
+         'check "Right operand of ""|"" does not match masked type on the left"=>same_type(x._val,y)',line)
     call dcl_uproc(parser,&
          'masked(val,there:bool)=new masked {_val=val,_there=there}',line)
     call dcl_uproc(parser,'defined(x:masked)=x._there',line)
@@ -738,8 +738,6 @@ contains
          'get(&x,y:masked(x)) {if y._there{x=y._val};return y._there}',line)
 
     ! Polymorphic types
-!!$    call dcl_uproc(parser,'!(x,t:<any>)=^<x:t>',line)
-!!$    call dcl_uproc(parser,'!(x,t)=^<x,t>',line)
     call dcl_proc(parser,'get(x:*any,y:any)->=y',op_as,0,line,0)
     call dcl_proc(parser,'get(&x:any,y:*any)',op_get_poly,0,line,&
          proc_needs_type)
@@ -1494,7 +1492,7 @@ contains
          ' max(0,(y._lo-x._lo+x._st-1)/x._st)..min(x._n,(y._hi-x._lo)/x._st)',line)
     call dcl_uproc(parser,&
          'overlap(x:range(any_int),y:strided_range(any_int))='//&
-         'max(0,y._lo-x._lo)..min(x._n,y._hi-x._lo) by y._st',line)
+         'max((-d+y._st-1)/y._st*y._st+d,d)..min(x._n,y._hi-x._lo) by y._st where d=y._lo-x._lo',line) !!! WRONG
     call dcl_uproc(parser,&
          'intersect(x:strided_range(any_int),y:range(any_int))='//&
          'x._lo+max(convert(0,n1),n1)*x._st..x._lo+min(convert(x._n,n2),n2)*x._st by x._st'//&
@@ -1783,13 +1781,13 @@ contains
     call dcl_type(parser,'extent is tuple(range(int) ),'//&
          'extent1d,extent2d,extent3d,extent4d,extent5d,extent6d,extent7d',line)
 
-    call dcl_type(parser,'extent1d is tuple1d_of(range(int) )',line)
-    call dcl_type(parser,'extent2d is tuple2d_of(range(int) )',line)
-    call dcl_type(parser,'extent3d is tuple3d_of(range(int) )',line)
-    call dcl_type(parser,'extent4d is tuple4d_of(range(int) )',line)
-    call dcl_type(parser,'extent5d is tuple5d_of(range(int) )',line)
-    call dcl_type(parser,'extent6d is tuple6d_of(range(int) )',line)
-    call dcl_type(parser,'extent7d is tuple7d_of(range(int) )',line)
+    call dcl_type(parser,'extent1d is tuple1d_of(range(int))',line)
+    call dcl_type(parser,'extent2d is tuple2d_of(range(int))',line)
+    call dcl_type(parser,'extent3d is tuple3d_of(range(int))',line)
+    call dcl_type(parser,'extent4d is tuple4d_of(range(int))',line)
+    call dcl_type(parser,'extent5d is tuple5d_of(range(int))',line)
+    call dcl_type(parser,'extent6d is tuple6d_of(range(int))',line)
+    call dcl_type(parser,'extent7d is tuple7d_of(range(int))',line)
     call dcl_type(parser,'mshape(extent_t:extent) is '//&
          'rec {use _extent:extent_t,_n:int,_o:int}',line)
     
@@ -1943,18 +1941,18 @@ contains
     ! Complete a subscript using a base mshape
     call dcl_uproc(parser,&
          'fill_in(x:null,y)=y :test "Cannot use incomplete subscript on null dimension" => ''false',line)
-    call dcl_uproc(parser,'fill_in(x:range(int) or null,y:any_int)=single_point(int(y))',line)
-    call dcl_uproc(parser,'fill_in(x:range(int) or null,y:range(any_int))=int(y)',line)
-    call dcl_uproc(parser,'fill_in(x:range(int) or null,y:strided_range(any_int))=int(y)',line)
-    call dcl_uproc(parser,'fill_in(x:range(int),y:range_below(any_int))=x._lo..int(y._t)',line)
-    call dcl_uproc(parser,'fill_in(x:range(int),y:range_above(any_int))=int(y._t)..x._hi',line)
-    call dcl_uproc(parser,'fill_in(x:range(int),y:strided_range_below(any_int))=lo..int(y._t) by y._st'//&
+    call dcl_uproc(parser,'fill_in(x:seq(int) or null,y:any_int)=single_point(int(y))',line)
+    call dcl_uproc(parser,'fill_in(x:seq(int) or null,y:range(any_int))=int(y)',line)
+    call dcl_uproc(parser,'fill_in(x:seq(int) or null,y:strided_range(any_int))=int(y)',line)
+    call dcl_uproc(parser,'fill_in(x:seq(int),y:range_below(any_int))=x._lo..int(y._t)',line)
+    call dcl_uproc(parser,'fill_in(x:seq(int),y:range_above(any_int))=int(y._t)..x._hi',line)
+    call dcl_uproc(parser,'fill_in(x:seq(int),y:strided_range_below(any_int))=lo..int(y._t) by y._st'//&
          ' where lo=y._t-(y._t-x._lo)/y._st*y._st',line)
-    call dcl_uproc(parser,'fill_in(x:range(int),y:strided_range_above(any_int))=int(y._t)..x._hi by y._st',line)
-    call dcl_uproc(parser,'fill_in(x:range(int),y:stride(any_int))=x by int(y._st)',line)
-    call dcl_uproc(parser,'fill_in(x:range(int) or null,y:null)=x',line)
-    call dcl_uproc(parser,'fill_in(x:extent,y:tuple(subs_dim))=map($fill_in,x,y)',line)
-    call dcl_uproc(parser,'fill_in(x:extent,y:tuple(subs_dim) and contains(stretch_dim))='//&
+    call dcl_uproc(parser,'fill_in(x:seq(int),y:strided_range_above(any_int))=int(y._t)..x._hi by y._st',line)
+    call dcl_uproc(parser,'fill_in(x:seq(int),y:stride(any_int))=x by int(y._st)',line)
+    call dcl_uproc(parser,'fill_in(x:seq(int) or null,y:null)=x',line)
+    call dcl_uproc(parser,'fill_in(x:grid,y:tuple(subs_dim))=map($fill_in,x,y)',line)
+    call dcl_uproc(parser,'fill_in(x:grid,y:tuple(subs_dim) and contains(stretch_dim))='//&
          '_fill_in(x,head(y),tail(y))',line)
     call dcl_uproc(parser,'_fill_in(x,y,z)=prepend(fill_in(x.1,y),'//&
          '_fill_in(tail(x),head(z),tail(z)))',line)
@@ -2460,25 +2458,14 @@ contains
     call dcl_uproc(parser,&
          'array(a:any,s:fix mshape(tuple(range(int))))='//&
          'new array_template {_a=a,_d=s,_s=size(s),_v=''false,_f=''true}',line)
-!!$    call dcl_uproc(parser,&
-!!$         'array(a:any,s:mshape)='//&
-!!$         'new array_template {_a=a,_d=spread(0..1,#s),_s=size(s),_v=''false}'//&
-!!$         ':test "Cannot create array with null dimensions" => ''false',line)
     call dcl_uproc(parser,&
          'array(a:any,s:tuple(range(any_int)))=array(a,shape(s))',line)
-    call dcl_uproc(parser,&
-         'array(a:any,s:tuple(range(any_int)or null))='//&
-         'array(a,shape(spread(0..1,s))):'//&
-         'test "Cannot create array with null dimensions" => ''false',line)
     call dcl_uproc(parser,'dim%(a,d)=array(a,d)',line)
     call dcl_uproc(parser,'dim%(a,s:invariant mshape(tuple(range(int))))='//&
          'new array_template {_a=a,_d=s,_s=size(s),_v=''false,_i=''true}',line)
     call dcl_uproc(parser,'dim%(a,sh:invariant tuple(range(any_int)))='//&
          'new array_template {_a=a,_d=s,_s=size(s),_v=''false,_i=''true}'//&
          'where s=shape(sh)',line)
-
-    call dcl_uproc(parser,'FF(x)=x._f',line)
-    call dcl_uproc(parser,'II(x)=x._i',line)
     
     call dcl_uproc(parser,&
          'varray(a:any,s:mshape or dshape)='//&
@@ -2512,6 +2499,52 @@ contains
          '_array(a,d,size(d),''false)',&
          line)
 
+    
+    !*****************************************
+    ! MATRIX AND VECTOR
+    ! *****************************************
+
+    
+    
+    call dcl_type(parser,'matrix_element is num,bool,...',line)
+    call dcl_type(parser,'_matrix(t) is struct{use array:t}',line)
+    call dcl_type(parser,'matrix(t:matrix_element) is _matrix(array(t,shape2d))',line)
+    call dcl_type(parser,'vector(t:matrix_element) is _matrix(array(t,shape1d))',line)
+    call dcl_type(parser,'matrix_template(t:matrix_element) is _matrix(array_template(t,shape2d))',line)
+    call dcl_type(parser,'vector_template(t:matrix_element) is _matrix(array_template(t,shape1d))',line)
+    call dcl_uproc(parser,'PM__matrix(x)=new _matrix{array=x}',line)
+    call dcl_uproc(parser,'vector(x:matrix_element,n:shape1d or extent1d)='//&
+         'PM__matrix(array(x,n))',line)
+    call dcl_uproc(parser,'vvector(x:matrix_element,n:shape1d or extent1d)='//&
+         'PM__matrix(varray(x,n))',line)
+    call dcl_uproc(parser,'dvector(x:matrix_element,n:shape1d or extent1d)='//&
+         'PM__matrix(array(x,n,BLOCK_CYCLIC(32)))',line)
+    call dcl_uproc(parser,'dvvector(x:matrix_element,n:shape1d or extent1d)='//&
+         'PM__matrix(varray(x,n,BLOCK_CYCLIC(32)))',line)
+    call dcl_uproc(parser,'vector(x:matrix_element,n:shape1d or extent1d,'//&
+         'distr:distr_template,key...)='//&
+         'PM__matrix(array(x,n,distr,key...))',line)
+    call dcl_uproc(parser,'vvector(x:matrix_element,n:shape1d or extent1d,'//&
+         'distr:distr_template,key...)='//&
+         'PM__matrix(varray(x,n,key...))',line)
+    call dcl_uproc(parser,'matrix(x:matrix_element,n:shape2d or extent2d)='//&
+             'PM__matrix(array(x,n))',line)
+    call dcl_uproc(parser,'vmatrix(x:matrix_element,n:shape2d or extent2d)='//&
+         'PM__matrix(varray(x,n))',line)
+    call dcl_uproc(parser,'dmatrix(x:matrix_element,n:shape2d or extent2d)='//&
+         'PM__matrix(array(x,n,BLOCK_CYCLIC(32)))',line)
+    call dcl_uproc(parser,'dvmatrix(x:matrix_element,n:shape2d or extent2d)='//&
+         'PM__matrix(varray(x,n,BLOCK_CYCLIC(32)))',line)
+    call dcl_uproc(parser,'matrix(x:matrix_element,n:shape2d or extent2d,'//&
+         'distr:distr_template,key...)='//&
+         'PM__matrix(array(x,n,distr,key...))',line)
+    call dcl_uproc(parser,'vmatrix(x:matrix_element,n:shape2d or extent2d,'//&
+         'distr:distr_template,key...)='//&
+         'PM__matrix(varray(x,n,key...))',line)
+
+!!! Need + and * for vectors and matrices
+    
+
     ! *****************************************
     ! DISTRIBUTED SHAPE (DSHAPE)
     ! *****************************************
@@ -2520,6 +2553,13 @@ contains
     call dcl_type(parser,'_distrb(extent:extent,dist:distr) is ...,dshape(extent,dist)',line)
     call dcl_type(parser,'_distrb(extent:extent,dist:null) is ...,mshape(extent)',line)
     call dcl_type(parser,'shape(extent:extent,dist:distr or null) is _distrb(extent,dist)',line)
+    call dcl_type(parser,'shape1d(extent:extent1d,dist:distr or null) is shape(extent,dist)',line)
+    call dcl_type(parser,'shape2d(extent:extent2d,dist:distr or null) is shape(extent,dist)',line)
+    call dcl_type(parser,'shape3d(extent:extent3d,dist:distr or null) is shape(extent,dist)',line)
+    call dcl_type(parser,'shape4d(extent:extent4d,dist:distr or null) is shape(extent,dist)',line)
+    call dcl_type(parser,'shape5d(extent:extent5d,dist:distr or null) is shape(extent,dist)',line)
+    call dcl_type(parser,'shape6d(extent:extent6d,dist:distr or null) is shape(extent,dist)',line)
+    call dcl_type(parser,'shape7d(extent:extent7d,dist:distr or null) is shape(extent,dist)',line)
     call dcl_type(parser,'PM__distr_tag is unique',line)
     
     call dcl_type(parser,'dshape(extent:extent,dist:distr) '//&
@@ -3181,7 +3221,8 @@ contains
          '_scatter(x,region);PM__head_node{_recv(_v4(x),xx)};'//&
          '_sync_messages(xx,x)}',line)
     call dcl_uproc(parser,'PM__getref%(x:complete ^*(,^*(,,,,),,,_d_ref),at:invariant) <<complete,always>> {'//&
-         'channel var a=_v1%(x);_getref_d(&^(PM__local(^(&a@) <<shared>>)),region,subregion,^^(x),at  <<PM__node,PM__ignore>>);'//&
+         'channel var a=_v1%(x);_getref_d(&^(PM__local(^(&a@) <<shared>>)),region,subregion(schedule),'//&
+         '^^(x),at  <<PM__node,PM__ignore>>);'//&
          '_bcast_shared(a);return a}',line)
     call dcl_uproc(parser,'_getref_d(&a,region,subregion,x,at) {'//&
          '_get_dindex_from_dref(&a,x,t.2,'//&
@@ -3190,14 +3231,14 @@ contains
          '}',line)
     call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,,_d_ref),at:invariant) <<complete,always>> {'//&
          'channel var a=_arb(_v2%(x));'//&
-         '_getref_dc(&a@,region,subregion,^^(x),at <<PM__node,PM__ignore>>);_bcast_shared(a);return a}',line)
+         '_getref_dc(&a@,region,subregion(schedule),^^(x),at <<PM__node,PM__ignore>>);_bcast_shared(a);return a}',line)
     call dcl_uproc(parser,'_getref_dc(&a,region,subregion,x,at) {'//&
          'PM__head_node{_get_dindex(&^(PM__local(^(&a))),PM__local(_v2(x)),t.2,'//&
          '_local_region(region._tile,subregion),region,t.1,_drat(at,region._tile,t.1)) '//&
          ' where t=_v4(x)}}',line)
     call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,,_dp_ref),at:invariant) <<complete,always>> {'//&
          'channel var a=_v1%(x);'//&
-         '_getref_dp(&^(^^(^(&a))),region,subregion,^^(_cap%(x,here)),at,^^(^??),_v4(x) <<PM__node,PM__ignore>>);'//&
+         '_getref_dp(&^(^^(^(&a))),region,subregion(schedule),^^(_cap%(x,here)),at,^^(^??),_v4(x) <<PM__node,PM__ignore>>);'//&
          '_bcast_shared(a);return a}',line)
     call dcl_uproc(parser,'_getref_dp(&a,region,subregion,x,at,atq,t) {'//&
          'PM__head_node{_get_dindex_from_ref(&a,x,t.2,'//&
@@ -3281,7 +3322,7 @@ contains
     
     call dcl_uproc(parser,'PM__assign%(&x:private ^*(,,,,_d_ref or _dp_ref),y,at) {'//&
          '_set_ref_dp(&^(^^(_cap%(^(&x),here))),^(^^(y)),'//&
-         ' region,subregion,$_just_assign,^^(^??),at,_v4(x) <<PM__node,PM__ignore>>)}',line)
+         ' region,subregion(schedule),$_just_assign,^^(^??),at,_v4(x) <<PM__node,PM__ignore>>)}',line)
     call dcl_uproc(parser,'_just_assign(x,y)=y',line)
     call dcl_uproc(parser,'_set_ref_dp(&x,y,region,subregion,prc,atq,at,t) {'//&
          '_set_dindex_of_ref(&x,y,t.2,'//&
@@ -3317,7 +3358,7 @@ contains
          'PM__collect p,xx,yy,_cap%(x,here),_v4%(x),null,at { PM__assign(&^(_getlhs(^(&xx),null)),y,pr)}}',line)
     call dcl_uproc(parser,'PM__assign%(&x:private ^*(,,,,_d_ref or _dp_ref),y:private,pr,at) {'//&
          '_set_dindex_of_ref(&^(^^(_cap%(^(&x),here))),^^(y),t.2,'//&
-         '_local_region(region._tile,subregion),'//&
+         '_local_region(region._tile,subregion(schedule)),'//&
          'region,t.1,pr,^^(^??),at <<PM__node,always,PM__ignore>>)'//&
          'where t=_v4%(x)}',line)
     
@@ -3403,8 +3444,10 @@ contains
 
     call dcl_uproc(parser,'_correct(x:tuple(indexed_dim),y:extent)=map($-,x,low(y))',line)
 
-    call dcl_uproc(parser,'_dmap(x:any_int,n:null)=null',line)
-    call dcl_uproc(parser,'_dmap(x:any_int,n:range(int))=n',line)
+    call dcl_uproc(parser,'_dmap(x:any_int,n:int)=x',line)
+    call dcl_uproc(parser,'_dmap(x:any_int,n:grid_slice_dim)=single_point(x)',line)
+    call dcl_uproc(parser,'_dmap(x:any_int,n:tuple(int))=x',line)
+    call dcl_uproc(parser,'_dmap(x:any_int,n:tuple(grid_slice_dim))=single_point(x)',line)
     call dcl_uproc(parser,'_dmap(x:indexed_dim,n:int)=(n*x._m+x._c)/x._d',line)
     call dcl_uproc(parser,'_dmap(x:indexed_dim,n:tuple)=_dmap(x,get_dim(n,x._n))',line)
     call dcl_uproc(parser,'_dmap(x:indexed_dim,n:grid_slice_dim)=min(lo,hi)..max(lo,hi)'//&
@@ -3715,7 +3758,8 @@ contains
 
     call dcl_type(parser,'envelope is rec{cross:extent or null,corner:extent or null,envelope:extent}',line)
     call dcl_uproc(parser,'ortho(x:extent)=new envelope {cross=x,corner=null,envelope=x}',line)
-    call dcl_uproc(parser,'ortho(x:extent,y:extent)=new envelope {cross=x,corner=y,envelope=envelope(x,y)}',line)
+    call dcl_uproc(parser,'ortho(x:extent,y:extent)='//&
+         'new envelope {cross=x,corner=y,envelope=envelope(x,y)}',line)
     call dcl_uproc(parser,'envelope(x:envelope)=x.envelope',line)
     call dcl_uproc(parser,'envelope(x:extent)=x',line)
     call dcl_uproc(parser,'envelope(x:any_int,y:any_int)='//&
@@ -3968,50 +4012,27 @@ contains
          '_get_anti_halo(d.1,t.1,i)',line)
     call dcl_uproc(parser,'_get_anti_halo(d,t,i:null)=t',line)
 
-    if(pm_is_compiling) then
-       call dcl_uproc(parser,'_interior(d:range,t:range,n:range)=max(0,-low(n))..size(t)-1-max(0,high(n))',line)
-       call dcl_uproc(parser,'_interior(d:range,t:strided_range,n:range)=1..0 by 1',line)
-       call dcl_uproc(parser,'_interior(d:range,tt:block_seq,n:range)='//&
-         'block_seq(max(-low(n),0),size(t)-1,width(t),width(t)-max(-low(n),0)-max(high(n),0),0)'//&
-         'where t=middle_blocks(tt)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:range,n:range,l:''true)='//&
-            '0..min(-min(0,low(n))-1,size(t)-1)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:range,n:range,l:''false)='//&
-            'max(size(t)-max(high(n),0),-min(low(n),-1))..high(t)-low(t)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,tt:block_seq,n:range,l:''true)='//&
-            'if(low(n)<0=>block_seq(0,size(t)-1,width(t),min(-low(n),width(t)),0),empty(t))'//&
-            ' where t=middle_blocks(tt)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,tt:block_seq,n:range,l:''false)='//&
-            'if(high(n)>0=>block_seq(max(0,width(t)-high(n)),size(t)-1,width(t),min(width(t),high(n)),0),empty(t))'//&
-            ' where t=middle_blocks(tt)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:grid_dim,n:range,l:_left or _right)=empty(t)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:block_seq,n:range,l:_left)='//&
-         'block_seq(low(b)-low(t),high(b)-low(t),1,1,0) where b=first_block(t)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:block_seq,n:range,l:_right)='//&
-            'block_seq(low(b)+shft,high(b)+shft,1,1,0) where b=last_block(t),shft=size(t)-1-high(t)',line)
-    else
-       call dcl_uproc(parser,'_interior(d:range,t:range,n:range)=low(t)+max(0,-low(n))..high(t)-max(0,high(n))',line)
-       call dcl_uproc(parser,'_interior(d:range,t:strided_range,n:range)=1..0 by 1',line)
-       call dcl_uproc(parser,'_interior(d:range,tt:block_seq,n:range)='//&
+ 
+    call dcl_uproc(parser,'_interior(d:range,t:range,n:range)=low(t)+max(0,-low(n))..high(t)-max(0,high(n))',line)
+    call dcl_uproc(parser,'_interior(d:range,t:strided_range,n:range)=1..0 by 1',line)
+    call dcl_uproc(parser,'_interior(d:range,tt:block_seq,n:range)='//&
          'block_seq(low(t)+max(-low(n),0),high(t),width(t),width(t)-max(-low(n),0)-max(high(n),0),0)'//&
          'where t=middle_blocks(tt)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:range,n:range,l:''true)='//&
-            'low(t)..low(t)+min(-min(0,low(n))-1,size(t)-1)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:range,n:range,l:''false)='//&
-            'low(t)+max(size(t)-max(high(n),0),-min(low(n),-1))..high(t)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,tt:block_seq,n:range,l:''true)='//&
-            'if(low(n)<0=>block_seq(low(t),high(t),step(t),min(-low(n),width(t)),0),empty(t))'//&
-            ' where t=middle_blocks(tt)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,tt:block_seq,n:range,l:''false)='//&
-            'if(high(n)>0=>block_seq(low(t)+max(0,width(t)-high(n)),high(t),step(t),min(width(t),high(n)),0),empty(t))'//&
-            ' where t=middle_blocks(tt)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:grid_dim,n:range,l:_left or _right)=empty(t)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:block_seq,n:range,l:_left)='//&
-            'block_seq(low(b),high(b),1,1,0) where b=first_block(t)',line)
-       call dcl_uproc(parser,'_get_chunk(d:range,t:block_seq,n:range,l:_right)='//&
-            'block_seq(low(b),high(b),1,1,0) where b=last_block(t)',line)
-    endif
-    
+    call dcl_uproc(parser,'_get_chunk(d:range,t:range,n:range,l:''true)='//&
+         'low(t)..low(t)+min(-min(0,low(n))-1,size(t)-1)',line)
+    call dcl_uproc(parser,'_get_chunk(d:range,t:range,n:range,l:''false)='//&
+         'low(t)+max(size(t)-max(high(n),0),-min(low(n),-1))..high(t)',line)
+    call dcl_uproc(parser,'_get_chunk(d:range,tt:block_seq,n:range,l:''true)='//&
+         'if(low(n)<0=>block_seq(low(t),high(t),step(t),min(-low(n),width(t)),0),empty(t))'//&
+         ' where t=middle_blocks(tt)',line)
+    call dcl_uproc(parser,'_get_chunk(d:range,tt:block_seq,n:range,l:''false)='//&
+         'if(high(n)>0=>block_seq(low(t)+max(0,width(t)-high(n)),high(t),step(t),min(width(t),high(n)),0),empty(t))'//&
+         ' where t=middle_blocks(tt)',line)
+    call dcl_uproc(parser,'_get_chunk(d:range,t:grid_dim,n:range,l:_left or _right)=empty(t)',line)
+    call dcl_uproc(parser,'_get_chunk(d:range,t:block_seq,n:range,l:_left)='//&
+         'block_seq(low(b),high(b),1,1,0) where b=first_block(t)',line)
+    call dcl_uproc(parser,'_get_chunk(d:range,t:block_seq,n:range,l:_right)='//&
+         'block_seq(low(b),high(b),1,1,0) where b=last_block(t)',line)
     
     call dcl_uproc(parser,'_chunk(d,t,n,r,e,l)='//&
          'if(r<e=>_interior(d,t,n),r>e=>t,_get_chunk(d,t,n,l))',line)
@@ -4550,16 +4571,16 @@ contains
     call dcl_uproc(parser,'PM__get_tilesz(d)=d._tile,d._size',line)
     call dcl_uproc(parser,'PM__get_tilesz(d:mshape)=d,size(d)',line)
     
-    ! Support for ! operator
+    ! Support for @ operator
     if(pm_is_compiling) then
        call dcl_uproc(parser,&
             'PM__makearray%(x:channel)<<complete,always>>=_makearray(x,region,size(region))',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:private)=_makearray(x,region,size(region))'//&
-            ':test "Cannot only apply ""!"" to a ""channel"" " => ''false',line)
+            ':test "Can only apply ""@"" to a ""channel"" " => ''false',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:invariant)=_makearray(x,region,size(region))'//&
-            ':test "Cannot apply ""!"" to a ""shared"" or ""uniform"" value" => ''false',line)
+            ':test "Cannot apply ""@"" to a ""shared"" or ""uniform"" value" => ''false',line)
        call dcl_proc(parser,&
             '_makearray(x:any,y:any,z:any)->PM__invar_dim x,y',&
             op_make_array,0,line,proc_needs_type)
@@ -4568,20 +4589,18 @@ contains
             'PM__makearray%(x:channel)<<complete,always>>=_makearray(x,region)',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:private)=_makearray(x,region)'//&
-            ':test "Cannot only apply ""!"" to a ""channel"" " => ''false',line)
+            ':test "Can only apply ""@"" to a ""channel"" " => ''false',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:invariant)=_makearray(x,region)'//&
-            ':test "Cannot apply ""!"" to a ""shared"" or ""uniform"" value" => ''false',line)
+            ':test "Cannot apply ""@"" to a ""shared"" or ""uniform"" value" => ''false',line)
        call dcl_proc(parser,&
             '_makearray(x:any,y:any)->PM__dim x,y',&
             op_make_array,0,line,proc_needs_type)
     endif
     
     ! active%() intrinsic
-    call dcl_uproc(parser,'active%(x)=^?(x)',line)
-    call dcl_uproc(parser,'active%()=^??',line)
-    call dcl_uproc(parser,&
-         'PM__active(x)=masked(x,PM__active())',line)
+    call dcl_uproc(parser,'active%(x)=masked(^(x,coherent),^(^??,coherent) <<complete,always,PM__ignore>>)',line)
+    call dcl_uproc(parser,'active%()=^(^??,coherent)',line)
     call dcl_proc(parser,'PM__active()->bool',op_active,0,line,0)
     
     ! Imports and exports
@@ -4604,69 +4623,47 @@ contains
     call dcl_uproc(parser,'PM__checkimp(x) {}',line)
     call dcl_uproc(parser,'PM__checkimp(x:contains(PM__distr_tag)) {'//&
          'test "Cannot import a distributed value into a nested parallel scope" => ''false}',&
-         line) 
+         line)
+
+    call dcl_type(parser,'schedule(subregion,blocking) is rec{_subregion:subregion,_subtile,_blocking:blocking}',line)
+    call dcl_uproc(parser,'subregion(schedule:schedule)=schedule._subregion',line)
+    call dcl_uproc(parser,'subregion(schedule:null)=null',line)
+    call dcl_uproc(parser,'subtile(schedule:schedule)=schedule._subtile',line)
  
     ! Over statements
-    call dcl_uproc(parser,'PM__make_over%(subregion:null,x:invariant grid)=x',line)
-    call dcl_uproc(parser,'PM__make_over%(subregion:grid,x:invariant grid)=intersect(x,subregion)',line)
+    call dcl_uproc(parser,'PM__make_over%(schedule:null,x:invariant tuple(subs_dim except stretch_dim))<<shared>>='//&
+         'new schedule{_subregion=s,_subtile=overlap(region._tile,s),_blocking=null}'//&
+         'check "Value"++s++" in ""over"" out of bounds: "++region._extent=>region._extent inc s '//&
+         'where s=fill_in(region._extent,x)',line)
+    call dcl_uproc(parser,'PM__make_over%(x:invariant tuple(subs_dim except stretch_dim))<<shared>>='//&
+         'new schedule{_subregion=s,_subtile=overlap(region._tile,s),_blocking=null}'//&
+         'where s=intersect(map($norm,fill_in(region._extent,x)),schedule._subregion)',line)
     call dcl_uproc(parser,'PM__make_over%(x:invariant)=x'//&
-         ' check "Expression in an ""over"" statement must be a grid"=>''false',line)
+         ' check "Expression in an ""over"" statement must be a subscript tuple"=>''false',line)
     call dcl_uproc(parser,'PM__make_over%(x)=x'//&
          ' check "Expression in an ""over"" statement must be invariant"=>''false',line)
     
     if(.not.pm_is_compiling) then
-       call dcl_uproc(parser,'PM__do_over%(x)=true',line)
-       call dcl_uproc(parser,'PM__do_over%(x:invariant tuple(seq or block_seq))=here in x',line)
-       call dcl_uproc(parser,'PM__do_over%(x:invariant grid)=PM__do_over%(overlap(region._tile,x),here)',line)
-       call dcl_uproc(parser,'PM__do_over%(x:invariant grid,h:complete) <<complete,always>>'//&
+       call dcl_uproc(parser,'PM__do_over%(x:null)=true',line)
+       call dcl_uproc(parser,'PM__do_over%(x:invariant schedule(tuple(seq or block_seq)))=here in x._subregion',line)
+       call dcl_uproc(parser,'PM__do_over%(x:invariant schedule(grid))=PM__do_over%(schedule._subtile)',line)
+       call dcl_uproc(parser,'PM__do_over%(x:invariant grid) <<complete,always>>'//&
             '{channel var t=false;'//&
             ' _in(x,&^(PM__local(^(&t@))) <<shared,always,PM__ignore>>);'//&
             ' return t}',line)
        call dcl_uproc(parser,'PM__do_over%(x:invariant tuple(seq or block_seq),h:complete)=h in x',line)
-       call dcl_uproc(parser,'_in(x,&t){cfor i in x {t[i]:=true}}',line)
+       call dcl_uproc(parser,'_in(x,&t){cfor i in x {sync t[i]:=true}}',line)
     else
-       call dcl_uproc(parser,'PM__do_over%(x){}',line)
-       call dcl_uproc(parser,'PM__do_over%(x:invariant grid){'//&
-            ' PM__do_over(overlap(region._tile,x),region._tilesz) check _over_ok(x,subregion)}',line)
-       call dcl_uproc(parser,'_over_ok(x,y)=''true',line)
-       call dcl_proc(parser,'_nested_loop(arg...:int)',op_nested_loop,0,line,0)
-!!! This needs expanding to cater for block_seq and map_seq
-       call dcl_uproc(parser,'PM__do_over(x:null,t) {}',line)
-       call dcl_uproc(parser,&
-            'PM__do_over(x:tuple1d,t) {_nested_loop(low(x.1),high(x.1),step(x.1),size(t.1))}',line)
-       call dcl_uproc(parser,&
-            'PM__do_over(x:tuple2d,t) {_nested_loop(low(x.1),high(x.1),step(x.1),size(t.1),'//&
-            'low(x.2),high(x.2),step(x.2),size(t.2))}',line)
-       call dcl_uproc(parser,&
-            'PM__do_over(x:tuple3d,t) {_nested_loop(low(x.1),high(x.1),step(x.1),size(t.1),'//&
-            'low(x.2),high(x.2),step(x.2),size(t.2),'//&
-            'low(x.3),high(x.3),step(x.3),size(t.3))}',line)
-       call dcl_uproc(parser,&
-            'PM__do_over(x:tuple4d,t) {_nested_loop(low(x.1),high(x.1),step(x.1),size(t.1),'//&
-            'low(x.2),high(x.2),step(x.2),size(t.2),'//&
-            'low(x.3),high(x.3),step(x.3),size(t.3),'//&
-            'low(x.4),high(x.4),step(x.4),size(t.4))}',line)
-       call dcl_uproc(parser,&
-            'PM__do_over(x:tuple5d,t) {_nested_loop(low(x.1),high(x.1),step(x.1),size(t.1),'//&
-            'low(x.2),high(x.2),step(x.2),size(t.2),'//&
-            'low(x.3),high(x.3),step(x.3),size(t.3),'//&
-            'low(x.4),high(x.4),step(x.4),size(t.4),'//&
-            'low(x.5),high(x.5),step(x.5),size(t.5))}',line)
-       call dcl_uproc(parser,&
-            'PM__do_over(x:tuple6d,t) {_nested_loop(low(x.1),high(x.1),step(x.1),size(t.1),'//&
-            'low(x.2),high(x.2),step(x.2),size(t.2),'//&
-            'low(x.3),high(x.3),step(x.3),size(t.3),'//&
-            'low(x.4),high(x.4),step(x.4),size(t.4),'//&
-            'low(x.5),high(x.5),step(x.5),size(t.5),'//&
-            'low(x.6),high(x.6),step(x.6),size(t.6))}',line)
-       call dcl_uproc(parser,&
-            'PM__do_over(x:tuple7d,t) {_nested_loop(low(x.1),high(x.1),step(x.1),size(t.1),'//&
-            'low(x.2),high(x.2),step(x.2),size(t.2),'//&
-            'low(x.3),high(x.3),step(x.3),size(t.3),'//&
-            'low(x.4),high(x.4),step(x.4),size(t.4),'//&
-            'low(x.5),high(x.5),step(x.5),size(t.5),'//&
-            'low(x.6),high(x.6),step(x.6),size(t.6),'//&
-            'low(x.7),high(x.7),step(x.7),size(t.7))}',line)
+       call dcl_uproc(parser,'PM__do_over(x:null,region)=x',line)
+       call dcl_uproc(parser,'PM__do_over(x:schedule,region)='//&
+            '_st(map_apply($_do_elem,$_st,x._subtile),dims(extent(region)))',line)
+       call dcl_uproc(parser,'_do_elem(x:range(int))=_st(low(x),high(x))',line)
+       call dcl_uproc(parser,'_do_elem(x:strided_range(int))=_st(low(x),high(x),step(x))',line)
+       call dcl_uproc(parser,'_do_elem(x:block_seq)=_st(low(x),high(x),step(x),width(x),align(x))',line)
+       call dcl_uproc(parser,'_do_elem(x:map_seq)=_st(x.array)',line)
+       call dcl_uproc(parser,'_do_elem(x:single_point)=_st(x._t)',line)
+       call dcl_uproc(parser,'PM__nested_loop(x:null){}',line)
+       call dcl_proc(parser,'PM__nested_loop(any)',op_nested_loop,0,line,0)
     endif
     
     call dcl_proc(parser,'_blocked_loop(arg...:int)',op_blocked_loop,0,line,0)
@@ -4957,23 +4954,23 @@ contains
          '_st(t1,t2,t3,t4,t5,t6,t7)=new _stuple7d{t1=t1,t2=t2,t3=t3,t4=t4,t5=t5,t6=t6,t7=t7}',line)    
 
     ! Create normalised form of a grid used for _xxx_slice operations
-    call dcl_uproc(parser,'_norm(n,x:seq)=[n,low(x),high(x),step(x),width(x),align(x)]',line)
-    call dcl_uproc(parser,'_norm(n,x:map_seq)=x.array',line)
+    call dcl_uproc(parser,'_norm(n,x:seq)=_st(n,low(x),high(x),step(x),width(x),align(x))',line)
+    call dcl_uproc(parser,'_norm(n,x:map_seq)=_st(x.array)',line)
     call dcl_uproc(parser,'_norm(n,x:grid)=_st(map_apply($_norm,$_st,n,x),size(x))',line)
 
     ! Apply idxdim index and convert to normal for for _send_slice_mapped
     call dcl_uproc(parser,'_dnorm(x:indexed_dim(''1),m,n:single_point)='//&
-         '[m,t,t,1,1,0] where t=_dmap(x,n._t)',line)
+         '_st(m,t,t,1,1,0) where t=_dmap(x,n._t)',line)
     call dcl_uproc(parser,'_dnorm(x:indexed_dim(''1),m,n:range)='//&
-         '[m,_dmap(x,n._lo),_dmap(x,n._hi),1,1,0]',line)
+         '_st(m,_dmap(x,n._lo),_dmap(x,n._hi),1,1,0)',line)
     call dcl_uproc(parser,'_dnorm(x:indexed_dim(''1),m,n:strided_range)='//&
-         '[m,_dmap(x,n._lo),_dmap(x,n._hi),x._st*n._m,1,0]',line)
+         '_st(m,_dmap(x,n._lo),_dmap(x,n._hi),x._st*n._m,1,0)',line)
     call dcl_uproc(parser,'_dnorm(x:indexed_dim(''1,''1),m,n:block_seq)='//&
-         '[m,n._lo+x._c,n._hi+x._c,n._st,n._b,n._align]',line)
+         '_st(m,n._lo+x._c,n._hi+x._c,n._st,n._b,n._align)',line)
     call dcl_uproc(parser,'_dnorm(x:indexed_dim(''1),m,n:block_seq)='//&
          '_dnorm(x,m,map_seq(n))',line)
     call dcl_uproc(parser,'_dnorm(x:indexed_dim(''1),m,n:map_seq){'//&
-         'var a=array(0,#n._array);cfor i in a,j in n._array:i:=_dmap(x,j);return a}',line)
+         'var a=array(0,#n._array);cfor i in a,j in n._array:i:=_dmap(x,j);return _st(a)}',line)
     call dcl_uproc(parser,'_dnorm(x:indexed_dim(''1),m,n:grid)='//&
          '_st(map_apply($_dnorm,$_st,x,m,n),size(n))',line)
 
@@ -5208,7 +5205,7 @@ contains
          ' var m=(n+1)/2;'//&
          ' cfor k in m..n-1 {'//&
          '   PM__setaelem(&y,k-m,p.(_get_aelem(y,k-m),_get_aelem(y,k)) <<PM__ignore>>)};'//&
-         ' n:=m}; return _get_aelem(y,0)}',line)
+         ' n:=m};return _get_aelem(y,0)}',line)
     
     call dcl_uproc(parser,'reduce(p:proc,y:array)='//&
          '_reduce(p,reduce(p,PM__local(y)))',line)
@@ -5216,9 +5213,9 @@ contains
     call dcl_uproc(parser,'_reduce_for_assign%(p:invariant associative_proc,y,init:invariant){'//&
          'channel yy=y;return reduce%(p,yy,init)}',line)
     call dcl_uproc(parser,'_reduce_for_assign%(p:invariant $-,y,init:invariant){'//&
-         'channel yy=y;return init - _reduce%(p,yy,init)}',line)
+         'channel yy=y;return init - _reduce%($+,yy,init)}',line)
     call dcl_uproc(parser,'_reduce_for_assign%(p:invariant $/,y,init:invariant){'//&
-         'channel yy=y;return init / _reduce%(p,yy,init)}',line)
+         'channel yy=y;return init / _reduce%($*,yy,init)}',line)
     
     call dcl_uproc(parser,'reduce%(p:invariant proc,y:channel,init)='//&
          '^(p.(init,_reduce(p,reduce(p,PM__local(y@) <<PM__node,PM__ignore>>)<<PM__node,PM__ignore>>)),uniform)',line)

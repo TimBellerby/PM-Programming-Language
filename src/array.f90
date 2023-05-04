@@ -4573,9 +4573,9 @@ contains
     integer(pm_ln),intent(in):: n
     character(len=*),intent(out):: str
     if(v%data%l(v%offset+n)) then
-       str='true  '
+       str='TRUE  '
     else
-       str='false '
+       str='FALSE '
     endif
   end subroutine fmt_l
 

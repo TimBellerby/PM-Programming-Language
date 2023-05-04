@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2022
+! Copyright (c) Tim Bellerby, 2023
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -83,12 +83,12 @@ module pm_backend
   integer,parameter:: var_is_comm_op_par=8
   integer,parameter:: var_is_used=16
   integer,parameter:: var_is_reused=32
+  integer,parameter:: var_is_stacked_ve=64
 
   ! Loop modes
   integer,parameter:: loop_is_none=0
   integer,parameter:: loop_is_contig=1
   integer,parameter:: loop_is_nested=2
-  integer,parameter:: loop_is_blocked=3
 
   ! Loop parameters
   integer,parameter:: loop_start=1
@@ -106,8 +106,7 @@ module pm_backend
      integer:: free(2,pm_int:pm_string)
      integer:: nloops
      integer:: loop_mode
-     integer,dimension(loop_start:loop_block,7):: loop_pars
-     integer:: loop_dims
+     integer:: loop_par
      logical:: loop_active
   end type gloop
   
@@ -166,7 +165,6 @@ module pm_backend
   integer,parameter:: arg_comm_arg=4
   integer,parameter:: arg_wrapped=8
  
-
   ! Type of pack routine (for g_add_packable)
   integer,parameter:: pack_scalar=0
   integer,parameter:: pack_vect=1
@@ -511,7 +509,7 @@ contains
          op_broadcast_shared,op_nested_loop,&
          op_blocked_loop,op_isend_offset,op_irecv_offset,&
          op_recv_offset,op_recv_offset_resend,op_isend_reply,&
-         op_recv_reply,op_isend_req,op_isend_assn)
+         op_recv_reply,op_isend_req,op_isend_assn,op_active)
        call cross_all_vars(g)
        do i=0,n-1
           call use_var(g,g%codes(a+i))
@@ -642,7 +640,9 @@ contains
     g%lthis=save_lthis
   end subroutine gen_var_comm_block
 
-  
+  !=============================================================
+  ! Variable assignment phase for inline shared proc body
+  !=============================================================
   subroutine gen_var_shared_block(g,blk)
     type(gen_state):: g
     integer,intent(in):: blk
@@ -739,8 +739,8 @@ contains
        if(g%vardata(e)%finish==i.and.&
             g%vardata(v)%start==i.and.&
             g%vardata(e)%finish_on_assign.and.&
-            iand(g%vardata(v)%flags,v_is_param+v_is_chan+v_is_result)==0.and.&
-            iand(g%vardata(e)%flags,v_is_param+v_is_chan+v_is_result)==0.and.&
+            iand(g%vardata(v)%flags,v_is_param+v_is_chan+v_is_result+v_is_shared)==0.and.&
+            iand(g%vardata(e)%flags,v_is_param+v_is_chan+v_is_result+v_is_shared)==0.and.&
             g%vardata(v)%tno==g%vardata(e)%tno.and..false.) then
           call merge_vars(g,v,e)
           v=g%vardata(v)%link
@@ -807,7 +807,7 @@ contains
     integer,intent(in):: v
     integer:: tno,isvect
     if(g%vardata(v)%index/=0) then
-       if(iand(g%vardata(v)%flags,v_is_chan+v_is_param+v_is_result)==0) then
+       if(iand(g%vardata(v)%flags,v_is_chan+v_is_param+v_is_result+v_is_shared)==0) then
           tno=g%vardata(v)%tno
           isvect=merge(2,1,g_var_at_index_is_a_vect(g,v))
           if(debug_g) write(*,*) 'Deallocate',v,tno,isvect
@@ -1099,7 +1099,7 @@ contains
        call out_new_line(g)
     endif
 
-    if(pm_opts%ftn_comment_ops) then
+    if(pm_opts%ftn_comment_lines) then
        call out_char_idx(g,'!',g%codes(l+comp_op_line)/modl_mult)
        call out_line(g,trim(pm_name_as_string(g%context,iand(g%codes(l+comp_op_line),modl_mult-1))))
     endif
@@ -1161,7 +1161,7 @@ contains
           call out_idx(g,i-1)
           call out_char_idx(g,'_',g%lthis)
           call out_str(g,'=0,-1+')
-          call out_arg(g,g%codes(a+i+n/2),0)
+          call out_arg(g,g%codes(a+i+n/2),arg_no_index)
           call out_new_line(g)
        enddo
        do i=n/2,1,-1
@@ -1190,48 +1190,18 @@ contains
        g%lstack(g%lthis)%loop_mode=loop_is_contig
        g%lstack(g%lthis)%loop_active=.true.
     case(op_skip_empty)
-       if(g%codes(a)>0) then
-          call gen_loop(g,l,.true.)
-          call gen_stacked_ve(g,g%codes(a))
-          call out_str(g,'IF(.NOT.ANY(')
-          call out_arg(g,g%codes(a),arg_no_index)
-          call out_line(g,') THEN')
-          call gen_block(g,g%codes(a+1))
-          call out_line(g,'ENDIF')
-       else
-          call gen_loop(g,l,.true.)
-          call gen_block(g,g%codes(a+1))
-       endif
+       call gen_active_check_start(g,l)
+       call gen_block(g,g%codes(a+1))
+       call gen_active_check_end(g,l)
     case(op_head_node)
        call gen_loop(g,l,.true.)
        call out_line(g,'IF(PM__NODE_FRAME(PM__NODE_DEPTH)%SHARED_NODE==0) THEN')
        call gen_block(g,g%codes(a+1))
        call out_line(g,'ENDIF')
     case(op_nested_loop)
-       if(mod(n-1,4)/=0) call pm_panic('op_nested_loop nargs')
        call gen_loop(g,l,.true.)
-       k=1
-       do i=1,(n-1)/4
-          do j=1,4
-             g%lstack(g%lthis)%loop_pars(j,i)=g%codes(a+k)
-             k=k+1
-          enddo
-       enddo
-       g%lstack(g%lthis)%loop_dims=(n-1)/4
+       g%lstack(g%lthis)%loop_par=g%codes(a+1)
        g%lstack(g%lthis)%loop_mode=loop_is_nested
-    case(op_blocked_loop)
-       if(mod(n-1,5)/=0) call pm_panic('op_blocked_loop nargs')
-       call gen_loop(g,l,.true.)
-       k=1
-       do i=1,(n-1)/5
-          do j=1,5
-             g%lstack(g%lthis)%loop_pars(j,i)=g%codes(a+k)
-             k=k+1
-          enddo
-       enddo
-       g%lstack(g%lthis)%loop_dims=(n-1)/5
-       g%lstack(g%lthis)%loop_mode=loop_is_blocked
-       call gen_loop(g,l,.false.)
     case(op_over)
        call gen_loop(g,l,.true.)
        call gen_over_block(g,l,g%codes(a+1))
@@ -1249,10 +1219,10 @@ contains
        call out_close(g)
        call out_new_line(g)
     case(op_comm_call)
-       call gen_loop(g,l,.true.)
        if(g%codes(a)>0) then
-          call gen_stacked_ve(g,g%codes(a))
+          call gen_stacked_ve(g,l,g%codes(a))
        endif
+       call gen_loop(g,l,.true.)
        call out_comment_line(g,trim(pm_name_as_string(g%context,g_procname(g,opcode2))))
        call out_str(g,'CALL PM__P')
        call out_idx(g,opcode2)
@@ -1367,25 +1337,21 @@ contains
        call gen_mpi_recv_disp_or_grid(g,g%codes(a+3),'PM__DATA_TAG','RECV',g%codes(a+1),mode_array,.false.)
 
     case(op_isend_offset)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        call out_simple(g,'JNODE=$2',l)
        call gen_mpi_send_disp_or_grid(g,g%codes(a+3),'PM__DATA_TAG','ISEND',g%codes(a+1),mode_array)
        call gen_active_check_end(g,l)
     case(op_irecv_offset)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        call out_simple(g,'JNODE=$2',l)
        call gen_mpi_recv_disp_or_grid(g,g%codes(a+3),'PM__DATA_TAG','IRECV',g%codes(a+1),mode_array,.false.)
        call gen_active_check_end(g,l)
     case(op_recv_offset,op_recv_offset_resend)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        call out_simple(g,'JNODE=$2',l)
        call gen_mpi_recv_disp_or_grid(g,g%codes(a+3),'PM__DATA_TAG','RECV',g%codes(a+1),mode_array,.false.)
        call gen_active_check_end(g,l)
     case(op_isend_reply)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        call out_simple(g,'JNODE=$1',l)
        call gen_mpi_send(g,g%codes(a+2),'PM__DATA_TAG','RSEND',mode_vect)
@@ -1396,18 +1362,15 @@ contains
        call gen_sync_mess(g,l,a,n)
        
     case(op_broadcast)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        call out_simple(g,'JNODE=$2',l)
        call gen_mpi_bcast(g,g%codes(a+1))
        call gen_active_check_end(g,l)
     case(op_broadcast_shared)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        call gen_mpi_bcast(g,g%codes(a+1),isshared=.true.)
        call gen_active_check_end(g,l)
     case(op_broadcast_val)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        call out_simple(g,'JNODE=$3',l)
        call out_simple(g,&
@@ -1429,7 +1392,6 @@ contains
        endif
        
     case(op_isend_req,op_isend_assn)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        !call out_line(g,'write(*,*) "ISEND_ASSN"')
        call out_simple(g,'JNODE=$2',l)
@@ -1451,6 +1413,7 @@ contains
           else
              call out_simple(g,'NREQ=SIZE($#1)',l)
           endif
+          call out_line(g,'JCOMM=PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM')
           call out_line(g,'CALL MPI_ISEND(NREQ,1,MPI_AINT,JNODE,PM__REQ_TAG,JCOMM,JMESS,JERRNO)')
           call gen_mpi_send_disp_or_grid(g,g%codes(a+3),'PM__EXTRA_REQ_TAG','ISEND',g%codes(a+1),mode_vect)
           if(opcode==op_isend_req) then
@@ -1462,7 +1425,6 @@ contains
        call gen_active_check_end(g,l)
        
     case(op_recv_reply)
-       call gen_loop(g,l,.true.)
        call gen_active_check_start(g,l)
        call out_simple(g,'JNODE=$2',l)
        if(n>4) then
@@ -1478,7 +1440,9 @@ contains
        call gen_active_check_start(g,l)
        call gen_mpi_recv_call(g,l,g%codes(a+1),opcode==op_recv_assn_call)
        call gen_active_check_end(g,l)
-       
+    case(op_active)
+       call gen_stacked_ve(g,l,g%codes(a),g%codes(a+1))
+       call gen_loop(g,l,.true.)
     case(op_wshare)
        call out_simple_scalar(g,'$1=PM__WSHARE($2,$3,$4,$5)',l)
     case(op_sys_node)
@@ -1553,8 +1517,8 @@ contains
        call out_line(g,'END SELECT')
 
     case(op_intersect_seq)
-       call out_simple_scalar(g,'CALL PM__INTERSECT_SEQ($5,$6,$7,$8,$9,$X,$1,$2,$3,$4)',&
-            l,x=10)
+       call out_simple_scalar(g,&
+            'CALL PM__INTERSECT_SEQ($5,$6,$7,$8,$9,$(10),$(11),$(12),$1,$2,$3,$4)',l)
     case(op_intersect_aseq)
        if(opcode2==0) then
           call out_simple_scalar(g,'CALL PM__INTERSECT_ASEQ($2,$3,$4,$5,$6,$1)',l)
@@ -1613,7 +1577,7 @@ contains
     case(op_get_rf)
        call out_simple_scalar(g,'$1=$2',l)
     case(op_open_file)
-       call out_simple_scalar(g,'$1=PM__FILE_OPEN($3%P,$4,$5,$6,$7,$8,$9,$X,$2)',l,x=10)
+       call out_simple_scalar(g,'$1=PM__FILE_OPEN($3%P,$4,$5,$6,$7,$8,$9,$(10),$2)',l)
     case(op_close_file)
        call out_simple_scalar(g,'CALL MPI_FILE_CLOSE($2,$1)',l)
     case(op_seek_file)
@@ -1654,7 +1618,7 @@ contains
        call out_simple(g,'CALL PM__GET_MPI_TYPE(JBASE,N$N,JTYPE,JN,LNEW)',l,n=g%lthis)
        if(opcode==op_read_file_tile) then
           call out_simple(g,'CALL MPI_FILE_READ_ALL($2,$#3,JN,JTYPE,MPI_STATUS_IGNORE,$1)',l)
-       else
+       else 
           call out_simple(g,'CALL MPI_FILE_WRITE_ALL($2,$#3,JN,JTYPE,MPI_STATUS_IGNORE,$1)',l)
        endif
        call out_line(g,'IF(LNEW) CALL MPI_TYPE_FREE(JTYPE,JERRNO)')
@@ -1862,6 +1826,7 @@ contains
     type(gloop):: save_loop
     save_loop=g%lstack(g%lthis)
     g%lstack(g%lthis)%nloops=0
+    g%lstack(g%lthis)%loop_mode=loop_is_none
     call gen_block(g,blk)
     call gen_loop(g,l,.true.)
     g%lstack(g%lthis)=save_loop
@@ -1998,7 +1963,7 @@ contains
     if(shared) ve=0
     
     ! Start up loops
-    if((.not.shared).and.(.not.g%lstack(g%lthis)%loop_active)) then
+    if((.not.shared).and.(.not.g_loop_active(g))) then
        call gen_loop_nest(g)
        g%lstack(g%lthis)%loop_active=.true.
        g%last_ve=0
@@ -2010,12 +1975,22 @@ contains
        g%last_ve=ve
     endif
     
-    ! Start up loops
-    if(shared.and.g%lstack(g%lthis)%loop_active) then
+    ! Close down loops
+    if(shared.and.g_loop_active(g)) then
        call gen_close_loops(g)
     endif
     
   end subroutine gen_loop
+
+  !=========================================
+  ! Are the loops for the current parallel
+  ! context running
+  !=========================================
+  function g_loop_active(g) result(ok)
+    type(gen_state):: g
+    logical:: ok
+    ok=g%lstack(g%lthis)%loop_active
+  end function g_loop_active
 
   !============================================================
   ! Generate loops spanning the current domain
@@ -2026,8 +2001,7 @@ contains
     logical:: blocked
     integer:: i,n
 
-    if(g%lstack(g%lthis)%loop_active) return
-    g%lstack(g%lthis)%loop_active=.true.
+    if(g_loop_active(g)) return
     
     select case(g%lstack(g%lthis)%loop_mode)
     case(loop_is_none)
@@ -2039,76 +2013,250 @@ contains
        call out_idx(g,g%lthis)
        call out_new_line(g)
        nloops=1
-    case(loop_is_nested,loop_is_blocked)
-       blocked=g%lstack(g%lthis)%loop_mode==loop_is_blocked
-       n=g%lstack(g%lthis)%loop_dims
-       nloops=n
-       if(blocked) nloops=nloops*2
-       !!! Need to cope with block_seq and array_seq's here
-       do i=n,1,-1
-          call out_str(g,'DO I')
-          call out_idx(g,i-1)
-          if(blocked) call out_char(g,'_')
-          call out_char_idx(g,'_',g%lthis)
-          call out_char(g,'=')
-          call out_arg(g,g%lstack(g%lthis)%loop_pars(loop_start,i),0)
-          call out_char(g,',')
-          call out_arg(g,g%lstack(g%lthis)%loop_pars(loop_end,i),0)
-          call out_char(g,',')
-          call out_arg(g,g%lstack(g%lthis)%loop_pars(merge(loop_block,loop_step,blocked),i),0)
-          call out_new_line(g)
-       enddo
-       if(blocked) then
-          do i=n,1,-1
-             call out_str(g,'DO I')
-             call out_idx(g,i-1)
-             call out_char_idx(g,'_',g%lthis)
-             call out_char(g,'=')
-             call out_char_idx(g,'I',i-1)
-             call out_char(g,'_')
-             call out_char_idx(g,'_',g%lthis)
-             call out_str(g,',MIN(I')
-             call out_idx(g,i-1)
-             call out_char(g,'_')
-             call out_char_idx(g,'_',g%lthis)
-             call out_char(g,'+')
-             call out_arg(g,g%lstack(g%lthis)%loop_pars(loop_block,i),0)
-             call out_str(g,'-1,')
-             call out_arg(g,g%lstack(g%lthis)%loop_pars(loop_end,i),0)
-             call out_str(g,'),')
-             call out_arg(g,g%lstack(g%lthis)%loop_pars(loop_step,i),0)
-             call out_new_line(g)
-          enddo
-       endif
-       call out_char_idx(g,'I',g%lthis)
-       call out_str(g,'=1+')
-       call out_char_idx(g,'I',0)
-       call out_char_idx(g,'_',g%lthis)
-       do i=2,n
-          call out_char(g,'+')
-          call out_arg(g,g%lstack(g%lthis)%loop_pars(loop_size,i-1),0)
-          call out_str(g,'*(I')
-          call out_idx(g,i-1)
-          call out_char_idx(g,'_',g%lthis)
-       enddo
-       do i=2,n
-          call out_char(g,')')
-       enddo
-       call out_new_line(g)
+    case(loop_is_nested)
+       call gen_nested_loop(g,g%lstack(g%lthis)%loop_par,nloops)
     case default
        call pm_panic('gen_loop_nest')
     end select
+    g%lstack(g%lthis)%loop_active=.true.
     g%lstack(g%lthis)%nloops=nloops
     g%last_ve=0
   end subroutine gen_loop_nest
 
+
+  !============================================================
+  ! Generate loops described by variable v
+  ! -- v is a grouped tuple ( vdesc , dimension_sizes [ , blocking ] )
+  ! -- vdesc is a grouped tuple of vdim
+  ! -- each vdim is either a grouped tuple of sequence parameters
+  !    or an array
+  ! Returns number of loops opened in nloops
+  !============================================================
+  subroutine gen_nested_loop(g,v,nloops)
+    type(gen_state):: g
+    integer,intent(in):: v
+    integer,intent(out):: nloops
+    integer:: i,ndim,vdesc,vdim,vblock,vsize
+    if(g_kind(g,v)/=v_is_group) call pm_panic('nested loop var not a group')
+    vdesc=g_ptr(g,v,1)
+    if(g_kind(g,v)/=v_is_group) call pm_panic('nested loop desc var not a group')
+    ndim=g_v1(g,vdesc)
+    nloops=0
+    if(g_v1(g,v)==2) then
+       ! Non-blocked
+       do i=1,ndim
+          vdim=g_ptr(g,vdesc,i)
+          if(g_kind(g,vdim)==v_is_group) then
+             if(g_v2(g,vdim)==v_is_struct) then
+                select case(g_v1(g,vdim))
+                case(1)
+                   ! single point
+                   call out_simple(g,'I$N_$M=$I+1',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   nloops=nloops+1
+                case(2)
+                   ! range
+                   call out_simple_part(g,'DO I$N_$M=$I,',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_new_line(g)
+                   nloops=nloops+1
+                case(3)
+                   ! strided range
+                   call out_simple_part(g,'DO I$N_$M=$I,',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_char(g,',')
+                   call out_arg(g,g_ptr(g,vdim,3),0)
+                   call out_new_line(g)
+                   nloops=nloops+1
+                case(5)
+                   ! blocked seq
+                   call out_simple_part(g,'DO I$N__$M=($I)-',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   call out_arg(g,g_ptr(g,vdim,5),0)
+                   call out_str(g,',(')
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_str(g,'),')
+                   call out_arg(g,g_ptr(g,vdim,3),0)
+                   call out_new_line(g)
+                   call out_simple_part(g,'DO I$N_$M=MAX($I,I$N__$M),',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   call out_simple_part(g,'MIN(I$N__$M+($I)-1,',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,4))
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_char(g,')')
+                   call out_new_line(g)
+                   nloops=nloops+2
+                end select
+             else
+                call out_simple(g,'DO I$N__$M=1,SIZE($I)',&
+                     n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                call out_simple(g,'I$N_$M=$I(I$N__$M)',&
+                     n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+             endif
+          else
+             call out_simple(g,'DO I$N__$M=1,SIZE($I%E1)',&
+                  n=i,m=g%lthis,x=vdim)
+             call out_simple(g,'I$N_$M=$I%E1(I$N__$M)',&
+                  n=i,m=g%lthis,x=vdim)
+          endif
+       enddo
+    elseif(g_v1(g,v)==3) then
+       ! Post blocking
+       vblock=g_ptr(g,v,3)
+       
+       ! Outer loop
+       do i=1,ndim
+          vdim=g_ptr(g,vdesc,i)
+          if(g_kind(g,vdim)==v_is_group) then
+             if(g_v2(g,vdim)==v_is_struct) then
+                select case(g_v1(g,vdim))
+                case(1)
+                   ! single point
+                   call out_simple(g,'I$N_$M=$I+1',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   nloops=nloops+1
+                case(2)
+                   ! range
+                   call out_simple_part(g,'DO I$N__$M=$I,',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_simple_part(g,',$I%E$N',x=vblock,n=i)
+                   call out_new_line(g)
+                   nloops=nloops+1
+                case(3)
+                   ! strided range
+                   call out_simple_part(g,'DO I$N__$M=$I,',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_char(g,',')
+                   call out_arg(g,g_ptr(g,vdim,3),0)
+                   call out_simple_part(g,'*$I%E$N',x=vblock,n=i)
+                   call out_new_line(g)
+                   nloops=nloops+1
+                case(5)
+                   ! blocked seq
+                   call out_simple_part(g,'DO I$N__$M=$I-',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   call out_arg(g,g_ptr(g,vdim,5),0)
+                   call out_char(g,',')
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_char(g,',')
+                   call out_arg(g,g_ptr(g,vdim,3),0)
+                   call out_new_line(g)
+                   call out_simple_part(g,'IMAX$N__$M=MIN(I$N__$M+$I-1,',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,4))
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_line(g,')')
+                   call out_simple_part(g,'DO I$N_$M=MAX($I,I$N__$M),IMAX$N__$M',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                   call out_simple(g,',$I%E$N',x=vblock,n=i)
+                   nloops=nloops+2
+                end select
+             else
+                ! Arrays (split)
+                call out_simple_part(g,'DO I$N___$M=1,SIZE($I),',&
+                     n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                call out_simple(g,',$I%E$N',x=vblock,n=i)
+             endif
+          else
+             ! Array
+             call out_simple_part(g,'DO I$N___$M=1,SIZE($I%E1),',&
+                  n=i,m=g%lthis,x=vdim)
+             call out_simple(g,',$I%E$N',x=vblock,n=i)
+          endif
+       enddo
+
+       ! Loop over block
+       do i=1,ndim
+          vdim=g_ptr(g,vdesc,i)
+          if(g_kind(g,vdim)==v_is_group) then
+             if(g_v2(g,vdim)==v_is_struct) then
+                select case(g_v1(g,vdim))
+                case(1)
+                   ! single point
+                   continue
+                case(2)
+                   ! range
+                   call out_simple_part(g,'DO I$N_$M=I$N__$M,MIN(I$N__$M-1+$I%E$N,',&
+                        n=i,m=g%lthis,x=vblock)
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_char(g,')')
+                   call out_new_line(g)
+                   nloops=nloops+1
+                case(3)
+                   ! strided range
+                   call out_simple_part(g,'DO I$N_$M=I$N__$M,MIN(I$N__$M-1+$I%E$N*',&
+                        n=i,m=g%lthis,x=vblock)
+                   call out_arg(g,g_ptr(g,vdim,3),0)
+                   call out_char(g,',')
+                   call out_arg(g,g_ptr(g,vdim,2),0)
+                   call out_str(g,'),')
+                   call out_arg(g,g_ptr(g,vdim,3),0)
+                   call out_new_line(g)
+                   nloops=nloops+1
+                case(5)
+                   ! blocked seq
+                   call out_simple(g,'DO I$N_$M=I$N__$M,MIN(IMAX$N__$M,I$N__$M+$I%E$N)',&
+                        n=i,m=g%lthis,x=vblock)
+                   nloops=nloops+1
+                end select
+             else
+                ! Array (split)
+                call out_simple_part(g,'DO I$N__$M=I$N__$M,MIN(I$N__$M-1+$I%E$N,SIZE(',&
+                     n=i,m=g%lthis,x=vblock)
+                call out_arg(g,g_ptr(g,vdim,1),0)
+                call out_line(g,'))')
+                call out_simple(g,'I$N_$M=$I(I$N__$M)',&
+                     n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+             endif
+          else
+             ! Array
+             call out_simple_part(g,'DO I$N__$M=I$N__$M,MIN(I$N__$M-1+$I%E$N,SIZE(',&
+                  n=i,m=g%lthis,x=vblock)
+             call out_arg(g,g_ptr(g,vdim,1),0)
+             call out_line(g,'%E1))')
+             call out_simple(g,'I$N_$M=$I%E1(I$N__$M)',&
+                  n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+          endif
+       enddo
+    else
+       if(g_kind(g,v)==v_is_storageless) then
+          return
+       else
+          call pm_panic('Bad nested loop descriptor')
+       endif
+    endif
+
+    ! Calculate combined index
+    vsize=g_ptr(g,v,2)
+    call out_char_idx(g,'I',g%lthis)
+    call out_str(g,'=1+')
+    call out_char_idx(g,'I',1)
+    call out_char_idx(g,'_',g%lthis)
+    do i=2,ndim
+       call out_char(g,'+')
+       call out_arg(g,g_ptr(g,vsize,i),0)
+       call out_str(g,'*(I')
+       call out_idx(g,i)
+       call out_char_idx(g,'_',g%lthis)
+    enddo
+    do i=2,ndim
+       call out_char(g,')')
+    enddo
+    call out_new_line(g)
+
+  end subroutine gen_nested_loop
+
+  
   !============================================================
   ! Close all active loops
   !============================================================
   subroutine gen_close_loops(g)
     type(gen_state):: g
     integer:: i
-    if(g%lstack(g%lthis)%loop_active) then
+    if(g_loop_active(g)) then
        do i=1,g%lstack(g%lthis)%nloops
           call out_line(g,'ENDDO')
        enddo
@@ -2223,7 +2371,9 @@ contains
     type(gen_state):: g
     integer,intent(in):: last
     integer:: i
+ 
     i=g%last_ve
+    !write(*,*) 'LAST>>',i,last,g%last_ve
     do while(i/=last.and.i/=0)
        if(debug_g) write(*,*) 'FINISH>',i,g_kind(g,i),g_v1(g,i),g_v2(g,i)
        i=g_v1(g,i)
@@ -2232,12 +2382,16 @@ contains
     g%last_ve=0
   end subroutine gen_close_ifs
 
+  !============================================================
+  ! Generate code for IF( any active strand ) THEN
+  !============================================================
   subroutine gen_active_check_start(g,l)
     type(gen_state):: g
     integer,intent(in):: l
     integer:: ve
-    !call gen_stacked_ve(g,ve)
     ve=g%codes(l+comp_op_arg0)
+    call gen_stacked_ve(g,l,ve)
+    call gen_loop(g,l,.true.)
     if(ve/=0.and.ve/=shared_op_flag) then
        if(g_is_a_vect(g,ve)) then
           call out_simple(g,'IF(ANY($A))THEN',x=ve)
@@ -2247,6 +2401,9 @@ contains
     endif
   end subroutine gen_active_check_start
 
+  !============================================================
+  ! Generate code to close IF( any active strand ) THEN
+  !============================================================
   subroutine gen_active_check_end(g,l)
     type(gen_state):: g
     integer,intent(in):: l
@@ -2260,23 +2417,59 @@ contains
   !============================================================
   ! Generate code to combine stacked masks (ve)
   ! into single logical vector with all elements
-  ! fully defined
+  ! fully defined (nested ve only have valid
+  ! values only for strands that were active
+  ! when they were created)
+  !
+  ! - Assigned to vout if present
+  ! - Otherwise change in place if necessary
   !============================================================
-  subroutine gen_stacked_ve(g,v)
+  subroutine gen_stacked_ve(g,l,v,vout)
     type(gen_state):: g
-    integer,intent(in):: v
-    integer:: parent
-    parent=g_v1(g,v)
-    if(parent==0) return
-    call out_arg(g,v,arg_no_index)
+    integer,intent(in):: l,v
+    integer,intent(in),optional:: vout
+    integer:: parent,arg_flags
+    logical:: stacked_already
+    if(v==shared_op_flag) return
+    if(v==0) then
+       if(present(vout)) then
+          if(g_loop_active(g)) then
+             call out_arg(g,vout,0)
+          else
+             call out_arg(g,vout,arg_no_index)
+          endif
+          call out_line(g,'=.TRUE.')
+       endif
+       return
+    else
+       parent=g_v1(g,v)
+       if(parent==0.and..not.present(vout)) return
+    endif
+    stacked_already=g_gflags_set(g,v,var_is_stacked_ve)
+    if(stacked_already.and..not.present(vout)) return
+    if(g_loop_active(g)) then
+       call gen_close_ifs(g,0)
+       arg_flags=0
+    else
+       arg_flags=arg_no_index
+    endif
+    if(present(vout)) then
+       call out_arg(g,vout,arg_flags)
+    else
+       call out_arg(g,v,arg_flags)
+    endif
     call out_char(g,'=')
-    call out_arg(g,v,arg_no_index)
-    do while(parent/=0)
-       call out_str(g,'.AND.')
-       call out_arg(g,parent,arg_no_index)
-       parent=g_v1(g,parent)
-    end do
+    call out_arg(g,v,arg_flags)
+    if(.not.stacked_already) then
+       do while(parent/=0)
+          call out_str(g,'.AND.')
+          call out_arg(g,parent,arg_flags)
+          parent=g_v1(g,parent)
+       end do
+    endif
+    call out_str(g,' ! Stacked ve')
     call out_new_line(g)
+    call g_set_gflags(g,v,var_is_stacked_ve)
   end subroutine gen_stacked_ve
 
   !============================================================
@@ -2287,7 +2480,8 @@ contains
     integer:: v
     v=g%lstack(g%lthis)%varlist
     do while(v>0)
-       if(g_var_at_index_is_a_vect(g,v).and.iand(g%vardata(v)%flags,v_is_result)==0.and.&
+       if(g_var_at_index_is_a_vect(g,v).and.&
+            iand(g%vardata(v)%flags,v_is_result)==0.and.&
             iand(g%vardata(v)%gflags,var_is_recycled)==0) then
           call out_str(g,'IF(ALLOCATED(')
           call out_var_at_index(g,v)
@@ -2751,8 +2945,8 @@ contains
 
     call gen_pack(g,g%codes(a+2),g%codes(a+4),0)
     call gen_pack(g,g%codes(a+3),g%codes(a+5),0)
-
- 
+    
+    
     call gen_mpi_bcast(g,g%codes(a+2))
     call gen_mpi_bcast(g,g%codes(a+3))
 
@@ -3197,7 +3391,7 @@ contains
     integer:: k,k2,i,tno,a
     logical:: nonblocking,nontrivial,ok
     character(len=5):: ibuffer
-    !call out_simple(g,'WRITE(*,*) "SEND DISP",$N,$M',n=abs(v),x=mode)
+    !call out_simple(g,'WRITE(*,*) "SEND DISP",$N,$M',n=abs(v),m=mode)
     if(debug_g) write(*,*) 'SEND_DISP> v=',v,'s=',trim(s),'k=',g_kind(g,v)
     nonblocking=s=='ISEND'.or.s=='ISSEND'
     k=g_kind(g,v)
@@ -3460,22 +3654,32 @@ contains
           call out_line(g,'JTYPE=JBASE')
           do i=1,g_v1(g,grid_tuple)
              grid_dim=g_ptr(g,grid_tuple,i)
-             if(g_kind(g,grid_dim)==v_is_group) then
-                call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A,1,JTYPE_N)',&
-                     x=g_ptr(g,grid_dim,1))
-                call out_line(g,'JTYPE=JTYPE_N')
-             elseif(pm_typ_kind(g%context,g_type(g,grid_dim))==pm_typ_is_array) then
-                call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A%P,1,JTYPE_N)',&
-                     x=g_ptr(g,grid_dim,1))
-                call out_line(g,'JTYPE=JTYPE_N')
+             if(g_kind(g,grid_tuple)/=v_is_group) then
+                call pm_panic('norm grid dim not a group')
+             endif
+             if(g_v1(g,grid_dim)==1) then
+                grid_dim=g_ptr(g,grid_dim,1)
+                if(g_kind(g,grid_dim)==v_is_group) then
+                   if(g_v2(g,grid_dim)/=v_is_array.and.g_v2(g,grid_dim)/=v_is_var_array) then
+                      call pm_panic('grid dim array not array')
+                   endif
+                   call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A,1_PM__LN,JTYPE_N)',&
+                        x=g_ptr(g,grid_dim,1))
+                   call out_line(g,'JTYPE=JTYPE_N')
+                elseif(pm_typ_kind(g%context,g_type(g,grid_dim))==pm_typ_is_array) then
+                   call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A%P,1_PM__LN,JTYPE_N)',&
+                        x=g_ptr(g,grid_dim,1))
+                   call out_line(g,'JTYPE=JTYPE_N')
+                endif
              else
+                if(g_v1(g,grid_dim)/=6) then
+                   call pm_panic('grid_dim incorrect number of entries')
+                endif
                 call out_str(g,'CALL PM__GET_MPI_SUBRANGE_TYPE(JTYPE,')
                 tv=pm_typ_vect(g%context,g_type(g,grid_dim))
                 do j=1,6
                    if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,j)),pm_typ_has_storage)/=0) then
-                      call out_arg(g,grid_dim,0)
-                      call out_str(g,'%E')
-                      call out_idx(g,j)
+                      call out_arg(g,g_ptr(g,grid_dim,j),0)
                       call out_char(g,',')
                    else
                       call out_const(g,pm_typ_val(g%context,pm_tv_arg(tv,j)))
@@ -3505,7 +3709,7 @@ contains
     type(gen_state),intent(inout):: g
     integer,intent(in):: v1,v2,m
     integer:: k,k2,i
-    if(debug_g) write(*,*) 'PACK> v1=',v1,g_kind(g,v1),'v2=',v2,g_kind(g,v2)
+    if(debug_g) write(*,*) 'PACK> v1=',v1,g_kind(g,v1),'v2=',v2,g_kind(g,v2),'m=',m
     k=g_kind(g,v1)
     k2=g_v2(g,v1)
     if(k==v_is_group) then
@@ -3531,21 +3735,27 @@ contains
     elseif(iand(k2,v_is_poly)/=0) then
        call out_line(g,'IX=0')
        call out_simple(g,'DO I$N=1,N$N',n=g%lthis)
-       call out_simple(g,'IF($I) THEN',x=m)
+       if(m/=0) call out_simple(g,'IF($I) THEN',x=m)
        call out_line(g,'IX=IX+1')
        call out_arg(g,v1,arg_ix_index)
        call out_char(g,'=')
        call out_arg(g,v2,0)
        call out_new_line(g)
-       call out_line(g,'ENDIF')
+       if(m/=0) call out_line(g,'ENDIF')
        call out_line(g,'ENDDO')
     else
        call out_arg(g,v1,arg_no_index)
-       call out_str(g,'=PACK(')
-       call out_arg(g,v2,arg_no_index)
-       call out_char(g,',')
-       call out_arg(g,m,arg_no_index)
-       call out_char(g,')')
+       if(m==0) then
+          call out_char(g,'=')
+          call out_arg(g,v2,arg_wrapped)
+          call out_str(g,' ! pack - copy')
+       else
+          call out_str(g,'=PACK(')
+          call out_arg(g,v2,arg_wrapped)
+          call out_char(g,',')
+          call out_arg(g,m,arg_wrapped)
+          call out_char(g,')')
+       endif
        call out_new_line(g)
     endif
     if(debug_g) write(*,*) 'PACKED> v1=',v1
@@ -4217,7 +4427,7 @@ contains
           if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,j)),&
                pm_typ_has_storage)/=0) then
              call out_simple(g,'CALL MPI_GET_ADDRESS(T$N(1)%E$M,OFFSETS($M),JERROR)',&
-                  n=typ,x=j)
+                  n=typ,m=j)
              nn=nn+1
           endif
        enddo
@@ -4282,9 +4492,9 @@ contains
     
 !!$    call out_simple_part(g,'! idx=$N / lthis=$M '//&
 !!$         trim(pm_typ_as_string(g%context,g%vardata(i)%tno)),&
-!!$         n=g%vardata(i)%oindex,x=g%vardata(i)%lthis)
-!!$    call out_simple_part(g,'/ flags=$N state=$M',n=g%vardata(i)%flags,x=g%vardata(i)%state)
-!!$    call out_simple_part(g,'/ start=$N finish=$M',n=g%vardata(i)%start,x=g%vardata(i)%finish)
+!!$         n=g%vardata(i)%oindex,m=g%vardata(i)%lthis)
+!!$    call out_simple_part(g,'/ flags=$N state=$M',n=g%vardata(i)%flags,m=g%vardata(i)%state)
+!!$    call out_simple_part(g,'/ start=$N finish=$M',n=g%vardata(i)%start,m=g%vardata(i)%finish)
 !!$    call out_simple(g,'/ end_assign=$N',n=merge(1,0,g%vardata(i)%finish_on_assign))
     
     if(iand(flags,v_is_chan)/=0) then
@@ -4480,38 +4690,39 @@ contains
   ! followed by new line
   ! For expansions see out_simple_part
   !=========================================================
-  recursive subroutine out_simple(g,str,l,n,x)
+  recursive subroutine out_simple(g,str,l,n,m,x)
     type(gen_state):: g
     character(len=*),intent(in):: str
-    integer,intent(in),optional:: l,n,x
-    call out_simple_part(g,str,l,n,x)
+    integer,intent(in),optional:: l,n,m,x
+    call out_simple_part(g,str,l,n,m,x)
     call out_new_line(g)
   end subroutine out_simple
-
 
   !=========================================================
   ! Return code string expanded with variable/value info
   ! Expansions:
   !    $0 .. $9   - given argument (l must be passed)
+  !    $(10)...
   !    $#0 .. $#9 - given argument without index
+  !    $#(10)...
   !    $A         - variable passed as x without index
   !    $I         - variable passed as x
   !    $N         - integer value passed as n
-  !    $M         - integer value passed as x
+  !    $M         - integer value passed as m
   !    $X         - argument x (l must be passed)
   !    $Y         - argument x no index
   !    $S         - suffix string for pm basic type x
   !=========================================================
-  recursive subroutine out_simple_part(g,str,l,n,x)
+  recursive subroutine out_simple_part(g,str,l,n,m,x)
     type(gen_state):: g
     character(len=*),intent(in):: str
-    integer,intent(in),optional:: l,n,x
-    integer:: i,j,m,opt
+    integer,intent(in),optional:: l,n,m,x
+    integer:: i,j,k,opt,tens
     character:: c
     opt=0
-    m=len(str)
+    k=len(str)
     j=1
-    do while(j<=m)
+    do while(j<=k)
        c=str(j:j)
        if(c/='$') then
           g%n=g%n+1
@@ -4526,6 +4737,15 @@ contains
              call out_arg(g,g%codes(l+comp_op_arg0+iachar(c)-iachar('0')),arg_no_index)
           case('0','1','2','3','4','5','6','7','8','9')
              call out_arg(g,g%codes(l+comp_op_arg0+iachar(c)-iachar('0')),0)
+          case('(')
+             j=j+1
+             c=str(j:j)
+             tens=iachar(c)-iachar('0')
+             j=j+1
+             c=str(j:j)
+             call out_arg(g,g%codes(l+comp_op_arg0+tens*10+iachar(c)-iachar('0')),0)
+             j=j+1
+             if(str(j:j)/=')') call pm_panic('out_simple: bad $( arg')
           case('A')
              call out_arg(g,x,arg_no_index)
           case('I')
@@ -4534,7 +4754,7 @@ contains
           case('N')
              call out_idx(g,n)
           case('M')
-             call out_idx(g,x)
+             call out_idx(g,m)
           case('X')
              call out_arg(g,g%codes(l+comp_op_arg0+x),0)
           case('Y')
@@ -4547,7 +4767,7 @@ contains
           end select
        endif
        j=j+1
-       if(g%n+m-j>ftn_max_line) call out_line_break(g)
+       if(g%n+k-j>ftn_max_line) call out_line_break(g)
     enddo
   end subroutine out_simple_part
 
@@ -4711,7 +4931,7 @@ contains
        endif
     end select
   end subroutine out_arg
-
+  
   subroutine out_arg_name(g,var,opt)
     type(gen_state):: g
     integer,intent(in):: var,opt
