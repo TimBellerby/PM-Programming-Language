@@ -1694,11 +1694,10 @@ contains
          tno=coder%stack(slot)
          if(pm_debug_checks) then
             if(tno==undefined) then
-               write(*,*) m,slot,pm_main_process
                call qdump_code_tree(coder,pm_null_obj,6,&
                     cnode_arg(args,m),2)
-               call infer_error_with_trace(coder,args,'Broken::')
-               call pm_panic('Broken type resolution chain')
+               call infer_error_with_trace(coder,args,'Internal Compiler Error: Broken type resulution::')
+               !!call pm_panic('Broken type resolution chain')
             endif
          endif
       endif
@@ -1761,8 +1760,9 @@ contains
       else
          tno=coder%stack(slot)
          if(pm_debug_checks) then
-            if(tno==undefined) &
-                 call pm_panic('Broken type resolution chain')
+            if(tno==undefined) then
+               call infer_error_with_trace(coder,args,'Internal Compiler Error: Broken type resulution::')
+            endif
          endif
       endif
     end subroutine get_slot_and_type
@@ -2060,8 +2060,8 @@ contains
              call infer_error_with_trace(coder,cnode_arg(args,nret-mode-1000),&
                   'Cannot pass a "partial" value to a "complete" procedure'//&
                   trim(sig_name_str(coder,int(sig))))
-          else
-             call infer_error_with_trace(coder,cnode_arg(args,nret-mode-1000),&
+          elseif(.not.ignore_rules) then
+             call infer_error_with_trace(coder,cnode_arg(args,nret-mode-2000),&
                   'Cannot pass a "coherent" value to a "complete" procedure in an unlabelled call in a conditional context: '//&
                   trim(sig_name_str(coder,int(sig))))
           endif
@@ -2226,7 +2226,7 @@ contains
                call qdump_code_tree(coder,pm_null_obj,6,&
                     cnode_arg(args,m),2)
                call infer_error_with_trace(coder,args,'Broken::')
-               call pm_panic('Broken type resolution chain')
+               !call pm_panic('Broken type resolution chain')
             endif
          endif
       endif
