@@ -40,17 +40,28 @@ module pm_options
      integer:: proc_list
      logical:: show_variants
      logical:: check_alias
+     logical:: show_all_ref
+     logical:: print_immediate
      
      logical:: out_sysmod
      logical:: out_typelist
      logical:: print_timings
      logical:: hide_sysmod
 
+     logical:: schedule
+
      integer:: ftn_dims
+     integer:: ftn_lines
      logical:: ftn_contig
      integer(pm_ln):: ftn_max_stack_array
      logical:: ftn_comment_lines
      logical:: ftn_comment_ops
+     logical:: ftn_annotate
+     logical:: ftn_name_procs
+     logical:: ftn_name_vars
+     logical:: ftn_name_params
+     logical:: ftn_name_types
+     logical:: ftn_name_elems
 
      character(len=25):: error
      logical:: colour
@@ -72,16 +83,28 @@ contains
     pm_opts%proc_list=11
     pm_opts%show_variants=.false.
     pm_opts%check_alias=.not.pm_is_compiling
+    pm_opts%show_all_ref=.false.
+    pm_opts%print_immediate=.false.
     
     pm_opts%out_sysmod=.false.
     pm_opts%out_typelist=.false.
     pm_opts%print_timings=.false.
     pm_opts%hide_sysmod=.true.
 
+    pm_opts%schedule=.false.
+    
     pm_opts%ftn_dims=pm_default_ftn_dims
+    pm_opts%ftn_lines=pm_default_ftn_lines
+    pm_opts%ftn_max_stack_array=pm_default_ftn_max_stack_array
     pm_opts%ftn_contig=pm_default_ftn_has_contiguous
     pm_opts%ftn_comment_lines=.false.
     pm_opts%ftn_comment_ops=.false.
+    pm_opts%ftn_annotate=.false.
+    pm_opts%ftn_name_procs=.false.
+    pm_opts%ftn_name_vars=.false.
+    pm_opts%ftn_name_params=.false.
+    pm_opts%ftn_name_types=.false.
+    pm_opts%ftn_name_elems=.false.
     colour=pm_colour_messages.and.pm_isatty(6)
     if(colour) then
        pm_opts%error=pm_error_start//'Error: '//pm_error_end
@@ -126,23 +149,55 @@ contains
        write(*,*) '  -fproc-list=n    Maximum number of procs to list if see-all-procs not invoked'
        write(*,*) '  -fno-alias-check Do not check for argument aliasing'
        write(*,*) '  -falias_check    Check for argument aliasing'
+       if(.not.pm_is_compiling) then
+          write(*,*) '  -fprint-immediate'
+          write(*,*) '                   Do not buffer print output by node'
+       endif
        write(*,*)
        write(*,*) '  GENERAL OPTIONS'
        write(*,*) '  -N              Do not colour-highlight error messages'
        write(*,*) '  -H              Colour-highlight error messages'
        if(pm_is_compiling) then
           write(*,*)
+          write(*,*) '  OPTIMISER OPTIONS'
+          write(*,*) '  -opt-sched    Run list scheduler (default)'
+          write(*,*) '  -opt-no-sched Do not run list scheduler'
+          write(*,*)
           write(*,*) '  FORTRAN SOURCE OUTPUT OPTIONS'
-          write(*,*) '  -ftn-dims=n    Maximum number (n) of Fortran array dimensions'
+          write(*,*) '  -ftn-max-dims=n'
+          write(*,*) '                 Maximum number (n) of Fortran array dimensions'
           write(*,*) '  -ftn-contig    Fortran supports CONTIGUOUS attribute'
           write(*,*) '  -ftn-no-contig Fortran does not support CONTIGUOUS attribute'
           write(*,*) '  -ftn-max-stack_array=n'
           write(*,*) '                 Maximum size (n) of array that can be stored on the stack'
+          write(*,*) '  -ftn-max-lines=n'
+          write(*,*) '                 Maximum number of continuation lines'
           write(*,*) '  -ftn-comment-lines'
+          write(*,*) '                 Comment Fortran code with source lines'
           write(*,*) '  -ftn-comment-ops'
+          write(*,*) '                 Comment Fortran code with word-code operations'
+          write(*,*) '  -ftn-name-procs'
+          write(*,*) '  -ftn-no-name-procs'
+          write(*,*) '                 Include (or not) PM name in Fortran procedure names'
+          write(*,*) '  -ftn-name-vars'
+          write(*,*) '  -ftn-no-name-vars'
+          write(*,*) '                 Include (or not) PM name in Fortan variable names'
+          write(*,*) '  -ftn-name-params'
+          write(*,*) '  -ftn-no-name-params'
+          write(*,*) '                 Include (or not) PM name in Fortran parameter names'
+          write(*,*) '  -ftn-name-types'
+          write(*,*) '  -ftn-no-name-types'
+          write(*,*) '                 Include (or not) PM name in Fortan derived types'
+          write(*,*) '  -ftn-name-elems'
+          write(*,*) '  -ftn-no-name-elems'
+          write(*,*) '                 Include (or not) PM name in Fortan derived types elements'
+          write(*,*) '  -ftn-name-all'
+          write(*,*) '                 Include PM name in Fortran names'
+          write(*,*) '  -ftn-annotate'
+          write(*,*) '                 Include various annotation comments (mainly for debugging the compiler)'
        endif
        write(*,*)
-       write(*,*) '  COMPILER DEBUGGING OPTIONS'
+       write(*,*) '  OPTIONS FOR DEBUGGING THE COMPILER'
        write(*,*) '  -D              Activate all debugging options listed below.'
        write(*,*) '  -Dfiles         Output files from each compiler stage.'
        write(*,*) '  -Dtimings       Output time taken by each compilation stage.'
@@ -182,6 +237,7 @@ contains
              pm_opts%out_typelist=.true.
              pm_opts%print_timings=.true.
              pm_opts%hide_sysmod=.false.
+             pm_opts%show_all_ref=.true.
           elseif(arg=='-Dfiles') then
              out_debug_files=.true.
           elseif(arg=='-Dsys-mod') then
@@ -192,6 +248,9 @@ contains
              pm_opts%print_timings=.true.
           elseif(arg=='-Dshow-sys-mod') then
              pm_opts%hide_sysmod=.false.
+          elseif(pm_main_process) then
+             write(*,*) 'Not a valid compiler debugging (-D) option:',trim(arg)
+             call usage()
           endif
        elseif(arg(1:2)=='-f') then
           if(arg=='-fno-inline') then
@@ -212,6 +271,8 @@ contains
              pm_opts%check_alias=.true.
           elseif(arg=='-fno-alias-check') then
              pm_opts%check_alias=.false.
+          elseif(arg=='-fprint-immediate'.and..not.pm_is_compiling) then
+             pm_opts%print_immediate=.true.
           elseif(arg(1:12)=='-fproc-list=') then
              pm_opts%proc_list=get_num_opt(arg,arg(13:))
           elseif(arg(3:4)=='tn') then
@@ -225,11 +286,69 @@ contains
                 pm_opts%ftn_comment_ops=.true.
              elseif(arg(1:14)=='-ftn-max-dims=') then
 	        pm_opts%ftn_dims=get_num_opt(arg,arg(15:))
+             elseif(arg(1:15)=='-ftn-max-lines=') then
+                pm_opts%ftn_lines=get_num_opt(arg,arg(15:))
              elseif(arg(1:21)=='-ftn-max-stack-array=') then
                 pm_opts%ftn_max_stack_array=get_num_opt(arg,arg(22:))
+             elseif(arg=='-ftn-annotate') then
+                pm_opts%ftn_annotate=.true.
+             elseif(arg(1:9)=='-ftn-name') then
+                if(arg=='-ftn-name-procs') then
+                   pm_opts%ftn_name_procs=.true.
+                elseif(arg=='-ftn-name-vars') then
+                   pm_opts%ftn_name_vars=.true.
+                elseif(arg=='-ftn-name-params') then
+                   pm_opts%ftn_name_params=.true.
+                elseif(arg=='-ftn-name-types') then
+                   pm_opts%ftn_name_types=.true.
+                elseif(arg=='-ftn-name-elems') then
+                   pm_opts%ftn_name_elems=.true.
+                elseif(arg=='-ftn-name-all') then
+                   pm_opts%ftn_name_procs=.true.
+                   pm_opts%ftn_name_vars=.true.
+                   pm_opts%ftn_name_params=.true.
+                   pm_opts%ftn_name_types=.true.
+                   pm_opts%ftn_name_elems=.true.
+                elseif(pm_main_process) then
+                   write(*,*) 'Not a valid fortran name (-ftn-name) option:',trim(arg)
+                   call usage()
+                endif
+             elseif(arg(1:12)=='-ftn-no-name') then
+                if(arg=='-ftn-no-name-procs') then
+                   pm_opts%ftn_name_procs=.false.
+                elseif(arg=='-ftn-no-name-vars') then
+                   pm_opts%ftn_name_vars=.false.
+                elseif(arg=='-ftn-no-name-params') then
+                   pm_opts%ftn_name_params=.false.
+                elseif(arg=='-ftn-no-name-types') then
+                   pm_opts%ftn_name_types=.false.
+                elseif(arg=='-ftn-no-name-elems') then
+                   pm_opts%ftn_name_elems=.false.
+                elseif(arg=='-ftn-no-name-all') then
+                   pm_opts%ftn_name_procs=.false.
+                   pm_opts%ftn_name_vars=.false.
+                   pm_opts%ftn_name_params=.false.
+                   pm_opts%ftn_name_types=.false.
+                   pm_opts%ftn_name_elems=.false.
+                elseif(pm_main_process) then
+                   write(*,*) 'Not a valid fortran name (-ftn-name-no) option:',trim(arg)
+                   call usage()
+                endif
+             elseif(pm_main_process) then
+                write(*,*) 'Not a valid fortran output (-ftn) option:',trim(arg)
+                call usage()
              endif
           elseif(pm_main_process) then
              write(*,*) 'Not a valid language (-f) option:',trim(arg)
+             call usage()
+          endif
+       elseif(arg(1:4)=='-opt') then
+          if(arg=='-opt-sched') then
+             pm_opts%schedule=.true.
+          elseif(arg=='-opt-no-sched') then
+             pm_opts%schedule=.false.
+          elseif(pm_main_process) then
+             write(*,*) 'Not a valid optimiser (-opt) option:',trim(arg)
              call usage()
           endif
        elseif(arg=='--help') then

@@ -2906,34 +2906,38 @@ contains
           if(add_char('*distr*')) return
        endif
     case(pm_typ_is_dref)
-       if(pm_tv_name(tv)==pm_dref_is_dot) then
-          if(add_char('^.(')) return
-       elseif(pm_tv_name(tv)==pm_dref_is_shared) then
-          if(add_char('^shrd(')) return
-       elseif(pm_tv_name(tv)==pm_dref_is_var) then
-          if(add_char('^(')) return
-       elseif(pm_tv_name(tv)==pm_dref_is_any) then
-          if(add_char('^*(')) return
-       elseif(pm_tv_name(tv)==pm_dref_is_here) then
-          if(add_char('^here(')) return
-       elseif(pm_tv_name(tv)==pm_dref_is_slice) then
-          if(add_char('^#(')) return
-       elseif(pm_tv_name(tv)==pm_dref_is_shared_slice) then
-          if(add_char('^#shrd(')) return
-       elseif(pm_tv_name(tv)==pm_dref_is_ref) then
-          if(add_char('^ref(')) return
+       if(pm_opts%show_all_ref) then
+          if(pm_tv_name(tv)==pm_dref_is_dot) then
+             if(add_char('^.(')) return
+          elseif(pm_tv_name(tv)==pm_dref_is_shared) then
+             if(add_char('^shrd(')) return
+          elseif(pm_tv_name(tv)==pm_dref_is_var) then
+             if(add_char('^(')) return
+          elseif(pm_tv_name(tv)==pm_dref_is_any) then
+             if(add_char('^*(')) return
+          elseif(pm_tv_name(tv)==pm_dref_is_here) then
+             if(add_char('^here(')) return
+          elseif(pm_tv_name(tv)==pm_dref_is_slice) then
+             if(add_char('^#(')) return
+          elseif(pm_tv_name(tv)==pm_dref_is_shared_slice) then
+             if(add_char('^#shrd(')) return
+          elseif(pm_tv_name(tv)==pm_dref_is_ref) then
+             if(add_char('^ref(')) return
+          else
+             if(add_char('^')) return
+             call pm_name_string(context,pm_tv_name(tv),str(n:))
+             n=len_trim(str)+1
+             if(add_char('(')) return
+          endif
+          do i=1,pm_tv_numargs(tv)-1
+             call typ_to_str(context,pm_tv_arg(tv,i),str,n)
+             if(add_char(',')) return
+          enddo
+          call typ_to_str(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n)
+          if(add_char(')')) return
        else
-          if(add_char('^')) return
-          call pm_name_string(context,pm_tv_name(tv),str(n:))
-          n=len_trim(str)+1
-          if(add_char('(')) return
+          call typ_to_str(context,pm_tv_arg(tv,1),str,n)
        endif
-       do i=1,pm_tv_numargs(tv)-1
-          call typ_to_str(context,pm_tv_arg(tv,i),str,n)
-          if(add_char(',')) return
-       enddo
-       call typ_to_str(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n)
-       if(add_char(')')) return
     case(pm_typ_is_array)
        name=pm_tv_name(tv)
        if(name==sym_var) then

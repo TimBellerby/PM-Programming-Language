@@ -141,7 +141,7 @@ contains
     opcode2=opcode2*pm_ext_mult+opcode3/(pm_max_args+1)
     n=iand(int(opcode3),pm_max_args)  ! Number arguments
     if(pm_debug_level>3) then
-       write(*,*) 'DECODING>',opcode,&
+       write(*,*) sys_node,'DECODING>',opcode,&
             trim(op_names(opcode)),opcode2,n,&
             'pc=',pc%offset,'arg1=',pc%data%i16(pc%offset+3_pm_p)
        write(*,*) 'stack=',stack%data%hash,stack%offset,stack%data%esize
@@ -152,11 +152,10 @@ contains
     if(trace_opcodes) then
        call proc_line_module(func,&
             max(int(pc%offset-func%data%ptr(func%offset)%offset)-4,1),line,modl)
-       write(*,*) sys_node,op_names(opcode),opcode2,&
+       write(*,*) sys_node,op_names(opcode),opcode2,'(',n,' args)',&
             '@',trim(pm_name_as_string(context,modl)),'#',line
     endif
-
-    
+   
     oparg=pc%data%i16(pc%offset+3_pm_p)
     arg(1)=stack%data%ptr(stack%offset+oparg)
     if(pm_debug_checks) then
@@ -195,6 +194,7 @@ contains
           arg(i)=stack%data%ptr(stack%offset+oparg)
           if(pm_debug_level>3) then
              write(*,*) i,'STACK>>',oparg
+             call pm_dump_tree(context,6,arg(i),2)
           endif
        else if(oparg>=-int(pm_max_stack,pm_i16)) then
           arg(i)%data=>stack%data
@@ -237,10 +237,10 @@ contains
        
        ! Opcode that should not be skipped
        select case(opcode)
-       case(op_and_ve:op_andnot_jmp_any)
+       case(op_and_ve:op_andnot_jmp_any,op_do_at)
           call set_arg(2,arg(1))
        case(op_jmp_any_ve_par)
-          if(sync_status(pm_node_running)==pm_node_error) goto 777
+          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
           ok=sync_loop_end(.false.)
           if(ok) then
              pc%offset=pc%offset+opcode2-pm_jump_offset
@@ -256,13 +256,14 @@ contains
           if(par_frame(par_depth)%shared_node/=0) pc%offset=pc%offset+opcode2-pm_jump_offset
        case(op_remote_call:op_bcast_call,&
             op_dref,op_par_loop_end,op_chan,op_export,&
-            op_export_param)
+            op_export_param,op_pop_node,op_sync_mess,op_import_val,op_return)
+          !write(*,*) 'unskip',op_names(opcode)
           goto 20
        case(op_recv_req_call,op_recv_assn_call)
           call set_arg(2,arg(1))
        case(op_skip_empty)
           if(opcode2>0) then
-             if(sync_status(pm_node_running)==pm_node_error) goto 777
+             if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
              ok=sync_loop_end(.false.)
              if(ok) then
                 call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
@@ -272,6 +273,8 @@ contains
           else
              call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
           endif
+       case(op_comm_call)
+          if(pm_fast_vkind(arg(1)%data%ptr(arg(1)%offset))/=pm_tiny_int) goto 20
        end select
        if(pm_debug_level>3) then
           write(*,*) 'SKIPPING>',opcode,&
@@ -289,9 +292,17 @@ contains
     endif
     
     select case(opcode)
-    case(op_call,op_comm_call)
+    case(op_call)
        ! op_call #proc ve args...
        ! op_comm_call #proc ve args...
+       if(opcode==op_comm_call) write(*,*) sys_node,'Comm_call',opcode2,pm_fast_vkind(ve)
+       newfunc=context%funcs%data%ptr(&
+            context%funcs%offset+opcode2)
+       goto 30
+    case(op_comm_call)
+       ve=arg(2)%data%ptr(arg(2)%offset+1)
+       esize=ve%data%ln(ve%offset)
+       ve=arg(2)%data%ptr(arg(2)%offset)
        newfunc=context%funcs%data%ptr(&
             context%funcs%offset+opcode2)
        goto 30
@@ -299,7 +310,7 @@ contains
        ! op_skip_empty #0_or_2 ve &newve
        ! op_skip_empty #1 ve &newve oldve
        if(opcode2==1) then
-          if(sync_status(pm_node_running)==pm_node_error) goto 777
+          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
           ok=sync_loop_end(.true.)
           ve=make_new_ve(pm_null_obj,arg(3))
        else
@@ -310,16 +321,18 @@ contains
        call set_arg(2,ve)
     case(op_return)
        ! op_return args...
+       !if(sys_node==0) write(*,*) 'Return>',trim(pm_name_as_string(context,proc_get_name(func))),nargs
        if(nargs>0) then
           do i=2,nargs
              v=stack%data%ptr(stack%offset+pm_stack_locals+opcode2+i-1)
              v%data%ptr(v%offset)=arg(i)
-         enddo
-      endif
-      context%call_depth=context%call_depth-1
+             !if(sys_node==0) call pm_dump_tree(context,6,arg(i),2)
+          enddo
+       endif
+       context%call_depth=context%call_depth-1
 !!$      if(pm_debug_level>3.or.vm_depth==2) &
 !!$           write(*,*) spaces(1:vm_depth*2),&
-!!$           write(*,*) 'RETURN>',trim(pm_name_as_string(context,proc_get_name(func)))
+       if(trace_calls) write(*,*) 'RETURN>',trim(pm_name_as_string(context,proc_get_name(func)))
        pc=stack%data%ptr(stack%offset+pm_stack_pc)
        func=stack%data%ptr(stack%offset+pm_stack_func)
        stack=stack%data%ptr(stack%offset+pm_stack_oldstack)
@@ -443,7 +456,7 @@ contains
           endif
        enddo
        if(opcode==op_jmp_any_ve_par) then
-          if(sync_status(pm_node_running)==pm_node_error) goto 777
+          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
           ok=sync_loop_end(ok)
        endif
        if(ok) then
@@ -530,26 +543,26 @@ contains
     case(op_pop_node)
        ! op_pop_node ve
        if(conc_depth==0) then
-          if(sync_status(pm_node_running)==pm_node_error) goto 777
+          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        endif
        call pop_node(context)
     case(op_broadcast)
        ! op_broadcast ve vec prc
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        call broadcast(context,int(arg(3)%data%ln(arg(3)%offset)),arg(2))
     case(op_broadcast_shared)
        ! op_broadcast_shared ve vec
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        call broadcast(context,0,arg(2),&
             par_frame(par_depth)%shared_comm,par_frame(par_depth)%shared_node)
     case(op_broadcast_val)
        ! op_broadcast_val ve &vec_out vec_in prc
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        call set_arg(2,broadcast_val(context,&
             int(arg(4)%data%ln(arg(4)%offset)),arg(3),j))
     case(op_get_remote)
        ! op_get_remote ve &outvec vec prc offset   - OBSOLETE?
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        newve=arg(1)%data%ptr(arg(1)%offset+1)
        esize=newve%data%ln(newve%offset)
        v=empty_copy_vector(context,arg(3),esize+1)
@@ -563,7 +576,7 @@ contains
        if(errno/=0) goto 997
     case(op_put_remote)
        ! op_put_remote ve &outvec vec prc offset  - OBSOLETE?
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        newve=arg(1)%data%ptr(arg(1)%offset)
        if(pm_fast_vkind(newve)==pm_logical) &
             newve=shrink_ve(context,newve,pm_fast_esize(newve))
@@ -574,7 +587,7 @@ contains
        if(errno/=0) goto 997
     case(op_get_remote_distr)
        ! op_get_remote_distr ve &outvec array prc offset 
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        newve=arg(1)%data%ptr(arg(1)%offset+1)
        esize=newve%data%ln(newve%offset)
        w=arg(3)
@@ -591,7 +604,7 @@ contains
        if(errno/=0) goto 997
     case(op_put_remote_distr)
        ! op_get_remote_distr ve &outvec array prc offset 
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        newve=arg(2)%data%ptr(arg(2)%offset)
        if(pm_fast_vkind(newve)==pm_logical) &
             newve=shrink_ve(context,newve,pm_fast_esize(newve))
@@ -605,7 +618,7 @@ contains
        if(errno/=0) goto 997
     case(op_gather)
        ! op_gather ve &vec1 ... &vecN -- vecs both in and out
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        j=par_frame(par_depth)%this_nnode
        stack%data%ptr(stack%offset+opcode2)=&
             make_simple_ve(context,j)
@@ -661,6 +674,7 @@ contains
             v,arg(2),0_pm_ln,&
             m,data_tag)
        if(opcode==op_recv_offset_resend.or.opcode==op_recv_grid_resend) then
+          call pm_panic('should not be resending')
           do ii=1,par_frame(par_depth)%shared_nnode-1
              n=get_shared(i)
              call isend_disp(&
@@ -670,6 +684,15 @@ contains
                   data_tag)
           enddo
        endif
+    case(op_bcast_shared_offset,op_bcast_shared_grid)
+       v=arg(3)%data%ptr(&
+            arg(3)%offset&
+            +pm_array_vect)
+       v=v%data%ptr(v%offset)
+       m=1+pm_fast_esize(arg(2))
+       call broadcast_disp(context,&
+            0,v,arg(2),0_pm_ln,&
+            m,xcomm=par_frame(par_depth)%shared_comm)
     case(op_isend)
        ! op_isend ve prc array
        v=arg(3)%data%ptr(&
@@ -705,14 +728,13 @@ contains
         call recv(context,int(arg(2)%data%&
              ln(arg(2)%offset)),v,&
              data_tag)
-     case(op_isend_req,op_recv_reply,op_isend_assn,op_broadcast_disp)
+     case(op_isend_req,op_recv_reply,op_isend_assn)
         !!! Do not sync status as number of ops can vary between procs
         
         ! op_isend_req      ve offsets prc vec &vecout     [ mask ] 
         ! op_recv_reply     ve offsets prc &vec            [ mask ]
         ! op_isend_assn     ve offsets prc vec_lhs vec_rhs [ mask ]
-        ! op_broadcast_disp ve offsets prc &vec            [ mask ]
-        i=merge(4,5,opcode==op_recv_reply.or.opcode==op_broadcast_disp)
+        i=merge(4,5,opcode==op_recv_reply)
         if(nargs>i) then
            v=arg(2)
            w=arg(i+1)
@@ -740,20 +762,22 @@ contains
                 arg(4),&
                 arg(2),0_pm_ln,&
                 m,extra_req_tag)
-           if(opcode==op_isend_assn) then
-              call isend_val_disp(&
-                   int(arg(3)%data%&
-                   ln(arg(3)%offset)),&
-                   arg(5),&
-                   arg(2),0_pm_ln,&
-                   m,extra_req_tag)
-           else
-              call irecv_disp(context,&
-                   int(arg(3)%data%&
-                   ln(arg(3)%offset)),&
-                   arg(5),&
-                   arg(2),0_pm_ln,&
-                   m,data_tag,ok)
+           if(m>0) then
+              if(opcode==op_isend_assn) then
+                 call isend_val_disp(&
+                      int(arg(3)%data%&
+                      ln(arg(3)%offset)),&
+                      arg(5),&
+                      arg(2),0_pm_ln,&
+                      m,extra_req_tag)
+              else
+                 call irecv_disp(context,&
+                      int(arg(3)%data%&
+                      ln(arg(3)%offset)),&
+                      arg(5),&
+                      arg(2),0_pm_ln,&
+                      m,data_tag,ok)
+              endif
            endif
         elseif(opcode==op_recv_reply) then
            call recv_rest_disp(context,&
@@ -781,55 +805,58 @@ contains
         esize=j-1
         v=alloc_arg(pm_long,3)
         v%data%ln(v%offset:v%offset+esize)=i
-        v=copy_dref(context,arg(5),j,.false.)
-        call set_arg(4,v)
-        call recv(context,i,v,extra_req_tag)
-        if(opcode==op_recv_assn_call) then
-           w=recv_val(context,i,extra_req_tag)
-           call set_arg(6,w)
-           if(opcode2==1) then
-              do ii=1,par_frame(par_depth)%shared_nnode-1
-                 n=get_shared(ii)
-                 call isend(n,v,extra_req_tag,&
-                      par_frame(par_depth)%this_comm)
-                 call isend_val(n,w,0_pm_ln,j,extra_req_tag,&
-                      par_frame(par_depth)%this_comm)
-              enddo
+        if(j>0) then
+           v=copy_dref(context,arg(5),j,.false.)
+           call set_arg(4,v)
+           call recv(context,i,v,extra_req_tag)
+           if(opcode==op_recv_assn_call) then
+              w=recv_val(context,i,extra_req_tag)
+              call set_arg(6,w)
+              if(opcode2==1) then
+                 do ii=1,par_frame(par_depth)%shared_nnode-1
+                    n=get_shared(ii)
+                    call isend(n,v,extra_req_tag,&
+                         par_frame(par_depth)%this_comm)
+                    call isend_val(n,w,0_pm_ln,j,extra_req_tag,&
+                         par_frame(par_depth)%this_comm)
+                 enddo
+              endif
            endif
+           call set_arg(2,make_simple_ve(context,j))
         endif
         call set_arg(2,make_simple_ve(context,j))
-    case(op_remote_call)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+     case(op_remote_call)
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        v=arg(6)
-       w=empty_copy_vector(context,v%data%ptr(v%offset+1),esize+1)
+       if(pm_fast_vkind(ve)/=pm_tiny_int) w=empty_copy_vector(context,v%data%ptr(v%offset+1),esize+1)
        arg(5)%data%ptr(arg(5)%offset)=w
        errno=0
        if(remote_call(context,arg(7),&
             w,arg(6),arg(8),func,stack,pc,arg,&
             pc%offset+4,remote_call_block,arg(1),&
             .false.,errno,opcode2/=0)) then
-          i=sync_status(pm_node_error)
+          i=sync_status(pc,pm_node_error)
           call mesg_q_flush()
           goto 999
        else
           if(errno/=0) goto 997
        endif
     case(op_remote_send_call)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        v=arg(6)
        errno=0
        if(remote_call(context,arg(7),&
             arg(8),arg(6),pm_null_obj,func,stack,pc,arg,&
             pc%offset+4,remote_call_block,arg(1),&
             .true.,errno,opcode2/=0)) then
-          i=sync_status(pm_node_error)
+          i=sync_status(pc,pm_node_error)
           call mesg_q_flush()
           goto 999
        elseif(errno/=0) then
           goto 997
        endif
     case(op_server_call)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        v=arg(6)
        w=empty_copy_vector(context,v%data%ptr(v%offset+1),esize+1)
        arg(5)%data%ptr(arg(5)%offset)=w
@@ -839,14 +866,14 @@ contains
             w,arg(6),arg(8),func,stack,pc,arg,&
             pc%offset+4,remote_call_block,arg(1),&
             ve,.false.,errno)) then
-          i=sync_status(pm_node_error)
+          i=sync_status(pc,pm_node_error)
           call mesg_q_flush()
           goto 999
        elseif(errno/=0) then
           goto 997
        endif
     case(op_collect_call)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        v=arg(6)
        ve=shrink_ve(context,ve,esize)
        errno=0
@@ -854,14 +881,14 @@ contains
             arg(8),arg(6),pm_null_obj,func,stack,pc,arg,&
             pc%offset+4,remote_call_block,arg(1),&
             ve,.true.,errno,opcode2==1)) then
-          i=sync_status(pm_node_error)
+          i=sync_status(pc,pm_node_error)
           call mesg_q_flush()
           goto 999
        elseif(errno/=0) then
           goto 997
        endif
     case(op_bcast_call)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        if(pm_fast_vkind(ve)==pm_tiny_int) then
           call set_arg(3,broadcast_val_disp(context,&
                newve,0_pm_ln,0_pm_ln,&
@@ -885,13 +912,13 @@ contains
        newve%data%ptr(newve%offset)=arg(4)
        call set_arg(2,newve)
     case(op_sync_mess)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        call complete_messages(context)
 
        
        ! ******** Distibuted file operations *******
     case(op_open_file)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        v=alloc_arg(pm_int,2)
        w=alloc_arg(pm_int,3)
        p=arg(4)%data%ptr(arg(4)%offset+pm_array_vect)
@@ -910,7 +937,7 @@ contains
                w%data%i(w%offset+j))
        enddo
     case(op_close_file)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
        do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
@@ -924,7 +951,7 @@ contains
           call pm_file_close(arg(3)%data%i(arg(3)%offset+j),w%data%i(w%offset+j))
        enddo
     case(op_seek_file)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
        do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
@@ -939,7 +966,7 @@ contains
                arg(4)%data%lln(arg(4)%offset+j),w%data%i(w%offset+j))
        enddo
     case(op_read_file)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
        do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
@@ -954,7 +981,7 @@ contains
                w%data%i(w%offset+j))
        enddo
     case(op_write_file)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
        do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
@@ -969,7 +996,7 @@ contains
                w%data%i(w%offset+j))
        enddo
     case(op_read_file_array)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        v=arg(4)%data%ptr(arg(4)%offset+pm_array_vect)
        w=alloc_arg(pm_int,2)
        do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
@@ -985,7 +1012,7 @@ contains
                0_pm_ln,arg(5)%data%ln(arg(5)%offset+j),w%data%i(w%offset+j))
        enddo
     case(op_write_file_array)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
        v=arg(4)%data%ptr(arg(4)%offset+pm_array_vect)
        do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
@@ -1001,7 +1028,7 @@ contains
                0_pm_ln,arg(5)%data%ln(arg(5)%offset+j),w%data%i(w%offset+j))
        enddo
     case(op_read_file_tile)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
        call pm_file_read_disps(&
             arg(3)%data%i(arg(3)%offset),&
@@ -1011,7 +1038,7 @@ contains
             ii)
        w%data%i(w%offset:w%offset+esize)=ii
     case(op_write_file_tile)
-       if(sync_status(pm_node_running)==pm_node_error) goto 777
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
        call pm_file_write_disps(&
             arg(3)%data%i(arg(3)%offset),&
@@ -1212,6 +1239,10 @@ contains
           endif
        endif
        call set_arg(2,v)
+!!$       if(sys_node==0) then
+!!$          write(*,*) 'dref',sys_node
+!!$          call pm_dump_tree(context,6,v,2)
+!!$       endif
     case(op_import_dref)
        v=arg(1)%data%ptr(arg(1)%offset)
        if(.not.pm_fast_istiny(v)) then
@@ -1447,6 +1478,51 @@ contains
           endif
           p=arg(2)
           p%data%ln(p%offset+j)=m
+       enddo
+    case(op_includes_aseq)
+       p=alloc_arg(pm_logical,2)
+       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+          if(pm_fast_vkind(ve)==pm_null) then
+             j=jj
+          elseif(pm_fast_vkind(ve)==pm_logical) then
+             j=jj
+             if(.not.ve%data%l(ve%offset+jj)) cycle
+          else
+             j=ve%data%ln(ve%offset+jj)
+          endif
+          v=arg(3)%data%ptr(arg(3)%offset+pm_array_vect)
+          v=v%data%ptr(v%offset+j)
+          k=arg(4)%data%ln(arg(4)%offset)
+          w=arg(5)%data%ptr(arg(5)%offset+pm_array_vect)
+          w=w%data%ptr(w%offset+j)
+          kk=arg(6)%data%ln(arg(6)%offset)
+          p%data%l(p%offset+j)=aseq_includes(v%data%ln(v%offset:),k,w%data%ln(w%offset:),kk)
+       enddo
+    case(op_index_aseq,op_in_aseq)
+       p=alloc_arg(merge(pm_logical,pm_long,opcode==op_in_aseq),2)
+       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+          if(pm_fast_vkind(ve)==pm_null) then
+             j=jj
+          elseif(pm_fast_vkind(ve)==pm_logical) then
+             j=jj
+             if(.not.ve%data%l(ve%offset+jj)) cycle
+          else
+             j=ve%data%ln(ve%offset+jj)
+          endif
+          v=arg(3)%data%ptr(arg(3)%offset+pm_array_vect)
+          v=v%data%ptr(v%offset+j)
+          k=arg(4)%data%ln(arg(4)%offset)
+          kk=arg(5)%data%ln(arg(5)%offset+j)
+          m=aseq_index(v%data%ln(v%offset:),k,kk)
+          if(opcode==op_index_aseq) then
+             p%data%ln(p%offset+j)=m
+          else
+             if(m<0.or.m>=k) then
+                p%data%l(p%offset+j)=.false.
+             else
+                p%data%l(p%offset+j)=v%data%ln(v%offset+m)==kk
+             endif
+          endif
        enddo
     case(op_expand_aseq)
        do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
@@ -9878,7 +9954,7 @@ contains
       integer(pm_p),intent(in):: vkind
       integer,intent(in)::iarg
       type(pm_ptr):: ptr
-      ptr=pm_new(context,vkind,esize+1)
+      ptr=pm_new(context,vkind,max(1_pm_ln,esize+1))
       arg(iarg)%data%ptr(arg(iarg)%offset)=ptr
     end function alloc_arg
 
@@ -10091,12 +10167,22 @@ contains
        errno=pm_run(context,func,stack,newpc,-1,0,&
             arg,num_args,nesting,noexit)
     else
-       errno=0
+       newve%data%ptr(newve%offset)=pm_fast_tinyint(context,0)
+       newve=pm_assign_new(context,newve,1_pm_ln,pm_long,n+4_pm_ln,.false.)
+       newve%data%ln(newve%offset)=0
+       newve%data%ln(newve%offset+1)=0
+       newve%data%ln(newve%offset+2)=0
+       newve%data%ln(newve%offset+3)=0
+       newve%data%ln(newve%offset+4:newve%offset+3+n)=&
+            hash%data%ln(hash%offset:hash%offset+n-1)
+       errno=pm_run(context,func,stack,newpc,-1,0,&
+            arg,num_args,nesting,noexit)
     endif
   contains
     include 'fesize.inc'
     include 'fnewnc.inc'
     include 'fisnull.inc'
+    include 'ftiny.inc'
   end function  par_loop
 
   ! Call block of args
@@ -10119,15 +10205,21 @@ contains
     type(pm_ptr):: newve,p,newpc
     integer(pm_ln):: n,i
 
-    !write(*,*) 'BLOCK m=',m
+!!$    write(*,*) sys_node,'BLOCK m=',m
+!!$    if(present(disps)) write(*,*) size(disps)
     
     if(m>0) then
        
        newve=pm_fast_newnc(context,pm_pointer,2)
        arg(2)%data%ptr(arg(2)%offset)=newve
        if(present(disps)) then
-          p=pm_assign_new(context,newve,0_pm_ln,pm_long,size(disps,kind=pm_ln),.false.)
-          p%data%ln(p%offset:p%offset+size(disps)-1)=disps
+          if(size(disps)==0) then
+             errno=0
+             return
+          else
+             p=pm_assign_new(context,newve,0_pm_ln,pm_long,size(disps,kind=pm_ln),.false.)
+             p%data%ln(p%offset:p%offset+size(disps)-1)=disps
+          endif
        else
           newve%data%ptr(newve%offset)=pm_null_obj
        endif
@@ -10233,7 +10325,7 @@ contains
     character(len=*),intent(in):: errmesg
     integer:: junk
     if(.not.noexit) then
-       junk=sync_status(pm_node_error)
+       junk=sync_status(pc,pm_node_error)
        call mesg_q_flush()
     endif
     if(pm_opts%colour) then
@@ -10330,7 +10422,11 @@ contains
        start=off%data%ln(off%offset+j)
        size=len%data%ln(len%offset+j)
        p=vec%data%ptr(vec%offset+j)
-       call mesg_q_print(context,p%data%s(p%offset+start:p%offset+start+size-1))
+       if(pm_opts%print_immediate) then
+          write(*,*) p%data%s(p%offset+start:p%offset+start+size-1)
+       else
+          call mesg_q_print(context,p%data%s(p%offset+start:p%offset+start+size-1))
+       endif
     enddo
   contains
     include 'fesize.inc'

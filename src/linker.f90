@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2019
+! Copyright (c) Tim Bellerby, 2023
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -118,8 +118,8 @@ contains
     vals=pm_dict_vals(context,list)
     do i=0,pm_dict_size(context,list)-1
        key=keys%data%ptr(keys%offset+i)
-       slot=key%data%i16(key%offset)
-       name=pm_fast_name(context,int(key%data%i16(key%offset+1)))
+       slot=key%data%i(key%offset)
+       name=pm_fast_name(context,int(key%data%i(key%offset+1)))
        mnode=vals%data%ptr(vals%offset+i)
        dict=imodl%data%ptr(imodl%offset+slot)
        val=pm_dict_lookup(context,dict,name)

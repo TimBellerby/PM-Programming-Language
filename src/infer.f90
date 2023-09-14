@@ -73,9 +73,7 @@ module pm_infer
   integer,parameter:: par_mode_multi_node=2
   integer,parameter:: par_mode_single_node=3
   integer,parameter:: par_mode_conc=4
-  integer,parameter:: par_mode_tile=5
-  integer,parameter:: par_mode_inner=6
-  integer,parameter:: par_mode_inner_tile=7
+  integer,parameter:: par_mode_inner=5
 
 contains
   
@@ -179,9 +177,10 @@ contains
 
     if(cnode_flags_set(prc,pr_flags,proc_is_abstract)) then
        call infer_error(coder,callnode,&
-            'Call to an abstract procedure is not implemented for this argument list')
+            'Abstract procedure needs to be implemented for the given argument list')
        call infer_error(coder,prc,&
-            'Abstract procedure definition referenced in above error')
+            'Abstract procedure definition referenced in the above error')
+       call infer_trace(coder)
        rtype=error_type
     endif
 
@@ -461,7 +460,8 @@ contains
     call code_int_vec(coder,coder%stack,base,coder%top)
     call code_num(coder,&
          ior(iand(cnode_get_num(prc,pr_flags),&
-         proc_is_comm+proc_run_shared+proc_run_local+proc_inline+proc_no_inline),&
+         proc_is_comm+proc_run_shared+proc_run_local+proc_inline+&
+         proc_no_inline+proc_run_complete+proc_run_always),&
          coder%taints))
     if(nkeys>0) then
        call code_int_vec(coder,coder%wstack,&
@@ -711,6 +711,9 @@ contains
              tv=pm_typ_vect(coder%context,rtype)
              t1=pm_tv_arg(tv,1)
              rtype=pm_new_type_typ(coder%context,t1)
+          case(sym_query)
+             rtype=error_type
+             coder%num_errors=coder%num_errors+1
           end select
        endif
     endif
@@ -848,11 +851,11 @@ contains
           enddo
           if(cblock_has_comm(cnode_arg(args,2))&
                .or.cblock_has_comm(cnode_arg(args,4))) then
-             call set_call_sig(merge(1,0,coder%par_kind2<=par_mode_tile))
+             call set_call_sig(merge(1,0,coder%par_kind2<=par_mode_conc))
           else
              call set_call_sig(0)
           endif
-       case(sym_until,sym_each,sym_loop,sym_loop_body)
+       case(sym_until,sym_each)
           list=cnode_arg(args,2)
           counter=0
           do 
@@ -867,11 +870,8 @@ contains
              endif
           enddo
           call check_logical(3)
-          if(sig==sym_loop) then
-             call check_logical(1)
-          endif
           if(cblock_has_comm(list)) then
-             call set_call_sig(merge(1,0,coder%par_kind<=par_mode_tile))
+             call set_call_sig(merge(1,0,coder%par_kind<=par_mode_conc))
           else
              call set_call_sig(0)
           endif
@@ -888,20 +888,25 @@ contains
           endif
        case(sym_do,sym_for,sym_also)
           call prc_cblock(coder,cnode_arg(args,1),base)
+       case(sym_sync)
+          call prc_cblock(coder,cnode_arg(args,2),base)
        case(sym_over)
           call prc_cblock(coder,cnode_arg(args,1),base)
           call prc_cblock(coder,cnode_arg(args,2),base)
        case(sym_import_val,sym_import_param)
           tno=pm_typ_strip_mode(coder%context,arg_type_with_mode(2),mode)
           coder%stack(get_slot(1))=pm_typ_add_mode(coder%context,tno,sym_shared,.false.)
-          if(tno>0.and.(coder%par_kind==par_mode_tile.or.coder%par_kind==par_mode_conc)) then
+          if(tno>0.and.(coder%par_kind==par_mode_conc)) then
              if(iand(pm_typ_flags(coder%context,tno),&
                   pm_typ_has_distributed)/=0) then
-                if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
-                   call infer_error_with_trace(coder,callnode,&
-                        'Cannot import distributed value into "for '//&
-                        merge('conc','tile',coder%par_kind==par_mode_conc)//'" statement')
-                   coder%stack(get_slot(1))=error_type
+                tno=pm_typ_strip_mode(coder%context,arg_type_with_mode(3),mode)
+                if(iand(pm_typ_flags(coder%context,tno),&
+                     pm_typ_has_distributed)==0) then
+                   if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
+                      call infer_error_with_trace(coder,callnode,&
+                           'Cannot import distributed value into mirrored "forall"')
+                      coder%stack(get_slot(1))=error_type
+                   endif
                 endif
              endif
           endif
@@ -1028,19 +1033,19 @@ contains
           if(arg_type(2)/=pm_null) then
              call prc_cblock(coder,cnode_arg(args,1),base)
           endif
-       case(sym_for_stmt,sym_tile)
+       case(sym_for_stmt)
           coder%taints=ior(coder%taints,proc_needs_par)
           tno=coder%par_kind
           coder%stack(get_slot(1))=pm_long
           coder%stack(get_slot(2))=tno
           if(tno==error_type) tno=pm_null
-          if(tno>par_mode_multi_node.or.arg_type(7)==pm_null.or.sig==sym_tile) then
+          if(tno>par_mode_multi_node.or.arg_type(7)==pm_null) then
              save_par_kind=coder%par_kind2
              coder%par_kind2=coder%par_kind
              if(tno>par_mode_multi_node) then
-                coder%par_kind=merge(par_mode_inner_tile,par_mode_inner,sig==sym_tile)
+                coder%par_kind=par_mode_inner
              else
-                coder%par_kind=merge(par_mode_tile,par_mode_conc,sig==sym_tile)
+                coder%par_kind=par_mode_conc
              endif
              slot=get_slot(1)
              coder%stack(slot)=pm_long
@@ -1262,14 +1267,6 @@ contains
           call set_call_sig(int(k))
           call combine_types(cnode_arg(args,1),&
                pm_typ_add_mode(coder%context,tno2,mode,cond))
-!!$       case(sym_var,sym_const)
-!!$          tno=cnode_num_arg(args,3)
-!!$          tno2=pm_typ_strip_mode_and_cond(coder%context,&
-!!$               arg_type_with_mode(2),mode,cond)
-!!$          tno3=pm_typ_convert(coder%context,tno,tno2,sig==sym_var)
-!!$          if(tno3>0) tno2=tno3
-!!$          call combine_types(cnode_arg(args,1),&
-!!$               pm_typ_add_mode(coder%context,tno2,mode,cond))
        case(sym_var_set_mode)
           mode2=cnode_num_arg(args,2)
           coder%stack(get_slot(1))=pm_typ_add_mode(coder%context,&
@@ -1299,7 +1296,7 @@ contains
              call infer_error_with_trace(coder,callnode,&
                   'Expression must be invariant instead of: '//trim(sym_names(mode)))
           endif
-       case(sym_assign)
+       case(sym_assignment)
           tno=pm_typ_get_mode(coder%context,arg_type_with_mode(1))
           if(tno>=sym_mirrored) then
              call infer_error(coder,callnode,&
@@ -1310,76 +1307,6 @@ contains
                   'Assignments to "'//trim(sym_names(tno))//&
                   '" variables must be labelled in a conditional context') 
           endif
-       case(sym_sync_assign)
-          tno=pm_typ_get_mode(coder%context,arg_type_with_mode(1))
-          write(*,*) '>>>>',trim(sym_names(tno))
-          if(tno>=sym_mirrored) then
-             call infer_error(coder,callnode,&
-                  'Assignments to "'//trim(sym_names(tno))//&
-                  '" variables are not allowed outside of a "sync" statement') 
-          endif
-!!$       case(sym_pval,sym_pval_as)
-!!$          tno=arg_type(2)
-!!$          if(tno==error_type) then
-!!$             call set_arg_to_error_type(1)
-!!$             return
-!!$          endif
-!!$          if(sig==sym_pval_as) then
-!!$             if(pm_typ_kind(coder%context,tno)==pm_typ_is_poly) then
-!!$                tno=pm_typ_arg(coder%context,tno,1)
-!!$             else
-!!$                call infer_error(coder,callnode,'"@" second argument is not a polymorphic value')
-!!$                call set_arg_to_error_type(1)
-!!$                return
-!!$             endif
-!!$          else
-!!$             if(pm_typ_kind(coder%context,tno)==pm_typ_is_type) then
-!!$                tno=pm_typ_arg(coder%context,tno,1)
-!!$             else
-!!$                call infer_error(coder,callnode,'"pval" second argument is not a type')
-!!$                call set_arg_to_error_type(1)
-!!$                return
-!!$             endif
-!!$          endif
-!!$          call get_slot_and_type(3,slot2,tno2)
-!!$          if(tno2==error_type) then
-!!$             call set_arg_to_error_type(1)
-!!$             return
-!!$          endif
-!!$          tno2=pm_typ_strip_mode_and_cond(coder%context,tno2,mode,cond)
-!!$          t=pm_typ_vect(coder%context,tno2)
-!!$          if(pm_tv_kind(t)==pm_typ_is_poly) then
-!!$             list=check_poly(coder,tno2)
-!!$             tno2=pm_tv_arg(t,1)
-!!$          endif
-!!$          if(.not.pm_typ_includes(coder%context,tno,tno2,pm_typ_incl_val,&
-!!$               einfo)) then
-!!$             if(tno2/=0) then
-!!$                call infer_error(coder,callnode,&
-!!$                       'polymorphic value has incompatible argument type')
-!!$                call pm_typ_error(coder%context,einfo)
-!!$                call infer_trace(coder)
-!!$             endif
-!!$          endif
-!!$          tno=pm_new_poly_typ(coder%context,tno)
-!!$          call combine_types(cnode_arg(args,1),&
-!!$               pm_typ_add_mode(coder%context,tno,mode,cond))
-!!$          if(pm_tv_kind(t)==pm_typ_is_poly) then
-!!$             if(.not.pm_fast_isnull(list)) then
-!!$                n=pm_set_size(coder%context,list)
-!!$                do i=1,n
-!!$                   list2=pm_set_key(coder%context,list,int(i,pm_ln))
-!!$                   if(add_type_to_poly(coder,tno,&
-!!$                        list2%data%i(list2%offset))) then
-!!$                      coder%types_finished=.false.
-!!$                   endif
-!!$                enddo
-!!$             endif
-!!$          else
-!!$             if(add_type_to_poly(coder,tno,tno2)) then
-!!$                coder%types_finished=.false.
-!!$             endif
-!!$          endif
        case(sym_type_val)
           tno=cnode_num_arg(cnode_arg(args,2),1)
           call combine_types(cnode_arg(args,1),&
@@ -1603,7 +1530,7 @@ contains
           coder%stack(base)=pop_word(coder)
        case(sym_start_loop)
            coder%stack(get_slot(2))=pm_logical
-       case(sym_underscore,sym_sync,sym_colon,sym_end_loop)
+       case(sym_underscore,sym_colon,sym_end_loop,sym_init_var)
           continue
        case(sym_arg)
           call combine_types(cnode_arg(args,1),arg_type(2))
@@ -1848,9 +1775,7 @@ contains
       integer:: tkind
       tkind=pm_typ_kind(coder%context,tno)
       call set_call_sig(&
-           merge(1,0,coder%par_kind/=par_mode_tile.and.&
-           coder%par_kind/=par_mode_inner_tile.and.&
-           tkind/=pm_typ_is_dref.and.tkind/=pm_typ_is_vect))
+           merge(1,0,tkind/=pm_typ_is_dref.and.tkind/=pm_typ_is_vect))
     end subroutine flag_import_export
 
     !==================================================================
@@ -1894,7 +1819,7 @@ contains
          endif
       elseif(sig==0) then
          if(.not.isopt) then
-            call infer_error(coder,callnode,&
+            call infer_error_with_trace(coder,callnode,&
                  'Error accessing element "'//&
                  trim(pm_name_as_string(coder%context,name))//&
                  '" of type "'//&
@@ -1967,7 +1892,7 @@ contains
             trim(sig_name_str(coder,int(sig))),'@',&
             callnode%data%ptr(callnode%offset+cnode_lineno)%offset
        if(cnode_get_kind(args)/=cnode_is_arglist) call pm_panic('not arglist')
-       !call qdump_code_tree(coder,pm_null_obj,6,callnode,2)
+       call qdump_code_tree(coder,pm_null_obj,6,callnode,2)
     endif
     flags=cnode_get_num(callnode,call_flags)
     is_comm=iand(flags,call_is_comm)/=0
@@ -2113,9 +2038,13 @@ contains
                    call call_error('Cannot have "'//trim(sym_names(mode2))//&
                         '" "&" parameter alongside "<<shared>>" call attribute')
                 endif
-             elseif(mode2/=sym_partial.and.mode2/=sym_coherent) then
-                call call_error('Cannot have "'//trim(sym_names(mode2))//&
-                     '" "&" parameter in standard call')
+             elseif(mode2/=sym_partial.and.mode2/=sym_coherent.and.(mode2/=sym_chan.or.is_unlabelled)) then
+                if(mode2==sym_chan) then
+                   call call_error('Cannot change "chan" variable in an unlabelled conditional context')
+                else
+                   call call_error('Cannot change "'//trim(sym_names(mode2))//&
+                        '" "&" variable outside of a "sync" statement')
+                endif
              endif
           enddo
        endif
@@ -2653,9 +2582,7 @@ contains
                      endif
                   else
                      do j=1,nret
-                        v=cnode_arg(args,j)
-                        call combine_types(v,&
-                             0)
+                        call set_arg_to_error_type(j)
                      enddo
                   endif
                endif
@@ -2735,6 +2662,7 @@ contains
       
     end function  simple_proc_call
 
+ 
   end subroutine prc_proc_call
 
 
@@ -3379,12 +3307,12 @@ contains
              top=top-1
              node=coder%imports(top)
              if(.not.hide(node)) then
-                call pm_error_header(coder%context,&
-                     cnode_get_name(node,cnode_modl_name),&
-                     cnode_get_name(node,cnode_lineno),&
-                     cnode_get_name(node,cnode_charno))
-                top=top-1
-                if(top<1) return
+!!$                call pm_error_header(coder%context,&
+!!$                     cnode_get_name(node,cnode_modl_name),&
+!!$                     cnode_get_name(node,cnode_lineno),&
+!!$                     cnode_get_name(node,cnode_charno))
+!!$                top=top-1
+!!$                if(top<1) return
                 exit
              endif
           enddo
@@ -3417,12 +3345,21 @@ contains
       type(pm_ptr),intent(in):: node
       logical:: hideit
       character(len=4):: prefix
+      integer:: name
       if(cnode_get_name(node,cnode_modl_name)==sym_pm_system) then
          hideit=.true.
          return
       endif
-      prefix=pm_name_as_string(coder%context,sig_name(coder,cnode_get_num(node,call_sig)))
-      hideit=prefix=='PM__'
+      name=pm_name_stem(coder%context,sig_name(coder,cnode_get_num(node,call_sig)))
+      if(name==sym_assignment.or.name==sym_assign_var.or.&
+           name==sym_make_subref.or.name==sym_make_sublhs.or.&
+           name==sym_make_sublhs_amp) then
+         hideit=.false.
+      else
+         prefix=pm_name_as_string(coder%context,name)
+         hideit=prefix=='PM__'
+      endif
+      !write(*,*) 'hide',hideit,name,sym_make_subref,sym_dump,pm_name_as_string(coder%context,name)
     end function hide
   end subroutine infer_trace
   
@@ -3439,7 +3376,7 @@ contains
     character(len=100):: str
     character(len=2):: join,ampstr
     integer:: n,k,nargs,nkeys
-    integer::ampidx,signame
+    integer::ampidx,signame,signamebase
     type(pm_ptr):: tv,key,val,amp,keyargs,name
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
@@ -3472,9 +3409,15 @@ contains
          cnode_get_name(node,cnode_lineno),&
          cnode_get_name(node,cnode_charno))
     signame=sig_name(coder,cnode_get_num(node,call_sig))
+    signamebase=pm_name_stem(coder%context,signame)
     if(signame==sym_proc) then
        tv=pm_typ_vect(coder%context,coder%wstack(base))
        signame=abs(pm_tv_name(tv))
+    elseif(signamebase==sym_assignment.or.signamebase==sym_assign_var) then
+       signame=sym_assign
+    elseif(signamebase==sym_make_subref.or.signamebase==sym_make_sublhs.or.&
+         signamebase==sym_make_sublhs_amp) then
+       signame=sym_sub
     endif
     if(cnode_flags_clear(node,call_flags,&
          call_is_comm)) then
@@ -3483,12 +3426,17 @@ contains
        n=0
     else
        call more_error(coder%context,' '//trim(pm_name_as_string(coder%context,&
-            signame))//'%('//&
+            signame))//'%(')
+       call more_error(coder%context,'  region:   '//&
             trim(pm_typ_as_string(coder%context,&
-            coder%wstack(base+nkeys+1),distr=.true.))//&
-            ','//trim(pm_typ_as_string(coder%context,&
+            coder%wstack(base+nkeys+1),distr=.true.)))
+       call more_error(coder%context,'  schedule: '//&
+            trim(pm_typ_as_string(coder%context,&
             coder%wstack(base+nkeys+2),distr=.true.)))
-       n=2
+       call more_error(coder%context,'  here:     '//&
+            trim(pm_typ_as_string(coder%context,&
+            coder%wstack(base+nkeys+3),distr=.true.)))
+       n=3
     endif
     do i=nkeys+n+1,nargs
        if(i<nargs.or.nkeys>0) then
@@ -3561,7 +3509,6 @@ contains
     type(pm_ptr):: tv,tv2,key,amp,val
     character(len=256):: str,str2
     character(len=7):: buf1,buf2
-    logical:: angles
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
     k=0
@@ -3619,20 +3566,27 @@ contains
        if(add_char('%')) goto 777
        tv=pm_typ_vect(coder%context,tno)
        if(add_char('(')) goto 777
-       if(add_char('[')) goto 777
        typ=pm_tv_arg(tv,1)
        if(typ/=0) then
-          tv2=pm_typ_vect(coder%context,typ)
-          call typ_to_str(coder%context,pm_tv_arg(tv2,1),str,n,.false.)
-          if(pm_tv_arg(tv2,2)/=0.or.pm_tv_arg(tv2,3)/=0) then
-             if(add_char(':')) goto 777
-             call typ_to_str(coder%context,pm_tv_arg(tv2,2),str,n,.false.)
-          endif
+          if(add_char('region:')) goto 777
+          call typ_to_str(coder%context,typ,str,n,.false.)
+          if(add_char(',')) goto 777
        endif
-       if(add_char('],')) goto 777
+       typ=pm_tv_arg(tv,2)
+       if(typ/=0) then
+          if(add_char('schedule:')) goto 777
+          call typ_to_str(coder%context,typ,str,n,.false.)
+          if(add_char(',')) goto 777
+       endif
+       typ=pm_tv_arg(tv,3)
+       if(typ/=0) then
+          if(add_char('here:')) goto 777
+          call typ_to_str(coder%context,typ,str,n,.false.)
+          if(add_char(',')) goto 777
+       endif
        if(n>len(str)-10) goto 777
        nargs=pm_tv_numargs(tv)
-       do i=3,nargs
+       do i=4,nargs
           call check_amp
           typ=pm_tv_arg(tv,i)
           call typ_to_str(coder%context,typ,str,n,.false.)
