@@ -181,13 +181,42 @@ contains
     integer,intent(in):: ndims
     integer(pm_ln),dimension(ndims),intent(inout):: dims_inout
     integer,intent(in):: shared_nnode
-    integer:: error
+    integer:: nnodes,error,i,j,nrequired
     integer,dimension(ndims):: dims
-    dims=dims_inout
+    logical:: has_zero
+    do i=1,ndims
+       if(dims_inout(i)>huge(1)) then
+          do j=1,ndims
+             if(dims_inout(i)<=0) dims_inout(i)=1
+          enddo
+          return
+       else
+          dims(i)=max(0,dims_inout(i))
+       endif
+    enddo
     if(shared_nnode>1) then
-       call mpi_dims_create(shared_nnode,ndims,dims,error)
-       if(error/=MPI_SUCCESS) &
-            call pm_panic('cannot create dims')
+       nrequired=1
+       has_zero=.true.
+       do i=1,ndims
+          if(dims(i)/=0) then
+             nrequired=nrequired*dims(i)
+          else
+             has_zero=.true.
+          endif
+       enddo
+       if(nrequired>=shared_nnode) then
+          if(has_zero) then
+             do i=1,ndims
+                if(dims(i)==0) dims(i)=1
+             enddo
+          endif
+       elseif(has_zero) then
+          nnodes=(shared_nnode/nrequired)*nrequired
+          call mpi_dims_create(nnodes,ndims,dims,error)
+          if(error/=MPI_SUCCESS) then
+             call pm_panic('cannot create dims')
+          endif
+       endif
     else
        dims=1
     endif
@@ -1018,8 +1047,9 @@ contains
        len=v%data%ptr(v%offset+pm_array_length)
        call recv(context,node,len,mess_tag)
        avec=v%data%ptr(v%offset+pm_array_vect)
+       
        do j=0,pm_fast_esize(len)
-          call pm_ptr_assign(context,avec,k,recv_val(context,node,mess_tag+1))
+          call pm_ptr_assign(context,avec,j,recv_val(context,node,mess_tag+1))
        enddo
     case(pm_struct_type,pm_rec_type,pm_polyref_type)
        do i=2,esize
@@ -1409,8 +1439,9 @@ contains
        call mpi_recv(ptr%data%l(ptr%offset),m,&
             tno,node,mess_tag,comm,MPI_STATUS_IGNORE,errno)
     case default
-       write(*,*) 'HDR==',hdr
-       call pm_panic('recv_val')
+!!$       write(*,*) 'HDR==',hdr
+!!$       call pm_panic('recv_val')
+       ptr=pm_null_obj
     end select
     if(debug_mess) then
        write(*,*) 'RECV VAL DONE'
@@ -1904,6 +1935,8 @@ contains
             tno,node,mess_tag,comm,mess,errno)
        call push_message(mess)
        call mpi_type_free(tno,errno)
+    case default
+!       if(hdr%hdr(1)==4) call pm_panic('isend_val_disp')
     end select
   contains
     include 'fvkind.inc'
@@ -2420,7 +2453,8 @@ contains
        off=offsets%data%ptr(offsets%offset+2)
        do i=2,pm_fast_esize(off)
           seq=off%data%ptr(off%offset+i)
-          if(typ==pm_array_type.or.typ==pm_const_array_type) then
+          if(pm_fast_esize(seq)==2) then
+             seq=seq%data%ptr(seq%offset+2)
              v=seq%data%ptr(seq%offset+pm_array_vect)
              v=v%data%ptr(v%offset)
              mpi_typ=mpi_disp_type(mpi_typ,v,0_pm_ln,&
@@ -3385,8 +3419,8 @@ contains
 
     if(debug_mess) then
        write(*,*) this_node,'REMOTE_CALL> ntot=',ntot,'top=',message_top,'ve_kind=',pm_fast_vkind(ve)
-       write(*,*) this_node,'node=(',node%data%ln(node%offset:node%offset+nnode-1),')'
-       call pm_dump_tree(context,6,ve,2)
+       !write(*,*) this_node,'node=(',node%data%ln(node%offset:node%offset+nnode-1),')'
+       !call pm_dump_tree(context,6,ve,2)
     endif
 
     if(ntot>0) then
@@ -3909,11 +3943,11 @@ contains
     logical:: allok
     integer:: errno
     if(debug_mess) &
-         write(*,*) 'sync enter',sys_node,ok
+         write(*,*) sys_node,'sync enter',ok
     call mpi_allreduce(ok,allok,1,MPI_LOGICAL,&
          MPI_LOR,par_frame(par_depth)%this_comm,errno)
     if(debug_mess) &
-         write(*,*) 'sync leave',sys_node,allok
+         write(*,*) sys_node,'sync leave',allok
   end function sync_loop_end
 
   function sync_find(ok) result(node)
@@ -3931,12 +3965,13 @@ contains
     endif
   end function sync_find
 
-  function sync_status(status) result(allstatus)
+  function sync_status(pc,status) result(allstatus)
+    type(pm_ptr),intent(in):: pc
     integer,intent(in):: status
     integer:: allstatus
     integer:: i,junk,errno
     if(debug_mess) &
-         write(*,*) 'sync_status',sys_node,par_frame(par_depth)%this_comm
+         write(*,*) sys_node,'sync_status',par_frame(par_depth)%this_comm,pc%offset
     call mpi_allreduce(status,allstatus,1,MPI_INTEGER,&
         MPI_BOR,par_frame(par_depth)%this_comm,errno)
    if(iand(allstatus,pm_node_error)/=0) then

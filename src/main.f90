@@ -292,16 +292,17 @@ contains
     endif
     
     
-    !if(coder%num_errors>0) then
-    !   call pm_stop('Compilation terminated due to type-inference errors')
-    !endif
- 
     if(out_debug_files) then
        open(unit=pm_comp_file_unit,file='infer.out')
        call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
        call dump_res_sigs(coder,pm_comp_file_unit)
        close(pm_comp_file_unit)
     endif
+
+   if(coder%num_errors>0) then
+       call pm_stop('Compilation terminated due to type-inference errors')
+    endif
+
     
     if(pm_opts%print_timings) then
        call cpu_time(newtime)
@@ -343,5 +344,20 @@ contains
        time=newtime
     endif
   end subroutine run_wcode_stage
+
+!!$  subroutine repl
+!!$    type(parse_state),target:: parser
+!!$    type(code_state):: coder
+!!$    type(wcoder),target:: wcd
+!!$    
+!!$    prog=root%data%ptr(root%offset+modl_stmts)
+!!$    if(pm_fast_isnull(prog)) call pm_stop('No program defined to run')
+!!$    call trav_prog(coder,prog)
+!!$    call prc_prog(coder)
+!!$    call init_wcoder(context,wcd,proc_cache,poly_cache)
+!!$    call wcode_prog(wcd,prog_code)
+!!$    call wcode_procs(wcd)
+!!$    
+!!$  end subroutine repl
   
 end program pm

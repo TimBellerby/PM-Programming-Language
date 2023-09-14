@@ -145,12 +145,15 @@ module pm_vmdefs
   integer,parameter:: op_intersect_aseq = op_misc3 + 10
   integer,parameter:: op_expand_aseq = op_misc3 + 11
   integer,parameter:: op_intersect_bseq = op_misc3 + 12
-  integer,parameter:: op_gcd = op_misc3 + 13
-  integer,parameter:: op_chan = op_misc3 + 14
-  integer,parameter:: op_active = op_misc3 + 15
-  integer,parameter:: op_new_dump = op_misc3 + 16
-  integer,parameter:: op_show = op_misc3 + 17
-  integer,parameter:: op_show_stack = op_misc3 + 18
+  integer,parameter:: op_includes_aseq = op_misc3 + 13
+  integer,parameter:: op_in_aseq = op_misc3 +14
+  integer,parameter:: op_index_aseq = op_misc3 + 15
+  integer,parameter:: op_gcd = op_misc3 + 16
+  integer,parameter:: op_chan = op_misc3 + 17
+  integer,parameter:: op_active = op_misc3 + 18
+  integer,parameter:: op_new_dump = op_misc3 + 19
+  integer,parameter:: op_show = op_misc3 + 20
+  integer,parameter:: op_show_stack = op_misc3 + 21
 
   integer,parameter:: op_comm = op_show_stack + 1
 
@@ -201,13 +204,14 @@ module pm_vmdefs
   integer,parameter:: op_isend_reply = op_comm + 43
   integer,parameter:: op_do_at = op_comm + 44
   integer,parameter:: op_root_node = op_comm + 45
-  integer,parameter:: op_broadcast_disp = op_comm + 46
-  integer,parameter:: op_broadcast_shared = op_comm + 47
-  integer,parameter:: op_isend_grid = op_comm + 48
-  integer,parameter:: op_irecv_grid = op_comm + 49
-  integer,parameter:: op_recv_grid = op_comm + 50
-  integer,parameter:: op_recv_grid_resend = op_comm + 51
-  integer,parameter:: op_recv_offset_resend = op_comm + 52
+  integer,parameter:: op_bcast_shared_offset = op_comm + 46
+  integer,parameter:: op_bcast_shared_grid = op_comm + 47
+  integer,parameter:: op_broadcast_shared = op_comm + 48
+  integer,parameter:: op_isend_grid = op_comm + 49
+  integer,parameter:: op_irecv_grid = op_comm + 50
+  integer,parameter:: op_recv_grid = op_comm + 51
+  integer,parameter:: op_recv_grid_resend = op_comm + 52
+  integer,parameter:: op_recv_offset_resend = op_comm + 53
 
   integer,parameter:: first_file_op = op_recv_offset_resend
   integer,parameter:: op_open_file=first_file_op+1
@@ -678,7 +682,9 @@ module pm_vmdefs
   integer,parameter:: op_assign_farray=op_start_comp+21
   integer,parameter:: op_init_farray=op_start_comp+22
   integer,parameter:: op_wrap=op_start_comp+23
-  integer,parameter:: op_stop_comp=op_init_farray
+  integer,parameter:: op_sync=op_start_comp+24
+  integer,parameter:: op_init_var=op_start_comp+25
+  integer,parameter:: op_stop_comp=op_init_var
   
   integer,parameter:: num_op=op_stop_comp
   
@@ -789,6 +795,9 @@ contains
     op_names(op_intersect_aseq)='op_intersect_aseq'
     op_names(op_expand_aseq)='op_expand_aseq'
     op_names(op_intersect_bseq)='op_intersect_bseq'
+    op_names(op_includes_aseq)='op_includes_aseq'
+    op_names(op_in_aseq)='op_in_aseq'
+    op_names(op_index_aseq)='op_index_aseq'
     op_names(op_gcd)='op_gcd'
     op_names(op_chan)='op_chan'
     op_names(op_active)='op_active'
@@ -844,7 +853,8 @@ contains
     op_names(op_isend_reply)='op_isend_reply'
     op_names(op_do_at)='op_do_at'
     op_names(op_root_node)='op_root_node'
-    op_names(op_broadcast_disp)='op_broadcast_disp'
+    op_names(op_bcast_shared_offset)='op_bcast_shared_offset'
+    op_names(op_bcast_shared_grid)='op_bcast_shared_grid'
     op_names(op_broadcast_shared)='op_broadcast_shared'
     op_names(op_isend_grid)='op_isend_grid'
     op_names(op_irecv_grid)='op_irecv_grid'
@@ -1296,6 +1306,8 @@ contains
     op_names(op_assign_farray)='op_assign_farray'
     op_names(op_init_farray)='op_init_farray'
     op_names(op_wrap)='op_wrap'
+    op_names(op_sync)='op_sync'
+    op_names(op_init_var)='op_init_var'
 
 !!$    do i=op_call,op_comm_loop_par
 !!$       if(op_names(i)=='??')then

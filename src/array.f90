@@ -523,10 +523,10 @@ contains
     type(pm_reg),pointer:: reg
     integer(pm_ln)::i
     if(pm_fast_typeof(array)==pm_array_type) then
-       reg=>pm_register(context,'aindx',idx,p)
        vec=array%data%ptr(array%offset+pm_array_vect)
        off=array%data%ptr(array%offset+pm_array_offset)
        len=array%data%ptr(array%offset+pm_array_length)
+       reg=>pm_register(context,'aindx',idx,p)
        p=empty_copy_vector(context,vec%data%ptr(vec%offset),&
             esize+1_pm_ln)
        ptr=p
@@ -575,6 +575,7 @@ contains
     endif
   contains
     include 'ftypeof.inc'
+    include 'fisnull.inc'
   end function array_index
 
   recursive subroutine array_vect_index(context,p,v,idx,offset,esize)
@@ -3991,7 +3992,7 @@ contains
        write(*,*) spaces(1:depth*2),'...'
     endif
     k=pm_fast_typeof(v)
-    write(*,*) 'k=',k
+    !write(*,*) 'k=',k
     select case(k)
     case(pm_array_type,pm_const_array_type)
        write(*,*) spaces(1:depth*2),'Array (',v%data%hash,v%offset
@@ -4062,7 +4063,7 @@ contains
     integer:: k
     type(pm_ptr):: name,w
     integer:: tno,i,name1
-    integer(pm_ln):: jj
+    integer(pm_ln):: jj,esize
     if(depth>=35) then
        call output(context,spaces(1:depth*2)//'...')
        return
@@ -4073,10 +4074,11 @@ contains
        call output(context,spaces(1:depth*2)//'Array (')
        w=v%data%ptr(v%offset+pm_array_vect)
        w=w%data%ptr(w%offset+j)
-       do jj=0,min(5,pm_fast_esize(w))
+       esize=vector_esize(w)
+       do jj=0,min(5,esize)
           call vector_dump_to(context,w,jj,output,depth+1)
        enddo
-       if(pm_fast_esize(w)>5) call output(context,spaces(1:depth*2+2)//'...')
+       if(esize>5) call output(context,spaces(1:depth*2+2)//'...')
        call output(context,spaces(1:depth*2)//') over (')
        call vector_dump_to(context,v%data%ptr(v%offset+pm_array_dom),j,output,depth+1)
        call output(context,spaces(1:depth*2)//')')
@@ -4989,6 +4991,116 @@ contains
     endif
   end subroutine intersect_aseq
 
+  function aseq_includes(a1,n1,a2,n2) result(ok)
+    integer(pm_ln),dimension(*),intent(in):: a1,a2
+    integer(pm_ln),intent(in):: n1,n2
+    logical:: ok
+    integer(pm_ln):: i,j
+    logical:: a1asc,a2asc
+    ok=.false.
+    if(n1==0.or.n2==0) return
+    if(max(a1(1),a1(n1)) < min(a2(1),a2(n2)).or.max(a2(1),a2(n2)) < min(a1(1),a1(n1))) return
+    a1asc=.true.
+    a2asc=.true.
+    if(n1>1) a1asc=a1(2)>a1(1)
+    if(n2>1) a2asc=a2(2)>a2(1)
+    if(a1asc) then
+       if(a2asc) then
+          i=1
+          do j=1,n2
+             do while(i<=n1.and.a1(i)<a2(j))
+                i=i+1
+             enddo
+             if(a1(i)/=a2(j)) then
+                ok=.false.
+                return
+             endif
+          enddo
+          ok=.true.
+          return
+       else
+          i=1
+          do j=n2,1,-1
+             do while(i<=n1.and.a1(i)<a2(j))
+                i=i+1
+             enddo
+             if(a1(i)/=a2(j)) then
+                ok=.false.
+                return
+             endif
+          enddo
+          ok=.true.
+          return
+       endif
+    else
+       if(a2asc) then
+          i=n1
+          do j=1,n2
+             do while(i>0.and.a1(i)<a2(j))
+                i=i-1
+             enddo
+             if(a1(i)/=a2(j)) then
+                ok=.false.
+                return
+             endif
+          enddo
+          ok=.true.
+          return
+       else
+          i=n1
+          do j=n2,1,-1
+             do while(i>0.and.a1(i)<a2(j))
+                i=i-1
+             enddo
+             if(a1(i)/=a2(j)) then
+                ok=.false.
+                return
+             endif
+          enddo
+          ok=.true.
+          return
+       endif
+    endif
+  end function aseq_includes
+
+  function aseq_index(a,n,v) result(index)
+    integer(pm_ln),dimension(*),intent(in):: a
+    integer(pm_ln),intent(in):: n
+    integer(pm_ln),intent(in):: v
+    integer(pm_ln):: index
+    integer(pm_ln):: left,right,middle
+    left=1
+    right=n+1
+    if(a(1)<a(2)) then
+       if(v<a(1)) then
+          index=-1
+       endif
+       do while(left<right-1)
+          middle=(left+right)/2
+          if(a(middle)<=v) then
+             left=middle
+          else
+             right=middle
+          endif
+       enddo
+       index=left-1
+    else
+       if(v<a(n)) then
+          index=n
+          return
+       endif
+       do while(left<right-1)
+          middle=(left+right)/2
+          if(a(middle)>v) then
+             left=middle
+          else
+             right=middle
+          endif
+       enddo
+       index=right-1
+    endif
+  end function aseq_index
+
   subroutine overlap_aseq(a1,n1,a2,n2,a3,n3)
     integer(pm_ln),dimension(*),intent(in):: a1,a2
     integer(pm_ln),intent(in):: n1,n2
@@ -5170,47 +5282,7 @@ contains
        endif
     endif
   end subroutine overlap_aseq2
-  
-  subroutine intersect_bseq_old(l1,h1,w1,s1,al1,l2,h2,w2,s2,al2,a,n)
-    integer(pm_ln),intent(in):: l1,h1,w1,s1,al1,l2,h2,w2,s2,al2
-    integer(pm_ln),dimension(*),intent(out):: a
-    integer(pm_ln),intent(out):: n
-    integer(pm_ln):: i,j,k,p,q,dp,u,v,g,cycle
-
-    call extended_gcd(s1,s2,u,v,g)
-    cycle=s1*s1/g
-    p=l2
-    q=w2-al2
-    k=1
-    do i=l1-al1,((h1-l1)/s1)*s1,s1
-       do j=max(l1,i),min(h1,i+w1-1)
-          do while(p<j)
-             dp=min(j-p,q)
-             p=p+dp
-             q=q-dp
-             if(q==0) then
-                p=p+(s2-w2)
-                q=w2
-             endif
-          enddo
-          if(p>h2) goto 10
-          if(p==j) then
-             a(k)=p
-             k=k+1
-             p=p+1
-             q=q-1
-             if(q==0) then
-                p=p+(s2-w2)
-                q=w2
-             endif
-          endif
-       enddo
-       if(k==1.and.(p>=l2+cycle.or.i+w1>l1+cycle)) exit 
-    enddo
-10  continue
-    n=k-1
-  end subroutine intersect_bseq_old
-  
+    
   subroutine intersect_bseq(l1,h1,wd1,st1,al1,l2,h2,wd2,st2,al2,a,n)
     integer(pm_ln),intent(in):: l1,h1,wd1,st1,al1,l2,h2,wd2,st2,al2
     integer(pm_ln),dimension(*),intent(out):: a
@@ -5326,7 +5398,9 @@ contains
        call extended_gcd(st1,st2,u,v,gcd)
        jcycle=st2/gcd
        finish=min(actual_finish,start+jcycle*st1-1)
+       write(*,*) 'HERE'
     endif
+    write(*,*) 'jcycle=',jcycle
     first1=((start+al1-l1)/st1)*st1+l1-al1
     first2=((start+al2-l2)/st2)*st2+l2-al2
     bstart1=first1+al1
@@ -5395,6 +5469,7 @@ contains
        j=jcycle
        do while(j+a(kk)<=jfinish)
           do i=1,kk
+             write(*,*) 'doin',j,k,kk,a(i),a(i)+j,'jcycle=',jcycle
              a(k)=a(i)+j
              k=k+1
           enddo
@@ -5547,181 +5622,6 @@ contains
     
     n=k-1
   end subroutine overlap_bseq2
-  
-!!$
-!!$  subroutine overlap_bseq(l1,h1,w1,s1,l2,h2,w2,s2,a,n)
-!!$    integer(pm_ln),intent(in):: l1,h1,w1,s1,l2,h2,w2,s2
-!!$    integer(pm_ln),dimension(*),intent(out):: a
-!!$    integer(pm_ln),intent(out):: n
-!!$    integer(pm_ln):: i,j,k,p,q,dp,m
-!!$    p=l2
-!!$    q=w2
-!!$    k=1
-!!$    m=0
-!!$    do i=l1,h1,s1
-!!$       do j=i,i+w1-1
-!!$          do while(p<j)
-!!$             dp=min(j-p,q)
-!!$             p=p+dp
-!!$             q=q-dp
-!!$             if(q==0) then
-!!$                p=p+(s2-w2)
-!!$                q=w2
-!!$             endif
-!!$          enddo
-!!$          if(p==j) then
-!!$             a(k)=m
-!!$             k=k+1
-!!$             p=p+1
-!!$             q=q-1
-!!$             if(q==0) then
-!!$                p=p+(s2-w2)
-!!$                q=w2
-!!$             endif
-!!$          endif
-!!$          m=m+1
-!!$       enddo
-!!$    enddo
-!!$    n=k-1
-!!$  end subroutine overlap_bseq
-!!$
-!!$  subroutine overlap_bseq2(l1,h1,w1,s1,l2,h2,w2,s2,a1,a2,n)
-!!$    integer(pm_ln),intent(in):: l1,h1,w1,s1,l2,h2,w2,s2
-!!$    integer(pm_ln),dimension(*),intent(out):: a1,a2
-!!$    integer(pm_ln),intent(out):: n
-!!$    integer(pm_ln):: i,j,k,p,q,dp,m,mm
-!!$    p=l2
-!!$    q=w2
-!!$    k=1
-!!$    m=0
-!!$    mm=0
-!!$    do i=l1,h1,s1
-!!$       do j=i,i+w1-1
-!!$          do while(p<j)
-!!$             dp=min(j-p,q)
-!!$             p=p+dp
-!!$             mm=mm+dp
-!!$             q=q-dp
-!!$             if(q==0) then
-!!$                p=p+(s2-w2)
-!!$                q=w2
-!!$             endif
-!!$          enddo
-!!$          if(p==j) then
-!!$             a1(k)=m
-!!$             a2(k)=mm
-!!$             k=k+1
-!!$             p=p+1
-!!$             mm=mm+1
-!!$             q=q-1
-!!$             if(q==0) then
-!!$                p=p+(s2-w2)
-!!$                q=w2
-!!$             endif
-!!$          endif
-!!$          m=m+1
-!!$       enddo
-!!$    enddo
-!!$    n=k-1
-!!$  end subroutine overlap_bseq2
-!!$
-!!$  subroutine intersect_bseq_aseq(l1,h1,w1,s1,a1,n1,a2,n2)
-!!$    integer(pm_ln),intent(in):: l1,h1,w1,s1,n1
-!!$    integer(pm_ln),dimension(*),intent(in):: a1
-!!$    integer(pm_ln),dimension(*),intent(out):: a2
-!!$    integer(pm_ln),intent(out):: n2
-!!$    integer(pm_ln):: i,j,k,m,p
-!!$    k=1
-!!$    m=1
-!!$    do i=l1,h1,s1
-!!$       do j=i,i+w1-1
-!!$          do while(a1(k)<j)
-!!$             k=k+1
-!!$          enddo
-!!$          if(a1(k)==j) then
-!!$             a2(m)=j
-!!$             m=m+1
-!!$             m=k+1
-!!$          endif
-!!$       enddo
-!!$    enddo
-!!$    n2=m-1
-!!$  end subroutine intersect_bseq_aseq
-!!$
-!!$  subroutine overlap_bseq_aseq(l1,h1,w1,s1,a1,n1,a2,n2)
-!!$    integer(pm_ln),intent(in):: l1,h1,w1,s1,n1
-!!$    integer(pm_ln),dimension(*),intent(in):: a1
-!!$    integer(pm_ln),dimension(*),intent(out):: a2
-!!$    integer(pm_ln),intent(out):: n2
-!!$    integer(pm_ln):: i,j,k,m,p
-!!$    k=1
-!!$    m=1
-!!$    p=0
-!!$    do i=l1,h1,s1
-!!$       do j=i,i+w1-1
-!!$          do while(a1(k)<j)
-!!$             k=k+1
-!!$          enddo
-!!$          if(a1(k)==j) then
-!!$             a2(m)=p
-!!$             m=m+1
-!!$             k=k+1
-!!$          endif
-!!$          p=p+1
-!!$       enddo
-!!$    enddo
-!!$    n2=m-1
-!!$  end subroutine overlap_bseq_aseq
-!!$
-!!$  subroutine overlap_aseq_bseq(which,l1,h1,w1,s1,a1,n1,a2,n2)
-!!$    integer(pm_ln),intent(in):: which,l1,h1,w1,s1,n1
-!!$    integer(pm_ln),dimension(*),intent(in):: a1
-!!$    integer(pm_ln),dimension(*),intent(out):: a2
-!!$    integer(pm_ln),intent(out):: n2
-!!$    integer(pm_ln):: i,j,k,m,p
-!!$    k=1
-!!$    m=1
-!!$    do i=l1,h1,s1
-!!$       do j=i,i+w1-1
-!!$          do while(a1(k)<j)
-!!$             k=k+1
-!!$          enddo
-!!$          if(a1(k)==j) then
-!!$             a2(m)=k-1
-!!$             m=m+1
-!!$             k=k+1
-!!$          endif
-!!$       enddo
-!!$    enddo
-!!$    n2=m-1
-!!$  end subroutine overlap_aseq_bseq
-!!$
-!!$  subroutine overlap_bseq_aseq2(l1,h1,w1,s1,a1,n1,a2,a3,n2)
-!!$    integer(pm_ln),intent(in):: l1,h1,w1,s1,n1
-!!$    integer(pm_ln),dimension(*),intent(in):: a1
-!!$    integer(pm_ln),dimension(*),intent(out):: a2
-!!$    integer(pm_ln),dimension(*),intent(out):: a3
-!!$    integer(pm_ln),intent(out):: n2
-!!$    integer(pm_ln):: i,j,k,m,p
-!!$    k=1
-!!$    m=1
-!!$    p=0
-!!$    do i=l1,h1,s1
-!!$       do j=i,i+w1-1
-!!$          do while(a1(k)<j)
-!!$             k=k+1
-!!$          enddo
-!!$          if(a1(k)==j) then
-!!$             a2(m)=p
-!!$             a3(m)=k-1
-!!$             m=m+1
-!!$             k=k+1
-!!$          endif
-!!$          p=p+1
-!!$       enddo
-!!$    enddo
-!!$    n2=m-1
-!!$  end subroutine overlap_bseq_aseq2
 
   subroutine expand_aseq(a1,n1,lo,hi,a2,n2)
     integer(pm_ln),dimension(*),intent(in):: a1
@@ -5875,6 +5775,8 @@ contains
     v=old_t
     g=old_r
   end subroutine extended_gcd
+
+
 
   
 end module pm_array
