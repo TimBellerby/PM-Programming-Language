@@ -96,14 +96,11 @@ foreach shape in shapes {
   // "any" statement does dynamic dispatch on a body
   // of code - PM does not dispatch individual calls
   any shape {
-   np:=np+npoints(shape)
+   np=np+npoints(shape)
    draw(shape)
   }
 }
 print("Total points= "++np)
-
-print("Triangle at [0] is:")
-draw(get(shapes[0],triangle([0,0],[0,0],[0,0])))
 
 print("Shape at [1] is:")
 any s=shapes[1] {draw(s)}
