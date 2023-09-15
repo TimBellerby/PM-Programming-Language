@@ -1,4 +1,4 @@
-![ PM logo ](./PM-logo.gif)
+![ PM logo ](./PM-logo.png)
 # PM Programming Language 
 ## [www.pm-lang.org](http://www.pm-lang.org)
 
