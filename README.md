@@ -1,3 +1,7 @@
+# PM Programming Language [www.pm-lang.org](www.pm-lang.org)
+
+## Overview
+
 The PM Programming Language is designed to facilitate the creation
 of numerical models on parallel systems. It combines concepts of
 parallelisation and vectorisation into a unified model using a 'strand'
@@ -8,17 +12,17 @@ with other strands, including those running on other nodes. PM uses a modified f
 the Partitioned Global Address Space approach which builds synchronisation into basic operations 
 and excludes race conditions.
 
-The PM interpreter uses a parallel virtual machine and is designed for debugging PM code.
-
 The PM compiler currently cross-compiles to Fortran+MPI. More target language/library
 combinations are planned, including Fortran-MPI-OpenMP and accelerator support (initially
 via either OpenMP or OpenACC)
 
-For a more complete project description see www.pm-lang.org
+The PM interpreter uses a parallel virtual machine and is designed for debugging PM code.
 
 The language specification (available in /doc) while incomplete in places, will give
 a good view of the features of the version 0.4 of the language.
     
+
+## Installation and use
 
 This is an initial (not stable) pr-release of version 0.4 of the language.
 The interpreter is currently more stable than the compiler.
