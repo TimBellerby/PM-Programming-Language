@@ -39,8 +39,11 @@ The code should be fairly portable. Portability issues may be addressed by
 editing config/sysdep.f90 (read the comments)
 
 To compile the interpreter:
+
   cd pm
+
   make clean
+
   make
 
 You can then run the interpreter (./pm --help for options)
@@ -48,8 +51,11 @@ You can then run the interpreter (./pm --help for options)
 mpirun the interpreter for distributed execution.
 
 To compile PM-to-Fortran compiler:
+
   cd pmc
+
   make clean
+
   make
 
 To compile a PM program to Fortran use ./pmc (./pmc --help for options)
