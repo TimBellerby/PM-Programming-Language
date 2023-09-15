@@ -1,5 +1,5 @@
 # PM Programming Language 
-## [www.pm-lang.org](https://www.pm-lang.org)
+## [www.pm-lang.org](http://www.pm-lang.org)
 
 ## Overview
 
