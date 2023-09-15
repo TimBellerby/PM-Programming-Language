@@ -1355,7 +1355,7 @@ contains
     call clear_large_obj_marks(context%new_large)
     
     if(major_cycle) then
-       if(pm_debug_level>1.or..true.) write(*,*) 'Major cycle'
+       if(pm_debug_level>1) write(*,*) 'Major cycle'
        ! Clear bitmaps
        do vk=pm_int,pm_num_vkind
           do esize=1,pm_large_obj_size

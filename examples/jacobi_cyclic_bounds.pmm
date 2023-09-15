@@ -1,0 +1,22 @@
+/*
+An example of the use of the nhd statement to implement a stencil
+Solution of 2D heat equation by Jacobi iteration on a cylinder
+One boundary set to 1.0 with the opposite set to 0.0
+Boundaries along the other dimension are cyclic
+*/
+tol=0.01
+for cell_pos in [1..10,1..10] {
+   chan var cell=0.0
+   over [0,]:cell=1.0
+   print(cell_pos++cell)
+   until invar err<tol {
+      old_cell=cell
+      nhd ortho[-1..1,-1..1] dcell of cell bounds [EXCLUDED,CYCLE] {
+             cell=(dcell[-1,0]+dcell[1,0]+dcell[0,-1]+dcell[0,1])/4.0
+      }
+      chan cell_err=abs(cell-old_cell)
+      err=reduce%($max,cell_err,0.0)
+      if cell_pos==[1,1]:print("err="++err)
+   }
+   print(cell_pos++"="++cell)
+}
