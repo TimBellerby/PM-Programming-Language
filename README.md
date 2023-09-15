@@ -26,8 +26,7 @@ a good view of the features of the version 0.4 of the language.
 
 ## Installation and use
 
-This is an initial (not stable) pr-release of version 0.4 of the language.
-The interpreter is currently more stable than the compiler.
+This is an initial release of version 0.4 of the language.
 
 To compile PM:
 
