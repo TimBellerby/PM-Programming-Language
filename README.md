@@ -1,4 +1,5 @@
-# PM Programming Language [www.pm-lang.org](www.pm-lang.org)
+# PM Programming Language 
+## [www.pm-lang.org](www.pm-lang.org)
 
 ## Overview
 
@@ -62,4 +63,4 @@ You can then mpirun the resulting executable.
 Both compiler and interpreter expect PM source files to have a .pmm extension.
 
 
-Watch out for continuing updates.
+## Watch out for continuing updates.
