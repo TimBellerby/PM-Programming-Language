@@ -1556,6 +1556,8 @@ contains
     call dcl_uproc(parser,&
          '#(y:block_seq,x:int)=nb*y._b+xx-nb*y._st '//&
          ' where nb=xx/y._st where xx=x-y._lo+y._align',line)
+    call dcl_uproc(parser,&
+         '#(y:block_seq,x:grid_dim)=overlap(map_seq(y),map_seq(x))',line)
     call dcl_uproc(parser,'element(x:block_seq,y:int)='//&
          'x._lo+y+((y+x._align)/x._b)*(x._st-x._b)',line)
     
@@ -1595,8 +1597,8 @@ contains
     call dcl_uproc(parser,'map_seq(x:array(int,mshape1d))=new map_seq {array=x} '//&
          'check "Array for ""map_seq"" must be strictly increasing or stricly decreasing"=>_mono(x)',line)
     call dcl_uproc(parser,'_mono(x) {xs=#x;var ok=true;'//&
-         'if x[low(xs.1)]<x[high(xs.1)] {for i in low(xs.1)+1..high(xs.1):if x[i]<x[i-1]:sync ok=false} '//&
-         'else{ for i in low(xs.1)+1..high(xs.1):if x[i]>x[i-1]:sync ok=false};return ok}' ,line)
+         'if x[low(xs.1)]<x[high(xs.1)] {forall i in low(xs.1)+1..high(xs.1){if x[i]<x[i-1]:sync ok=false}} '//&
+         'else{forall i in low(xs.1)+1..high(xs.1):if x[i]>x[i-1]:sync ok=false};return ok}' ,line)
     
     call dcl_uproc(parser,'map_seq(x:map_seq)=x',line)
 
@@ -1870,7 +1872,7 @@ contains
 
     ! Convert an extent to have a zero base
     call dcl_uproc(parser,'zero_base(x:range)=0..size(x)',line)
-    call dcl_uproc(parser,'zero_base(x:extent)=map(zero_base,x)',line)
+    call dcl_uproc(parser,'zero_base(x:extent)=map($zero_base,x)',line)
 
     ! Extent of a mshape
     call dcl_uproc(parser,'extent(x:shape)=x._extent',line)
@@ -2168,7 +2170,8 @@ contains
          'j6,s6,e6=PM__first(d.6),j7,s7,e7=PM__first(d.7)',line)
 
     ! - subsequent elements
-    call dcl_uproc(parser,'PM__next(d:int,g,i)=ii,null,ii<d where ii=i+1',line)
+    call dcl_uproc(parser,'PM__next(d:int,g,i)=ii,null,ii<d '//&
+         ' where ii=i+1',line)
     
     call dcl_uproc(parser,&
          'PM__next(d:tuple1d,g,i)=j,s,e where j,s,e=PM__next(d.1,g,i)',line)
@@ -2440,7 +2443,11 @@ contains
     ! Array operations
     call dcl_uproc(parser,'_arb(x:any^mshape)='//&
          '_get_aelem(x,0)',line)
-    call dcl_proc(parser,'size(x:any^mshape)->int',op_get_size,0,line,0)
+    if(pm_is_compiling) then
+       call dcl_uproc(parser,'size(x:any^mshape)=size(#x)',line)
+    else
+       call dcl_proc(parser,'size(x:any^mshape)->int',op_get_size,0,line,0)
+    endif
     call dcl_proc(parser,'_array(x:any,y:any,z:any,v:''false)->PM__dim x,y',&
          op_array,0,line,proc_needs_type)
     call dcl_proc(parser,'_array(x:any,y:any,z:any,v:''true)->PM__vdim x,y',&
@@ -4038,7 +4045,7 @@ contains
          '   portion_to_send=overlap(this_tile,_dunmap(t,other_tile,local_region._mshape));'//&
          '   _recv_slice_reply(i,&a,local_region._mshape,portion_to_send,complt)'//&
          ' }};'//&
-         ' _sync_messages(a,x);'//&
+         ' _sync_messages(a,x)'//&
          '}',line)
 
     ! Resolve x[ indexed ][ whatever ] <pr> = priv
@@ -4157,7 +4164,8 @@ contains
     call dcl_uproc(parser,'PM__subref(x:nbhd,t:null)=_nhd_sub(x,t)',line)
     
     call dcl_uproc(parser,'_nhd_sub(x:nbhd,t:any except contains(null or stretch_dim))='//&
-         'PM__subref(x._array,tt+x._nbhd._interior[x._index]) {tt=_tup(t);'//&
+         'PM__subref(x._array,tt+x._nbhd._interior[x._index]) {'//&
+         'tt=_tup(t);'//&
          'test "Subscript"++tt++" not in neighbourhood"++x._nbhd._nbhd=>contains(_foot(tt,x._nbhd._nbhd),tt),'//&
          '"At "++x._here++" nhd "++tt++" goes outside of boundary "++limits=>'//&
          'contains(limits,dtt) where limits=x._nbhd._limits '//&
@@ -4189,10 +4197,10 @@ contains
          '   if contains(#region.dist,i) and i/=pp {'//&
          '     p=index(dims(region.dist),i);'//&
          '     other_tile=element(region.dist,i);'//&
-         '     other_tile_x=_get_halo(region._mshape,other_tile,'//&
+         '     tile_x=_get_halo(region._mshape,region._tile,'//&
          '       _foot(i-pp,nbhd._nbhd));'//&
-         '     ov=overlap(this_tile_x,other_tile);if size(ov)>0 {'//&
-         '     _recv_slice(p,&a,ov);'//&
+         '     ov=this_tile_x#intersect(tile_x,other_tile);if size(ov)>0 {'//&
+         '       _recv_slice(p,&a,ov)'//&
          '   }}'//&
          ' };'//&
          ' foreach i in node_nhd(region.dist,pp,_rev(envelope(nbhd._nbhd))) { '//&
@@ -4201,7 +4209,7 @@ contains
          '     other_tile=element(region.dist,i);'//&
          '     other_tile_x=_get_halo(region._mshape,other_tile,_foot(i-pp,nbhd._nbhd));'//&
          '     ov=overlap(this_tile_x,intersect(this_tile,other_tile_x));if size(ov)>0 {'//& 
-         '            _send_slice(p,a,ov);'//&
+         '      _send_slice(p,a,ov)'//&
          '   }} '//&
          ' };'//&
          '_apply_boundaries(&a,region,envelope(nbhd._nbhd),this_tile_x,extent(region),'//&
@@ -4248,9 +4256,9 @@ contains
          '   if contains(#region.dist,i) and i/=pp {'//&
          '     p=index(dims(region.dist),i);'//&
          '     other_tile=element(region.dist,i);'//&
-         '     other_tile_x=_get_halo(region._mshape,other_tile,'//&
+         '     tile_x=_get_halo(region._mshape,region._tile,'//&
          '       _foot(i-pp,nbhd._nbhd));'//&
-         '     ov=overlap(this_tile_x,other_tile);if size(ov)>0 {'//&
+         '     ov=this_tile_x#intersect(tile_x,other_tile);if size(ov)>0 {'//&
          '     _recv_slice_sync(p,&a,ov);'//&
          '   }}'//&
          ' };'//&
@@ -4261,7 +4269,7 @@ contains
       call dcl_uproc(parser,&
            'PM__bcast_nhd%(&a:invar,nbhd:invar,b:invar) <<shared,always>> {'//&
            'if shrd_nnode()>1 {'//&
-           ' foreach i in 1..chunks(region,envelope(nbhd._nbhd)) {'//&
+           ' foreach i in 1..chunks(region,envelope(nbhd._nbhd))-1 {'//&
            '   chunk=chunk(region,envelope(nbhd._nbhd),i,b);'//&
            '   _bcast_slice_shared(&a,chunk)'//&
            '}}}',line)
@@ -4299,7 +4307,7 @@ contains
          '  p=index(dims(d.dist),pp);'//&
          '  if pp in #d.dist and p/=_this_node() {'//&
          '  tile=element(from,overlap(to,_get_halo(d,element(d.dist,p),n)));'//&
-         '   ov=overlap(this_tile_x,tile);'//&
+         '   ov=this_tile_x#intersect(d._tile,tile);'//&
          '   if size(ov)>0{_send_slice(p,a,ov)}}'//&
          '}}',line)
 
@@ -4309,17 +4317,16 @@ contains
          'foreach pp in nodes_for_grid(d.dist,_get_anti_halo(d,element(to,oldpart),n)) {'//& 
          '  p=index(dims(d.dist),pp);'//&
          '  if pp in #d.dist and p/=_this_node() {'//&
-         '  tile=element(from,overlap(to,_get_halo(d,element(d.dist,p),n)));'//& !!! expand tile
-         '  _send_slice(p,a,overlap(this_tile_x,tile))}'//&
+         '  tile=element(from,overlap(to,_get_halo(d,element(d.dist,p),n)));'//&
+         '   ov=this_tile_x#intersect(d._tile,tile);'//&
+         '   if size(ov)>0{_send_slice(p,a,ov)}}'//&
          '}}',line)
-
 
    call dcl_uproc(parser,'_copy_bounds(&a,d,n,this_tile_x,to,from,recv:''true) {'//&
          'oldpart,oldtile=overlap(from,this_tile_x);'//&
          'newpart,newtile=overlap(to,this_tile_x);'//&
          'o,oo=overlap(newpart,oldpart);'//&
-         '_set_slice(&a,element(newtile,o),a,'//&
-         '  element(oldtile,oo))}',line)
+         '_set_slice(&a,element(newtile,o),a,element(oldtile,oo))}',line)
 
    call dcl_uproc(parser,'_copy_bounds(&a:_comp^any,d,n,this_tile_x,to,from,recv:''true) {'//&
         'oldpart,oldtile=overlap(from,this_tile_x);'//&
@@ -4344,7 +4351,6 @@ contains
        
     call dcl_uproc(parser,'_not_zero(x)=if(x/=0=>1,0)',line)
     call dcl_uproc(parser,'_crss(x)=1==map_reduce($_not_zero,$+,x)',line)
-    
 
     
     ! Add (anti) halo around tile
@@ -4486,7 +4492,7 @@ contains
     call dcl_uproc(parser,'_cr(i,n):test "Index out of range in ""get_chunk"""=>i>=0 and i<=n',line)
     
     call dcl_uproc(parser,'chunk(t:tuple(range(any_int)),n:extent,i:int) {'//&
-         ' _cr(i,rank(t)*2);const r;'//&
+         ' _cr(i,rank(t)*2);var r=n;'//&
          ' if i==0: r=map($_interior,t,n) elseif i&1==0: r=_get_chunk(t,n,(i+1)/2,''true) '//&
          ' else:  r=_get_chunk(t,n,(i+1)/2,''false);return r}',line)
     
@@ -4496,20 +4502,20 @@ contains
     call dcl_type(parser,'_down is unique',line)
     
     call dcl_uproc(parser,'chunk(t:tuple(range(any_int) or block_seq),n:extent,i:int) {'//&
-         '_cr(i,rank(t)*4);const r;if i==0:r=map($_interior,t,n) else: switch (i-1)&3 {'//&
-         'case 0:r=_get_chunk(t,n,i,''true);'//&
-         'case 1:r=_get_chunk(t,n,i,''false);'//&
-         'case 2:r=_get_chunk(t,n,i,_left);'//&
-         'default:r=_get_chunk(t,n,i,_right);'//&
+         '_cr(i,rank(t)*4);var r=t;if i==0:r=map($_interior,t,n) else: switch (i-1)&3 {'//&
+         'case 0:r=_get_chunk(t,n,(i+3)/4,''true);'//&
+         'case 1:r=_get_chunk(t,n,(i+3)/4,''false);'//&
+         'case 2:r=_get_chunk(t,n,(i+3)/4,_left);'//&
+         'default:r=_get_chunk(t,n,(i+3)/4,_right);'//&
          '};return r}',line)
     call dcl_uproc(parser,'chunk(t:grid,n:extent,i:int) {'//&
-         '_cr(i,1);const r;if i==0:r=empty(#t) else: r=#t;return r}',line)
+         '_cr(i,1);var r=#t;if i==0:r=empty(#t);return r}',line)
     
     call dcl_uproc(parser,'chunk(t:grid,n:extent,i:int,b:null)='//&
          'chunk(t,n,i)',line)
     call dcl_uproc(parser,'chunk(t:grid,n:extent,i:int,b:extent)='//&
          'intersect(chunk(t,n,i),b)',line)
-    
+   
     call dcl_uproc(parser,'inside_edge(t:tuple(range(any_int)),n:extent,i:int,low:fix bool)='//&
             '_get_chunk(t,n,i,low)',line)
     call dcl_uproc(parser,'outside_edge(t:tuple(range(any_int)),n:extent,i:int,low:fix bool)='//&
@@ -4521,7 +4527,7 @@ contains
 
     call dcl_uproc(parser,'_exterior(t:range(int),n:range(int))=low(t)+min(low(n),0)..high(t)+max(high(n),0)',line)
     call dcl_uproc(parser,'_get_external_chunk(t:tuple(range(any_int)),n:extent,i:int) {'//&
-         ' const r;tt=map($_exterior,t,n);'//&
+         ' var r=t;tt=map($_exterior,t,n);'//&
          ' if i==0: r=#tt elseif i&1==0: r=_get_chunk(tt,n,(i+1)/2,_up)'//&
          ' else:  r=_get_chunk(tt,n,(i+1)/2,_down);return r}',line)
 
@@ -4666,8 +4672,8 @@ contains
          line,proc_is_impure)
     
     call dcl_uproc(parser,'_zd(x,y)=if(x==1=>1,nodes_needed(y,x))',line)
-    call dcl_uproc(parser,&
-         'cart_topo(dd:tuple,t:null,n:int)=cart_topo(dd,dd,n)',line)
+!!$    call dcl_uproc(parser,&
+!!$         'cart_topo(dd:tuple,t:null,n:int)=cart_topo(dd,dd,n)',line)
     call dcl_uproc(parser,&
          'cart_topo(dd:tuple,t,n:int)=cart_topo(dd,spread(t,dd),n)',line)
     call dcl_uproc(parser,&
@@ -4884,9 +4890,9 @@ contains
     call dcl_uproc(parser,'nodes_needed(d:block_cyclic_template,g:int)=0',line)
     call dcl_uproc(parser,&
          'block_cyclic_distr(g:int,p:int,b:int)='//&
-         'new block_cyclic_distr {_hi=int(g),_p=int(p),_b=int(b),'//&
+         'new block_cyclic_distr {_hi=int(g),_p=int(pp),_b=bb,'//&
          ' _s=s}'//&
-         ' where s=p*b',line)    
+         ' where s=pp*bb where bb=if(pp==1=>g,b) where pp=min((g+b-1)/b,p)',line)    
     call dcl_uproc(parser,'#(b:block_cyclic_distr)=shape([0..b._p-1])',line)
     call dcl_uproc(parser,'_shp(b:block_cyclic_distr)=0..b._p-1',line)
     call dcl_uproc(parser,'dims(b:block_cyclic_distr)=[b._p]',line)
@@ -4908,10 +4914,10 @@ contains
          '   where lo=low(g)/b._b mod p,hi=high(g)/b._b mod p where p=b._p',&
          line)
     call dcl_uproc(parser,'nodes_for_grid(b:block_cyclic_distr,g:strided_range){'//&
-         ' const r;if b._s==step(g) {r=nodes_for_grid(b,low(g)..low(g))} else'//&
+         ' var r=0..0;if b._s==step(g) {r=nodes_for_grid(b,low(g)..low(g))} else'//&
          ' {r=nodes_for_grid(b,low(g)..high(g))};return r}',line)
     call dcl_uproc(parser,'nodes_for_grid(b:block_cyclic_distr,g:block_seq){'//&
-         ' const r;if b._s==step(g) {r=nodes_for_grid(b,low(g)..low(g)+width(g)-1)} else'//&
+         ' var r=0..0;if b._s==step(g) {r=nodes_for_grid(b,low(g)..low(g)+width(g)-1)} else'//&
          ' {r=nodes_for_grid(b,low(g)..high(g))};return r}',line)
     call dcl_uproc(parser,'node_for(b:block_cyclic_distr,j:int)=p'//&
          ' where p=_rdiv(jj,b._b) mod b._p where jj=int(j)',line)
@@ -5131,18 +5137,18 @@ contains
     call dcl_uproc(parser,'subtile(schedule:schedule)=schedule._subtile',line)
  
     ! Over statements
-     call dcl_uproc(parser,'PM__over%(schedule:null,x:invar,block:invar)<<shared>>='//&
-         'new schedule{_subregion=x,_subtile=overlap(region._tile,x),_blocking=_blocking(block,region)}',line)
-    call dcl_uproc(parser,'PM__over%(x:invar,block:invar)<<shared>>='//&
+     call dcl_uproc(parser,'PM__over%(schedule:null,x:invar,block:invar)<<shared,always>>='//&
+          'new schedule{_subregion=x,_subtile=overlap(region._tile,x),_blocking=_blocking(block,region)}',line)
+    call dcl_uproc(parser,'PM__over%(x:invar,block:invar)<<shared,always>>='//&
          'new schedule{_subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}'//&
          'where s=intersect(x,schedule._subregion)',line)
     call dcl_uproc(parser,'PM__make_over%(schedule:null,'//&
-         'x:invar tuple(subs_dim except stretch_dim),block:invar)<<shared>>='//&
+         'x:invar tuple(subs_dim except stretch_dim),block:invar)<<shared,always>>='//&
          'new schedule{_subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}'//&
          'check "Value"++s++" in ""over"" out of bounds: "++region._extent=>region._extent inc s '//&
          'where s=fill_in(region._extent,x,null)',line)
     call dcl_uproc(parser,'PM__make_over%(x:invar tuple(subs_dim except stretch_dim)'//&
-         ',block:invar)<<shared>>='//&
+         ',block:invar)<<shared,always>>='//&
          'new schedule{_subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}'//&
          'where s=intersect(map($norm,fill_in(region._extent,x,''true)),schedule._subregion)',line)
     call dcl_uproc(parser,'PM__make_over%(x:invar,block)=x'//&
@@ -5176,7 +5182,7 @@ contains
        call dcl_uproc(parser,'_do_elem(x:range(int))=_st(low(x),high(x))',line)
        call dcl_uproc(parser,'_do_elem(x:strided_range(int))=_st(low(x),high(x),step(x))',line)
        call dcl_uproc(parser,'_do_elem(x:block_seq)=_st(low(x),high(x),step(x),width(x),align(x))',line)
-       call dcl_uproc(parser,'_do_elem(x:map_seq)=x.array',line)
+       call dcl_uproc(parser,'_do_elem(x:map_seq)=_st(x.array,size(x.array),null,null)',line)
        call dcl_uproc(parser,'_do_elem(x:single_point)=_st(x._t)',line)
        call dcl_uproc(parser,'PM__nested_loop(x:null){}',line)
        call dcl_proc(parser,'PM__nested_loop(any)',op_nested_loop,0,line,0)
@@ -5433,7 +5439,7 @@ contains
 
     ! Create normalised form of a grid used for _xxx_slice operations
     call dcl_uproc(parser,'_norm(n,x:seq or block_seq)=_st(n,low(x),high(x),step(x),width(x),align(x))',line)
-    call dcl_uproc(parser,'_norm(n,x:map_seq)=_st(x.array)',line)
+    call dcl_uproc(parser,'_norm(n,x:map_seq)=_st(x.array,n)',line)
     call dcl_uproc(parser,'_norm(n,x:grid)=_st(map_apply($_norm,$_st,n,x),size(x))',line)
 
     ! Apply idxdim index and convert to normal for for _send_slice_mapped
@@ -5500,34 +5506,34 @@ contains
 !!$         '_recv_slice_resend(p,&x,d) { '//&
 !!$         '_recv_resend(_norm(dims(x),d),p,&x) }',line)
     call dcl_uproc(parser,&
-         '_send_recv_slice_req(p,&x:_comp,a,sx,d,c:''true) {'//&
+         '_send_recv_slice_req(p,x:_comp,&a,sx,d,c:^^(''true)) {'//&
          'forall i in d { j=index(sx,i);'//&
          '_isend_recv_req%(j,p,^(x),&^(^(a))); '//&
          '} }',line)
     call dcl_uproc(parser,&
-         '_send_recv_slice_req(p,x,&a,sx,d,c:''true) {'//&
+         '_send_recv_slice_req(p,x,&a,sx,d,c:^^(''true)) {'//&
          '_isend_recv_req(_norm(dims(sx),d),p,^(x),&^(^(a)))}',line)
     call dcl_uproc(parser,&
          '_send_recv_slice_req(p,x,&a,sx,d,c) {'//&
          'forall i in d { j=index(sx,i);_isend_recv_req%(j,p,^(x),&^(^(a)),c) '//&
          '} }',line)
     call dcl_uproc(parser,&
-         '_send_slice_assn(p,x:_comp,y,sx,d,c:''true) {'//&
+         '_send_slice_assn(p,x:_comp,y,sx,d,c:^^(''true)) {'//&
          'forall i in d { _isend_assn%(j,^(p),^(x),^(y)) '//&
          'where j=index(sx,i) } }',line)
     call dcl_uproc(parser,&
-         '_send_slice_assn(p,x,y,sx,d,c:''true) {'//&
+         '_send_slice_assn(p,x,y,sx,d,c:^^(''true)) {'//&
          '_isend_assn(_norm(dims(sx),d),p,x,y)}',line)
     call dcl_uproc(parser,&
          '_send_slice_assn(p,x,y,sx,d,c) {'//&
          'forall i in d { _isend_assn%(j,p,^(x),^(y),^(c)) '//&
          'where j=index(sx,i) } }',line)
     call dcl_uproc(parser,&
-         '_recv_slice_reply(p,&x:_comp,sx,d,c:''true) {'//&
+         '_recv_slice_reply(p,&x:_comp,sx,d,c:^^(''true)) {'//&
          'forall i in d { _recv_reply%(j,^(p),&^(^(x))) '//&
          'where j=index(sx,i) } }',line)
     call dcl_uproc(parser,&
-         '_recv_slice_reply(p,&x,sx,d,c:''true) {'//&
+         '_recv_slice_reply(p,&x,sx,d,c:^^(''true)) {'//&
          '_recv_reply(_norm(dims(sx),d),p,&x) }',line)
     call dcl_uproc(parser,&
          '_recv_slice_reply(p,&x,sx,d,c) {'//&
@@ -5799,7 +5805,7 @@ contains
     call dcl_uproc(parser,'as(x,t)=PM__cast(x,typeof(t))',line)
     call dcl_proc(parser,'inc(x:<any>,y:<any>)-> inc x,y',op_logical_return,0,line,proc_needs_type)
     call dcl_uproc(parser,'==(x:<any>,y:<any>)=x inc y and y inc x',line)
-    call dcl_proc(parser,'error_type()->?int',0,0,line,proc_needs_type)
+    call dcl_proc(parser,'error_type()->?0',0,0,line,proc_needs_type)
     
     ! Debugging
     call dcl_proc(parser,'_dump(any,any)',op_new_dump,0,line,proc_is_impure)

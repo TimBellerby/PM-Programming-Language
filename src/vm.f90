@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2022
+! Copyright (c) Tim Bellerby, 2023
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -43,7 +43,10 @@ module pm_backend
 
   ! Debugging (of VM)
   logical,private:: trace_opcodes=.false.
+  logical,private:: trace_opargs=.false.
   logical,private:: trace_calls=.false.
+  logical,private:: trace_call_stacks=.false.
+  logical,private:: trace_call_indent=.false.
   integer,private:: vm_depth=0
   character(len=20),private,parameter:: spaces='                    '
 
@@ -73,6 +76,8 @@ contains
     ! Run the code
     err=pm_run(context,pm_null_obj,pm_null_obj,&
          pm_null_obj,op_call,0,arg,1,0,.false.)
+
+    ! Flush message queue
     if(err<=0.or.pm_main_process) then
        call mesg_q_cleanup()
     else
@@ -111,9 +116,15 @@ contains
     integer:: modl,line
     logical:: flip,ok,done
     integer:: stacksize
+    type(pm_ptr):: trace_var
     type(pm_reg),pointer:: reg
     character(len=pm_comm_mess_len):: mess
+    integer:: trace_var_kind
+    logical::trace_var_changed
 
+    trace_var=pm_null_obj
+    trace_var_kind=pm_fast_vkind(trace_var)
+    
     empty_vector=pm_fast_tinyint(context,0)
     
     nargs=0
@@ -149,11 +160,24 @@ contains
             stack%data%ptr(stack%offset+pc%data%i16(pc%offset+3_pm_p)),2)
     endif
 
+
+    if(pm_fast_vkind(trace_var)==pm_usr) then
+       !write(*,*) 'trace_var',trace_var_kind,pm_fast_vkind(trace_var%data%ptr(trace_var%offset+3))
+       if(pm_fast_vkind(trace_var%data%ptr(trace_var%offset+3))/=trace_var_kind) then
+          trace_var_changed=.true.
+          trace_var_kind=pm_fast_vkind(trace_var%data%ptr(trace_var%offset+3))
+       else
+          trace_var_changed=.false.
+       endif
+    else
+       trace_var_changed=.false.
+    endif
+    
     if(trace_opcodes) then
        call proc_line_module(func,&
             max(int(pc%offset-func%data%ptr(func%offset)%offset)-4,1),line,modl)
-       write(*,*) sys_node,op_names(opcode),opcode2,'(',n,' args)',&
-            '@',trim(pm_name_as_string(context,modl)),'#',line
+       write(*,*) sys_node,pc%offset,op_names(opcode),opcode2,'(',n,' args)',&
+            '@',trim(pm_name_as_string(context,modl)),'#',line,trace_var_kind
     endif
    
     oparg=pc%data%i16(pc%offset+3_pm_p)
@@ -166,10 +190,11 @@ contains
           write(*,*) sys_node,op_names(opcode),&
                '@',trim(pm_name_as_string(context,modl)),'#',line
           call pm_dump_tree(context,6,arg(1),2)
-          call pm_panic('Bed vector engine')
+          call pm_panic('Bad vector engine')
           goto 999
        endif
     endif
+    
     if(opcode==op_comm_call) then
        oparg=pc%data%i16(pc%offset+4_pm_p)
        arg(2)=stack%data%ptr(stack%offset+oparg)
@@ -183,23 +208,24 @@ contains
        ve=arg(1)%data%ptr(arg(1)%offset)
        start_arg=2
     endif
-    if(pm_debug_level>3) then
+    if(trace_opargs) then
        write(*,*) 've.kind=',arg(1)%data%vkind,&
             've.vec.kind=',ve%data%vkind,'esize=',esize
+       call pm_dump_tree(context,6,ve,2)
     endif
     do i=start_arg,n
        oparg=pc%data%i16(pc%offset+i+2_pm_p)
-       if(pm_debug_level>3) write(*,*) 'OPARG>', oparg,pm_max_stack,int(pm_max_stack,pm_i16)
+       if(trace_opargs) write(*,*) 'OPARG>', oparg,pm_max_stack,int(pm_max_stack,pm_i16)
        if(oparg>=0) then
           arg(i)=stack%data%ptr(stack%offset+oparg)
-          if(pm_debug_level>3) then
+          if(trace_opargs) then
              write(*,*) i,'STACK>>',oparg
              call pm_dump_tree(context,6,arg(i),2)
           endif
        else if(oparg>=-int(pm_max_stack,pm_i16)) then
           arg(i)%data=>stack%data
           arg(i)%offset=stack%offset-oparg
-          if(pm_debug_level>3)  then
+          if(trace_opargs)  then
              write(*,*) i,'STACKREF>>',-oparg,&
                   arg(i)%data%esize,stack%data%vkind,&
                   arg(i)%data%hash,stack%data%esize,&
@@ -207,11 +233,11 @@ contains
                   stack%offset,arg(i)%offset
           endif
        else
-          if(pm_debug_level>3) then
+          if(trace_opargs) then
              write(*,*) i,'CONST>>',-oparg-pm_max_stack
           endif
           w=func%data%ptr(func%offset-oparg-pm_max_stack)
-          if(pm_debug_level>3) then
+          if(trace_opargs) then
              call pm_dump_tree(context,6,w,2)
           endif
           ii=pm_fast_vkind(w)
@@ -231,57 +257,59 @@ contains
     
     ! Empty ve
     if(pm_fast_vkind(ve)==pm_tiny_int) then
+
+       call pm_panic('Old empty ve')
        if(pm_debug_level>3) then
           write(*,*) 'NULLIFIED OP>',op_names(opcode)
        endif
        
-       ! Opcode that should not be skipped
-       select case(opcode)
-       case(op_and_ve:op_andnot_jmp_any,op_do_at)
-          call set_arg(2,arg(1))
-       case(op_jmp_any_ve_par)
-          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-          ok=sync_loop_end(.false.)
-          if(ok) then
-             pc%offset=pc%offset+opcode2-pm_jump_offset
-          endif
-       case(op_clone_ve)
-          stack%data%ptr(stack%offset+opcode2)=arg(1)
-       case(op_jmp)
-          pc%offset=pc%offset+opcode2-pm_jump_offset
-       case(op_skip_comms)
-          !write(*,*) 'SKIP COMMS (empty)>>',esize
-          if(esize==1) pc%offset=pc%offset+opcode2-pm_jump_offset
-       case(op_head_node)
-          if(par_frame(par_depth)%shared_node/=0) pc%offset=pc%offset+opcode2-pm_jump_offset
-       case(op_remote_call:op_bcast_call,&
-            op_dref,op_par_loop_end,op_chan,op_export,&
-            op_export_param,op_pop_node,op_sync_mess,op_import_val,op_return)
-          !write(*,*) 'unskip',op_names(opcode)
-          goto 20
-       case(op_recv_req_call,op_recv_assn_call)
-          call set_arg(2,arg(1))
-       case(op_skip_empty)
-          if(opcode2>0) then
-             if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-             ok=sync_loop_end(.false.)
-             if(ok) then
-                call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
-             else
-                call set_arg(2,make_new_ve(empty_vector,arg(3)))
-             endif
-          else
-             call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
-          endif
-       case(op_comm_call)
-          if(pm_fast_vkind(arg(1)%data%ptr(arg(1)%offset))/=pm_tiny_int) goto 20
-       end select
-       if(pm_debug_level>3) then
-          write(*,*) 'SKIPPING>',opcode,&
-               op_names(opcode),opcode2,opcode3,&
-               'pc=',pc%offset,'esize=',esize
-       endif
-       goto 10
+!!$       ! Opcode that should not be skipped
+!!$       select case(opcode)
+!!$       case(op_and_ve:op_andnot_jmp_any,op_do_at)
+!!$          call set_arg(2,arg(1))
+!!$       case(op_jmp_any_ve_par)
+!!$          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
+!!$          ok=sync_loop_end(.false.)
+!!$          if(ok) then
+!!$             pc%offset=pc%offset+opcode2-pm_jump_offset
+!!$          endif
+!!$       case(op_clone_ve)
+!!$          stack%data%ptr(stack%offset+opcode2)=arg(1)
+!!$       case(op_jmp)
+!!$          pc%offset=pc%offset+opcode2-pm_jump_offset
+!!$       case(op_skip_comms)
+!!$          !write(*,*) 'SKIP COMMS (empty)>>',esize
+!!$          if(esize==1) pc%offset=pc%offset+opcode2-pm_jump_offset
+!!$       case(op_head_node)
+!!$          if(par_frame(par_depth)%shared_node/=0) pc%offset=pc%offset+opcode2-pm_jump_offset
+!!$       case(op_remote_call:op_bcast_call,&
+!!$            op_dref,op_par_loop_end,op_chan,op_export,&
+!!$            op_export_param,op_pop_node,op_sync_mess,op_import_val,op_return)
+!!$          !write(*,*) 'unskip',op_names(opcode)
+!!$          goto 20
+!!$       case(op_recv_req_call,op_recv_assn_call)
+!!$          call set_arg(2,arg(1))
+!!$       case(op_skip_empty)
+!!$          if(opcode2>0) then
+!!$             if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
+!!$             ok=sync_loop_end(.false.)
+!!$             if(ok) then
+!!$                call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
+!!$             else
+!!$                call set_arg(2,make_new_ve(empty_vector,arg(3)))
+!!$             endif
+!!$          else
+!!$             call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
+!!$          endif
+!!$       case(op_comm_call)
+!!$          if(pm_fast_vkind(arg(1)%data%ptr(arg(1)%offset))/=pm_tiny_int) goto 20
+!!$       end select
+!!$       if(pm_debug_level>3) then
+!!$          write(*,*) 'SKIPPING>',opcode,&
+!!$               op_names(opcode),opcode2,opcode3,&
+!!$               'pc=',pc%offset,'esize=',esize
+!!$       endif
+!!$       goto 10
     endif
 
     20 continue
@@ -295,52 +323,67 @@ contains
     case(op_call)
        ! op_call #proc ve args...
        ! op_comm_call #proc ve args...
-       if(opcode==op_comm_call) write(*,*) sys_node,'Comm_call',opcode2,pm_fast_vkind(ve)
        newfunc=context%funcs%data%ptr(&
             context%funcs%offset+opcode2)
-       goto 30
+       if(run_call(newfunc)) goto 999
     case(op_comm_call)
        ve=arg(2)%data%ptr(arg(2)%offset+1)
        esize=ve%data%ln(ve%offset)
        ve=arg(2)%data%ptr(arg(2)%offset)
        newfunc=context%funcs%data%ptr(&
             context%funcs%offset+opcode2)
-       goto 30
+       if(run_call(newfunc)) goto 999
     case(op_skip_empty)
        ! op_skip_empty #0_or_2 ve &newve
        ! op_skip_empty #1 ve &newve oldve
-       if(opcode2==1) then
-          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-          ok=sync_loop_end(.true.)
-          ve=make_new_ve(pm_null_obj,arg(3))
+       if(ve_is_empty(ve)) then
+          if(opcode2>0) then
+             if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
+             ok=sync_loop_end(.false.)
+             if(ok) then
+                call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
+             else
+                call set_arg(2,make_new_ve(ve,arg(3)))
+             endif
+          else
+             call set_arg(2,make_new_ve(ve,arg(3)))
+          endif
        else
-          newve=vector_export_if_needed(context,ve,arg(1)%data%ptr(arg(1)%offset+1))
-          if(opcode2==2) newve=import_vector(context,newve,arg(1)%data%ptr(arg(1)%offset+1))
-          ve=make_new_ve(newve,arg(3))
+          if(opcode2==1) then
+             if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
+             ok=sync_loop_end(.true.)
+             ve=make_new_ve(pm_null_obj,arg(3))
+          else
+             newve=vector_export_if_needed(context,ve,arg(1)%data%ptr(arg(1)%offset+1))
+             if(opcode2==2) newve=import_vector(context,newve,arg(1)%data%ptr(arg(1)%offset+1))
+             ve=make_new_ve(newve,arg(3))
+          endif
+          call set_arg(2,ve)
        endif
-       call set_arg(2,ve)
     case(op_return)
        ! op_return args...
-       !if(sys_node==0) write(*,*) 'Return>',trim(pm_name_as_string(context,proc_get_name(func))),nargs
        if(nargs>0) then
           do i=2,nargs
              v=stack%data%ptr(stack%offset+pm_stack_locals+opcode2+i-1)
              v%data%ptr(v%offset)=arg(i)
-             !if(sys_node==0) call pm_dump_tree(context,6,arg(i),2)
           enddo
        endif
        context%call_depth=context%call_depth-1
-!!$      if(pm_debug_level>3.or.vm_depth==2) &
-!!$           write(*,*) spaces(1:vm_depth*2),&
-       if(trace_calls) write(*,*) 'RETURN>',trim(pm_name_as_string(context,proc_get_name(func)))
+       if(trace_calls) then
+          write(*,*) spaces(1:min(10,vm_depth)*2),'RETURN>',&
+               trim(pm_name_as_string(context,proc_get_name(func)))
+       endif
        pc=stack%data%ptr(stack%offset+pm_stack_pc)
        func=stack%data%ptr(stack%offset+pm_stack_func)
        stack=stack%data%ptr(stack%offset+pm_stack_oldstack)
-       if(pm_debug_level>3) then
+       if(trace_call_stacks) then
           write(*,*) '===RETURN==STACK==',stack%offset
-          write(*,*) spaces(1:vm_depth*2),'Call- RETURN'
+          do i=2,nargs
+             call vector_dump(context,arg(i),1)
+          enddo
+          write(*,*) '==========================='
        endif
-       vm_depth=vm_depth-1
+       if(trace_call_indent) vm_depth=vm_depth-1
        if(pm_fast_isnull(pc)) then
           errno=0
           goto 888
@@ -354,10 +397,17 @@ contains
        continue
     case(op_head_node)
        ! op_head_node #where
-       if(par_frame(par_depth)%shared_node/=0) pc%offset=pc%offset+opcode2-pm_jump_offset
+       if(par_frame(par_depth)%shared_node/=0) then
+          ve=pm_fast_newnc(context,pm_long,1)
+          call set_arg(2,make_new_ve(ve,arg(1)))
+       else
+          call set_arg(2,arg(1))
+       endif
     case(op_and_ve:op_andnot_jmp_any)
        ! op_and_ve #where ve &newve mask
        ! ...
+!!$       write(*,*) 'andve'
+!!$       call pm_dump_tree(context,6,arg(3),2)
        flip=opcode==op_andnot_ve.or.opcode==op_andnot_jmp_any
        if(pm_fast_isnull(ve)) then
           ! No active mask - logical vector becomes new mask
@@ -375,32 +425,26 @@ contains
                 k=k+1
              endif
           enddo
-          if(k>0.and.esize+1>=k*pm_shrink_thresh) then
+          if(esize+1>=k*pm_shrink_thresh) then
              newve=shrink_ve(context,newve,esize,k)
           endif
        elseif(pm_fast_vkind(ve)==pm_long) then
           ! Vector engine is using a list of indices 
           ! - subset active cells
           jj=0
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              k=ve%data%ln(ve%offset+j)
              if(arg(3)%data%l(arg(3)%offset+k).neqv.flip) jj=jj+1
           enddo
-          if(jj>0) then
-             newve=pm_new(context,pm_long,int(jj,pm_ln))
-             k=0
-             do j=0,pm_fast_esize(ve)
-                jj=ve%data%ln(ve%offset+j)
-                if(arg(3)%data%l(arg(3)%offset+jj).neqv.flip) then
-                   newve%data%ln(newve%offset+k)=jj
-                   k=k+1
-                endif
-             enddo
-          else
-             k=0
-          endif
-       elseif(pm_fast_vkind(ve)==pm_tiny_int) then
+          newve=pm_new(context,pm_long,int(jj+1,pm_ln))
           k=0
+          do j=0,pm_fast_esize(ve)-1
+             jj=ve%data%ln(ve%offset+j)
+             if(arg(3)%data%l(arg(3)%offset+jj).neqv.flip) then
+                newve%data%ln(newve%offset+k)=jj
+                k=k+1
+             endif
+          enddo
        else
           ! Calculate new vector of active cell flags
           newve=pm_new(context,pm_logical,esize+1)
@@ -413,14 +457,11 @@ contains
           enddo
           ! If only a small number of cells active in vector, 
           ! change to index list
-          if(k>0.and.esize+1>=k*pm_shrink_thresh) then
+          if(esize+1>=k*pm_shrink_thresh) then
              newve=shrink_ve(context,newve,esize,k)
           endif
        endif
-       
-       ! Empty ve
-       if(k==0) newve=empty_vector
-       
+            
        ! New vector engine structure
        ve=make_new_ve(newve,arg(1))
        call set_arg(2,ve)
@@ -431,7 +472,15 @@ contains
        endif
     case(op_chan)
        ! op_chan &chan_out
-       ve=make_new_ve(pm_null_obj,arg(1))
+       if(esize==0) then
+          v=arg(1)%data%ptr(arg(1)%offset+1)
+          j=v%data%ln(v%offset+3)
+       endif
+       if(esize/=0.or.j/=0) then
+          ve=make_new_ve(pm_null_obj,arg(1))
+       else
+          ve=arg(1)
+       endif
        call set_arg(2,ve)
     case(op_active)
        ! op_active &vec_out
@@ -442,15 +491,14 @@ contains
           v%data%l(v%offset:v%offset+esize)=.true.
        else
           v%data%l(v%offset:v%offset+esize)=.false.
-          v%data%l(ve%data%ln(ve%offset:ve%offset+esize))=.true.
+          v%data%l(ve%data%ln(ve%offset:ve%offset+pm_fast_esize(ve)-1))=.true.
        endif
     case(op_jmp_any_ve,op_jmp_any_ve_par)
        ! op_jmp_any_ve #where ve ve1 ve2...
        ! op_jmp_any_ve_par #where ve ve1 ve2...
        ok=.false.
        do i=2,nargs
-          if(pm_fast_vkind(arg(i)%data%ptr(arg(i)%offset))&
-               /=pm_tiny_int) then
+          if(.not.ve_is_empty(arg(i)%data%ptr(arg(i)%offset))) then
              ok=.true.
              exit
           endif
@@ -468,7 +516,7 @@ contains
           pc%offset=pc%offset+opcode2-pm_jump_offset
        endif
     case(op_par_loop)
-       ! op_par_loop ????
+       ! op_par_loop args...
        errno=par_loop(context,func,stack,pc,arg,nargs,ve,esize,nesting,noexit)
        if(errno/=0) then
           call dump_stack(context,stack,func,pc,ve)
@@ -517,49 +565,74 @@ contains
        call fill_args_from_lbuffer(2,2,lbuffer)
     case(op_push_node_grid)
        ! op_push_node_grid ve mask1..maskN dim1..dimN
-       n=(nargs-1)/2
-       call get_args_to_lbuffer(0_pm_ln,2,n+1,lbuffer)
-       call get_args_to_ibuffer(0_pm_ln,n+2,n+n+1,ibuffer)
-       call push_node_grid(context,lbuffer,n,ibuffer)
+       if(.not.ve_is_empty(ve)) then
+          n=(nargs-1)/2
+          call get_args_to_lbuffer(0_pm_ln,2,n+1,lbuffer)
+          call get_args_to_ibuffer(0_pm_ln,n+2,n+n+1,ibuffer)
+          call push_node_grid(context,lbuffer,n,ibuffer)
+       endif
     case(op_push_node_split)
-       ! op_push_node_split ve colours
-       call push_node_split(context,&
-            int(arg(2)%data%ln(arg(2)%offset)))
+       if(.not.ve_is_empty(ve)) then
+          ! op_push_node_split ve colours
+          call push_node_split(context,&
+               int(arg(2)%data%ln(arg(2)%offset)))
+       endif
     case(op_push_node_distr)
-       ! op_push_node_distr ve
-       call push_node_distr(context)
+       if(.not.ve_is_empty(ve)) then
+          ! op_push_node_distr ve
+          call push_node_distr(context)
+       endif
     case(op_push_node_conc)
-       ! op_push_node_conc ve  -- OBSOLETE?
-       conc_depth=conc_depth+1
+       if(.not.ve_is_empty(ve)) then
+          ! op_push_node_conc ve  -- OBSOLETE?
+          conc_depth=conc_depth+1
+       endif
     case(op_pop_node_conc)
-       ! op_pop_node_conc ve   -- OBSOLETE?
-       conc_depth=conc_depth-1
+       if(.not.ve_is_empty(ve)) then
+          ! op_pop_node_conc ve   -- OBSOLETE?
+          conc_depth=conc_depth-1
+       endif
     case(op_push_node_back)
-       ! op_push_node_back ve
-       call push_node_back(context)
+       if(.not.ve_is_empty(ve)) then
+          ! op_push_node_back ve
+          call push_node_back(context)
+       endif
     case(op_pop_off_node)
-       ! op_pop_off_node ve
-       call pop_off_node(context)
+       if(.not.ve_is_empty(ve)) then
+          ! op_pop_off_node ve
+          call pop_off_node(context)
+       endif
     case(op_pop_node)
        ! op_pop_node ve
-       if(conc_depth==0) then
-          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
+       if(.not.ve_is_empty(ve)) then
+          if(conc_depth==0) then
+             if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
+          endif
+          call pop_node(context)
        endif
-       call pop_node(context)
+       
     case(op_broadcast)
        ! op_broadcast ve vec prc
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-       call broadcast(context,int(arg(3)%data%ln(arg(3)%offset)),arg(2))
+       if(.not.ve_is_empty(ve)) then
+          call broadcast(context,int(arg(3)%data%ln(arg(3)%offset)),arg(2))
+       endif
     case(op_broadcast_shared)
        ! op_broadcast_shared ve vec
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-       call broadcast(context,0,arg(2),&
-            par_frame(par_depth)%shared_comm,par_frame(par_depth)%shared_node)
+       if(.not.ve_is_empty(ve)) then
+          call broadcast(context,0,arg(2),&
+               par_frame(par_depth)%shared_comm,par_frame(par_depth)%shared_node)
+       endif
     case(op_broadcast_val)
        ! op_broadcast_val ve &vec_out vec_in prc
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-       call set_arg(2,broadcast_val(context,&
-            int(arg(4)%data%ln(arg(4)%offset)),arg(3),j))
+       if(ve_is_empty(ve)) then
+          call set_arg(2,args(3))
+       else
+          call set_arg(2,broadcast_val(context,&
+               int(arg(4)%data%ln(arg(4)%offset)),arg(3),j))
+       endif
     case(op_get_remote)
        ! op_get_remote ve &outvec vec prc offset   - OBSOLETE?
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
@@ -596,8 +669,9 @@ contains
        v=empty_copy_vector(context,w,esize+1)
        call set_arg(2,v)
        newve=arg(1)%data%ptr(arg(1)%offset)
-       if(pm_fast_vkind(newve)==pm_logical) &
-            newve=shrink_ve(context,newve,pm_fast_esize(newve))
+       if(pm_fast_vkind(newve)==pm_logical) then
+          newve=shrink_ve(context,newve,pm_fast_esize(newve))
+       endif
        call get_remote(context,arg(4),&
             arg(5),&
             w,v,newve,errno)
@@ -606,8 +680,9 @@ contains
        ! op_get_remote_distr ve &outvec array prc offset 
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        newve=arg(2)%data%ptr(arg(2)%offset)
-       if(pm_fast_vkind(newve)==pm_logical) &
-            newve=shrink_ve(context,newve,pm_fast_esize(newve))
+       if(pm_fast_vkind(newve)==pm_logical) then
+          newve=shrink_ve(context,newve,pm_fast_esize(newve))
+       endif
        w=arg(2)
        w=w%data%ptr(w%offset+pm_array_vect)
        w=w%data%ptr(w%offset)
@@ -616,8 +691,8 @@ contains
             w,arg(3),&
             newve,errno)
        if(errno/=0) goto 997
-    case(op_gather)
-       ! op_gather ve &vec1 ... &vecN -- vecs both in and out
+    case(op_gather)  
+       ! op_gather ve &vec1 ... &vecN -- vecs both in and out !!! OBSOLETE
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        j=par_frame(par_depth)%this_nnode
        stack%data%ptr(stack%offset+opcode2)=&
@@ -630,205 +705,240 @@ contains
        enddo
     case(op_isend_offset,op_isend_grid)
        ! op_isend_offset ve offsets prc array
-       !!! Do not sync status as number of ops can vary between procs
-       v=arg(4)%data%ptr(&
-            arg(4)%offset&
-            +pm_array_vect)
-       v=v%data%ptr(v%offset)
-       call isend_disp(&
-            int(arg(3)%data%&
-            ln(arg(3)%offset)),&
-            v,&
-            arg(2),0_pm_ln,&
-            1+pm_fast_esize(arg(2)),&
-            data_tag)
+!!! Do not sync status as number of ops can vary between procs
+       if(.not.ve_is_empty(ve)) then
+          v=arg(4)%data%ptr(arg(4)%offset&
+               +pm_array_vect)
+          v=v%data%ptr(v%offset)
+          call isend_disp(&
+               int(arg(3)%data%&
+               ln(arg(3)%offset)),&
+               v,&
+               arg(2),0_pm_ln,&
+               1+pm_fast_esize(arg(2)),&
+               data_tag)
+       endif
     case(op_irecv_offset,op_irecv_grid)
        ! op_irecv_offset ve offsets prc array
-       !!! Do not sync status as number of ops can vary between procs
-       v=arg(4)%data%ptr(&
-            arg(4)%offset&
-            +pm_array_vect)
-       v=v%data%ptr(v%offset)
-       ok=.false.
-       call irecv_disp(context,&
-            int(arg(3)%data%&
-            ln(arg(3)%offset)),&
-            v,arg(2),0_pm_ln,&
-            1+pm_fast_esize(arg(2)),&
-            data_tag,ok)
-       if(ok) then
-          call runtime_error(context,func,pc,ve,noexit,'cannot run irecv_offset on composite')
-          goto 999
+!!! Do not sync status as number of ops can vary between procs
+       if(.not.ve_is_empty(ve)) then
+          v=arg(4)%data%ptr(&
+               arg(4)%offset&
+               +pm_array_vect)
+          v=v%data%ptr(v%offset)
+          ok=.false.
+          call irecv_disp(context,&
+               int(arg(3)%data%&
+               ln(arg(3)%offset)),&
+               v,arg(2),0_pm_ln,&
+               1+pm_fast_esize(arg(2)),&
+               data_tag,ok)
+          if(ok) then
+             call runtime_error(context,func,pc,ve,noexit,&
+                  'cannot run irecv_offset on composite')
+             goto 999
+          endif
        endif
     case(op_recv_offset,op_recv_grid,op_recv_offset_resend,op_recv_grid_resend)
        ! op_recv_offset ve offsets prc array
-       !!! Do not sync status as number of ops can vary between procs
-       v=arg(4)%data%ptr(&
-            arg(4)%offset&
-            +pm_array_vect)
-       v=v%data%ptr(v%offset)
-       m=1+pm_fast_esize(arg(2))
-       call recv_disp(context,&
-            int(arg(3)%data%&
-            ln(arg(3)%offset)),&
-            v,arg(2),0_pm_ln,&
-            m,data_tag)
-       if(opcode==op_recv_offset_resend.or.opcode==op_recv_grid_resend) then
-          call pm_panic('should not be resending')
-          do ii=1,par_frame(par_depth)%shared_nnode-1
-             n=get_shared(i)
-             call isend_disp(&
-                  n,v,&
-                  arg(2),0_pm_ln,&
-                  1+pm_fast_esize(arg(2)),&
-                  data_tag)
-          enddo
+!!! Do not sync status as number of ops can vary between procs
+       if(.not.ve_is_empty(ve)) then
+          v=arg(4)%data%ptr(&
+               arg(4)%offset&
+               +pm_array_vect)
+          v=v%data%ptr(v%offset)
+          m=1+pm_fast_esize(arg(2))
+          call recv_disp(context,&
+               int(arg(3)%data%&
+               ln(arg(3)%offset)),&
+               v,arg(2),0_pm_ln,&
+               m,data_tag)
+          if(opcode==op_recv_offset_resend.or.opcode==op_recv_grid_resend) then
+             call pm_panic('should not be resending')
+             do ii=1,par_frame(par_depth)%shared_nnode-1
+                n=get_shared(i)
+                call isend_disp(&
+                     n,v,&
+                     arg(2),0_pm_ln,&
+                     1+pm_fast_esize(arg(2)),&
+                     data_tag)
+             enddo
+          endif
        endif
     case(op_bcast_shared_offset,op_bcast_shared_grid)
-       v=arg(3)%data%ptr(&
-            arg(3)%offset&
-            +pm_array_vect)
-       v=v%data%ptr(v%offset)
-       m=1+pm_fast_esize(arg(2))
-       call broadcast_disp(context,&
-            0,v,arg(2),0_pm_ln,&
-            m,xcomm=par_frame(par_depth)%shared_comm)
+       if(.not.ve_is_empty(ve)) then
+          v=arg(3)%data%ptr(&
+               arg(3)%offset&
+               +pm_array_vect)
+          v=v%data%ptr(v%offset)
+          m=1+pm_fast_esize(arg(2))
+          call broadcast_disp(context,&
+               0,v,arg(2),0_pm_ln,&
+               m,xcomm=par_frame(par_depth)%shared_comm)
+       endif
     case(op_isend)
-       ! op_isend ve prc array
-       v=arg(3)%data%ptr(&
-            arg(3)%offset&
-            +pm_array_vect)
-       v=v%data%ptr(v%offset)
-       call isend(int(arg(2)%data%&
-            ln(arg(2)%offset)),v,&
-            data_tag)
+       if(.not.ve_is_empty(ve)) then
+          ! op_isend ve prc array
+          v=arg(3)%data%ptr(&
+               arg(3)%offset&
+               +pm_array_vect)
+          v=v%data%ptr(v%offset)
+          call isend(int(arg(2)%data%&
+               ln(arg(2)%offset)),v,&
+               data_tag)
+       endif
     case(op_isend_reply)
-       ! op_isend_reply ve prc vect
-       call rsend(context,int(arg(2)%data%ln(arg(2)%offset)),&
-            arg(3),data_tag)
+       if(.not.ve_is_empty(ve)) then
+          ! op_isend_reply ve prc vect
+          call rsend(context,int(arg(2)%data%ln(arg(2)%offset)),&
+               arg(3),data_tag)
+       endif
     case(op_irecv)
        ! op_irecv ve prc array
-       v=arg(3)%data%ptr(&
-            arg(3)%offset&
-            +pm_array_vect)
-       v=v%data%ptr(v%offset)
-       call irecv(int(arg(2)%data%&
-            ln(arg(2)%offset)),v,&
-            data_tag,ok)
-       if(ok) then
-          call runtime_error(context,func,pc,ve,noexit,'cannot run irecv on composite')
-           goto 999
-        endif
+       if(.not.ve_is_empty(ve)) then
+          v=arg(3)%data%ptr(&
+               arg(3)%offset&
+               +pm_array_vect)
+          v=v%data%ptr(v%offset)
+          call irecv(int(arg(2)%data%&
+               ln(arg(2)%offset)),v,&
+               data_tag,ok)
+          if(ok) then
+             call runtime_error(context,func,pc,ve,noexit,'cannot run irecv on composite')
+             goto 999
+          endif
+       endif
      case(op_recv)
         ! op_recv ve prc array
-        v=arg(3)%data%ptr(&
-            arg(3)%offset&
-            +pm_array_vect)
-        v=v%data%ptr(v%offset)
-        call recv(context,int(arg(2)%data%&
-             ln(arg(2)%offset)),v,&
-             data_tag)
+        if(.not.ve_is_empty(ve)) then
+           v=arg(3)%data%ptr(&
+                arg(3)%offset&
+                +pm_array_vect)
+           v=v%data%ptr(v%offset)
+           call recv(context,int(arg(2)%data%&
+                ln(arg(2)%offset)),v,&
+                data_tag)
+        endif
      case(op_isend_req,op_recv_reply,op_isend_assn)
         !!! Do not sync status as number of ops can vary between procs
         
         ! op_isend_req      ve offsets prc vec &vecout     [ mask ] 
         ! op_recv_reply     ve offsets prc &vec            [ mask ]
         ! op_isend_assn     ve offsets prc vec_lhs vec_rhs [ mask ]
-        i=merge(4,5,opcode==op_recv_reply)
-        if(nargs>i) then
-           v=arg(2)
-           w=arg(i+1)
-           m=0
-           do j=0,pm_fast_esize(arg(2))
-              if(w%data%l(w%offset+v%data%ln(v%offset+j))) then
-                 v%data%ln(v%offset+m)=v%data%ln(v%offset+j)
-                 m=m+1
-              endif
-           enddo
-        elseif(pm_fast_vkind(arg(2))==pm_long) then
-           m=1+pm_fast_esize(arg(2))
-        else
-           w=arg(2)%data%ptr(arg(2)%offset+3)
-           m=w%data%ln(w%offset)
-        endif
-        if(opcode==op_isend_req.or.opcode==op_isend_assn) then
-           call isend_num(&
-                int(arg(3)%data%&
-                ln(arg(3)%offset)),&
-                m,req_tag)
-           call isend_disp(&
-                int(arg(3)%data%&
-                ln(arg(3)%offset)),&
-                arg(4),&
-                arg(2),0_pm_ln,&
-                m,extra_req_tag)
-           if(m>0) then
-              if(opcode==op_isend_assn) then
-                 call isend_val_disp(&
-                      int(arg(3)%data%&
-                      ln(arg(3)%offset)),&
-                      arg(5),&
-                      arg(2),0_pm_ln,&
-                      m,extra_req_tag)
-              else
-                 call irecv_disp(context,&
-                      int(arg(3)%data%&
-                      ln(arg(3)%offset)),&
-                      arg(5),&
-                      arg(2),0_pm_ln,&
-                      m,data_tag,ok)
-              endif
+        if(.not.ve_is_empty(ve)) then
+           i=merge(4,5,opcode==op_recv_reply)
+           if(nargs>i) then
+              v=arg(2)
+              w=arg(i+1)
+              m=0
+              do j=0,pm_fast_esize(arg(2))
+                 if(w%data%l(w%offset+v%data%ln(v%offset+j))) then
+                    v%data%ln(v%offset+m)=v%data%ln(v%offset+j)
+                    m=m+1
+                 endif
+              enddo
+           elseif(pm_fast_vkind(arg(2))==pm_long) then
+              m=1+pm_fast_esize(arg(2))
+           else
+              w=arg(2)%data%ptr(arg(2)%offset+3)
+              m=w%data%ln(w%offset)
            endif
-        elseif(opcode==op_recv_reply) then
-           call recv_rest_disp(context,&
-                int(arg(3)%data%&
-                ln(arg(3)%offset)),&
+           if(opcode==op_isend_req.or.opcode==op_isend_assn) then
+              if(pm_fast_vkind(arg(2))/=pm_long) then
+                 goto 999
+              endif
+              call isend_num(&
+                   int(arg(3)%data%&
+                   ln(arg(3)%offset)),&
+                   m,req_tag)
+              call isend_disp(&
+                   int(arg(3)%data%&
+                   ln(arg(3)%offset)),&
+                   arg(4),&
+                   arg(2),0_pm_ln,&
+                   m,extra_req_tag)
+              if(m>0) then
+                 if(opcode==op_isend_assn) then
+                    call isend_val_disp(&
+                         int(arg(3)%data%&
+                         ln(arg(3)%offset)),&
+                         arg(5),&
+                         arg(2),0_pm_ln,&
+                         m,extra_req_tag)
+                 else
+                    call irecv_disp(context,&
+                         int(arg(3)%data%&
+                         ln(arg(3)%offset)),&
+                         arg(5),&
+                         arg(2),0_pm_ln,&
+                         m,data_tag,ok)
+                 endif
+              endif
+           elseif(opcode==op_recv_reply) then
+              call recv_rest_disp(context,&
+                   int(arg(3)%data%&
+                   ln(arg(3)%offset)),&
                 arg(4),&
                 arg(2),0_pm_ln,&
                 m,data_tag)
-        else !! op_broadcast_disp
-           call broadcast_disp(context,&
-                int(arg(3)%data%&
-                ln(arg(3)%offset)),&
-                arg(4),&
-                arg(2),0_pm_ln,&
-                m)
+           else !! op_broadcast_disp
+              call broadcast_disp(context,&
+                   int(arg(3)%data%&
+                   ln(arg(3)%offset)),&
+                   arg(4),&
+                   arg(2),0_pm_ln,&
+                   m)
+           endif
         endif
      case(op_recv_req_call,op_recv_assn_call)
         !!! Do not sync status as number of ops can vary between procs
 
         ! op_recv_req_call  ve new_ve &node_out &vec_lhs_out vec_lhs_in 
         ! op_recv_assn_call ve new_ve &node_out &vec_lhs_out vec_lhs_in &vec_rhs_out
-        
-        i=message_pending_node(req_tag)
-        call recv_num(context,i,j,req_tag)
-        esize=j-1
-        v=alloc_arg(pm_long,3)
-        v%data%ln(v%offset:v%offset+esize)=i
-        if(j>0) then
-           v=copy_dref(context,arg(5),j,.false.)
-           call set_arg(4,v)
-           call recv(context,i,v,extra_req_tag)
-           if(opcode==op_recv_assn_call) then
-              w=recv_val(context,i,extra_req_tag)
-              call set_arg(6,w)
-              if(opcode2==1) then
-                 do ii=1,par_frame(par_depth)%shared_nnode-1
-                    n=get_shared(ii)
-                    call isend(n,v,extra_req_tag,&
-                         par_frame(par_depth)%this_comm)
-                    call isend_val(n,w,0_pm_ln,j,extra_req_tag,&
-                         par_frame(par_depth)%this_comm)
-                 enddo
+
+        if(ve_is_empty(ve)) then
+           call set_arg(2,arg(1))
+           v=alloc_arg(pm_long,3)
+           call set_arg(4,arg(5))
+           if(opcode==op_recv_assn_call.and..false.) then
+              call set_arg(6,arg(7))
+           endif
+        else
+           i=message_pending_node(req_tag)
+           call recv_num(context,i,j,req_tag)
+           esize=j-1
+           v=alloc_arg(pm_long,3)
+           v%data%ln(v%offset:v%offset+esize)=i
+           if(j>0) then
+              v=copy_dref(context,arg(5),j,.false.)
+              call set_arg(4,v)
+              call recv(context,i,v,extra_req_tag)
+              if(opcode==op_recv_assn_call) then
+                 w=recv_val(context,i,extra_req_tag)
+                 call set_arg(6,w)
+                 if(opcode2==1) then
+                    do ii=1,par_frame(par_depth)%shared_nnode-1
+                       n=get_shared(ii)
+                       call isend(n,v,extra_req_tag,&
+                            par_frame(par_depth)%this_comm)
+                       call isend_val(n,w,0_pm_ln,j,extra_req_tag,&
+                            par_frame(par_depth)%this_comm)
+                    enddo
+                 endif
+              endif
+              call set_arg(2,make_simple_ve(context,j))
+           else
+              call set_arg(2,arg(1))
+              call set_arg(4,arg(5))
+              if(opcode==op_recv_assn_call.and..false.) then
+                 call set_arg(6,arg(7))
               endif
            endif
-           call set_arg(2,make_simple_ve(context,j))
         endif
-        call set_arg(2,make_simple_ve(context,j))
      case(op_remote_call)
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        v=arg(6)
-       if(pm_fast_vkind(ve)/=pm_tiny_int) w=empty_copy_vector(context,v%data%ptr(v%offset+1),esize+1)
+       w=empty_copy_vector(context,v%data%ptr(v%offset+1),esize+1)
        arg(5)%data%ptr(arg(5)%offset)=w
        errno=0
        if(remote_call(context,arg(7),&
@@ -889,31 +999,32 @@ contains
        endif
     case(op_bcast_call)
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-       if(pm_fast_vkind(ve)==pm_tiny_int) then
-          call set_arg(3,broadcast_val_disp(context,&
-               newve,0_pm_ln,0_pm_ln,&
-               int(arg(7)%data%ln(arg(7)%offset)),arg(5),j))
-          call set_arg(4,broadcast_val_disp(context,&
-               newve,0_pm_ln,0_pm_ln,&
-               int(arg(7)%data%ln(arg(7)%offset)),arg(6),j))
-       else
-          newve=ve
-          if(pm_fast_vkind(newve)/=pm_long) newve=shrink_ve(context,newve,esize)
-          call set_arg(3,broadcast_val_disp(context,&
-               newve,0_pm_ln,pm_fast_esize(newve)+1,&
-               int(arg(7)%data%ln(arg(7)%offset)),arg(5),j))
-          call set_arg(4,broadcast_val_disp(context,&
-               newve,0_pm_ln,pm_fast_esize(newve)+1,&
-               int(arg(7)%data%ln(arg(7)%offset)),arg(6),j))
-       endif
+       newve=ve
+       if(pm_fast_vkind(newve)/=pm_long) newve=shrink_ve(context,newve,esize)
+       call set_arg(3,broadcast_val_disp(context,&
+            newve,0_pm_ln,pm_fast_esize(newve),&
+            int(arg(7)%data%ln(arg(7)%offset)),arg(5),j))
+       call set_arg(4,broadcast_val_disp(context,&
+            newve,0_pm_ln,pm_fast_esize(newve),&
+            int(arg(7)%data%ln(arg(7)%offset)),arg(6),j))
        call set_arg(2,make_simple_ve(context,j))
     case(op_do_at)
-       newve=make_simple_ve(context,arg(3)%data%ln(arg(3)%offset))
-       newve%data%ptr(newve%offset)=arg(4)
-       call set_arg(2,newve)
+       if(ve_is_empty(ve)) then
+          call set_arg(2,arg(1))
+       else
+          newve=make_simple_ve(context,arg(3)%data%ln(arg(3)%offset))
+          v=pm_new(context,pm_long,pm_fast_esize(arg(4))+2)
+          v%data%ln(v%offset:v%offset+pm_fast_esize(arg(4)))=&
+               arg(4)%data%ln(arg(4)%offset:&
+               arg(4)%offset+pm_fast_esize(arg(4)))
+          newve%data%ptr(newve%offset)=v
+          call set_arg(2,newve)
+       endif
     case(op_sync_mess)
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-       call complete_messages(context)
+       if(.not.ve_is_empty(ve)) then
+          call complete_messages(context)
+       endif
 
        
        ! ******** Distibuted file operations *******
@@ -922,7 +1033,7 @@ contains
        v=alloc_arg(pm_int,2)
        w=alloc_arg(pm_int,3)
        p=arg(4)%data%ptr(arg(4)%offset+pm_array_vect)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -939,7 +1050,7 @@ contains
     case(op_close_file)
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -953,7 +1064,7 @@ contains
     case(op_seek_file)
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -968,7 +1079,7 @@ contains
     case(op_read_file)
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -983,7 +1094,7 @@ contains
     case(op_write_file)
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -999,7 +1110,7 @@ contains
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        v=arg(4)%data%ptr(arg(4)%offset+pm_array_vect)
        w=alloc_arg(pm_int,2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1015,7 +1126,7 @@ contains
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
        w=alloc_arg(pm_int,2)
        v=arg(4)%data%ptr(arg(4)%offset+pm_array_vect)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1087,28 +1198,34 @@ contains
     case(op_miss_arg)
        arg(2)%data%ptr(arg(2)%offset)=empty_vector
     case(op_print)
-       if(par_frame(par_depth)%shared_node==0.or.opcode2==1) then
+       if(.not.ve_is_empty(ve).and.&
+            par_frame(par_depth)%shared_node==0.or.opcode2==1) then
           newve=shrink_ve(context,ve,esize)
           call vector_print_string(context,arg(2),newve)
        endif
     case(op_dump)
-       write(*,*) '====================== dump ======================', par_frame(par_depth)%this_node
-       call vector_dump(context,arg(2),1)
-       write(*,*) '====='
-       call pm_dump_tree(context,6,arg(2),2)
-       write(*,*) '----'
-       call pm_dump_tree(context,6,arg(1),2)
-       write(*,*) '=================================================='
+       trace_var=arg(2)
+       !if(.not.ve_is_empty(ve)) then
+          write(*,*) '====================== dump ======================', par_frame(par_depth)%this_node
+          call vector_dump(context,arg(2),1)
+          write(*,*) '====='
+          call pm_dump_tree(context,6,arg(2),2)
+          write(*,*) '----'
+          call pm_dump_tree(context,6,arg(1),2)
+          write(*,*) '=================================================='
+       !endif
     case(op_dump_id)
-       write(*,*) '====================== dumpid ======================'
-       write(*,*) arg(2)%data%hash,arg(2)%offset
-       write(*,*) '=================================================='
+       if(.not.ve_is_empty(ve)) then
+          write(*,*) '====================== dumpid ======================'
+          write(*,*) arg(2)%data%hash,arg(2)%offset
+          write(*,*) '=================================================='
+       endif
     case(op_new_dump)
        newpc=stack%data%ptr(stack%offset+pm_stack_pc)
        newfunc=stack%data%ptr(stack%offset+pm_stack_func)
        ! Below needs to be properly integrated with messaging system
        !call print_module_and_line(context,newfunc,newpc,ve,printit=.true.)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1121,16 +1238,20 @@ contains
           call vector_dump_to(context,arg(3),j,mesg_q_print_str,2)
        enddo
     case(op_show)
-       call print_module_and_line(context,func,pc,ve,printit=.true.)
+       if(.not.ve_is_empty(ve)) then
+          call print_module_and_line(context,func,pc,ve,printit=.true.)
+       endif
     case(op_show_stack)
-       call mesg_q_print_str(context,&
-            '=================================================================')
-       call print_module_and_line(context,func,pc,ve,printit=.true.)
-            call mesg_q_print_str(context,&
-            '-----------------------------------------------------------------')
-       call dump_stack(context,stack,func,pc,ve,printit=.true.)
-       call mesg_q_print_str(context,&
-            '=================================================================')
+       if(.not.ve_is_empty(ve)) then
+          call mesg_q_print_str(context,&
+               '=================================================================')
+          call print_module_and_line(context,func,pc,ve,printit=.true.)
+          call mesg_q_print_str(context,&
+               '-----------------------------------------------------------------')
+          call dump_stack(context,stack,func,pc,ve,printit=.true.)
+          call mesg_q_print_str(context,&
+               '=================================================================')
+       endif
     case(op_concat)
        newve=shrink_ve(context,ve,esize)
        call set_arg(2,vector_concat_string(context,newve,&
@@ -1173,23 +1294,27 @@ contains
              goto 999 
           endif
        else
-          if(.not.all(arg(3)%data%l(arg(3)%offset+&
-               ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))) then
-             call vector_get_string(context,arg(2),ve,first_false(ve,arg(3)),mess)
-             call runtime_error(context,func,pc,ve,noexit,mess)
-             errno=1
-             goto 999 
+          if(pm_fast_esize(ve)>0) then
+             if(.not.all(arg(3)%data%l(arg(3)%offset+&
+                  ve%data%ln(ve%offset:&
+                  ve%offset+pm_fast_esize(ve)-1)))) then
+                call vector_get_string(context,arg(2),ve,first_false(ve,arg(3)),mess)
+                call runtime_error(context,func,pc,ve,noexit,mess)
+                errno=1
+                goto 999 
+             endif
           endif
        endif
     case(op_elem)
        if(pm_fast_typeof(arg(3))==pm_elemref_type) then
           call set_arg(2,elem_ref_get_struct_elem(context,arg(3),opcode2,esize))
        else
+          if(pm_fast_vkind(arg(3))/=pm_usr) then
+             write(*,*) 'Internal error on',sys_node,opcode2
+             goto 999
+          endif
           call set_arg(2,arg(3)%data%ptr(arg(3)%offset+opcode2))
        endif
-    case(op_chan_array_elem)
-       call set_arg(2,array_get_struct_elem(context,arg(3),opcode2,0))
     case(op_chan_array_vect)
        v=arg(3)%data%ptr(arg(3)%offset+pm_array_vect)
        call set_arg(2,v%data%ptr(v%offset))
@@ -1202,14 +1327,6 @@ contains
        v%data%ptr(v%offset+2)=arg(3)
        v%data%ptr(v%offset+3:v%offset+5)=arg(3)%data%ptr(arg(3)%offset+3:arg(3)%offset+5)
     case(op_make_rf)
-       if(pm_main_process) then
-          if(pm_fast_esize(arg(3)%data%ptr(arg(3)%offset+pm_array_vect))/=pm_fast_esize(arg(4))) then
-             write(*,*) pm_fast_esize(arg(3)%data%ptr(arg(3)%offset+pm_array_vect)),pm_fast_esize(arg(4))
-              call runtime_error(context,func,pc,ve,noexit,&
-                   'Internal error: op_make_rf')
-             goto 999
-          endif
-       endif
        errno=0
        call set_arg(2,make_elem_ref(context,arg(3),arg(4),ve,errno))
        if(errno/=0) goto 997
@@ -1227,28 +1344,17 @@ contains
        v=pm_fast_newusr(context,&
             merge(pm_dref_type,pm_dref_shared_type,opcode2==0),&
             int(6,pm_p))
-       if(pm_fast_vkind(ve)==pm_tiny_int) then
-          v%data%ptr(v%offset+2)=arg(4)
+       if(nargs==5) then
+          v%data%ptr(v%offset+1:v%offset+3)=arg(3:5)
+          v%data%ptr(v%offset+4:v%offset+5)=&
+               arg(4)%data%ptr(arg(4)%offset+4:arg(4)%offset+5)
        else
-          if(nargs==5) then
-             v%data%ptr(v%offset+1:v%offset+3)=arg(3:5)
-             v%data%ptr(v%offset+4:v%offset+5)=&
-                  arg(4)%data%ptr(arg(4)%offset+4:arg(4)%offset+5)
-          else
-             v%data%ptr(v%offset+1:v%offset+nargs-2)=arg(3:nargs)
-          endif
+          v%data%ptr(v%offset+1:v%offset+nargs-2)=arg(3:nargs)
        endif
        call set_arg(2,v)
-!!$       if(sys_node==0) then
-!!$          write(*,*) 'dref',sys_node
-!!$          call pm_dump_tree(context,6,v,2)
-!!$       endif
     case(op_import_dref)
-       v=arg(1)%data%ptr(arg(1)%offset)
-       if(.not.pm_fast_istiny(v)) then
-          call set_arg(2,&
-               copy_dref(context,arg(3),esize+1,.true.,arg(1)))
-       endif
+       call set_arg(2,&
+            copy_dref(context,arg(3),esize+1,.true.,arg(1)))
        
     case(op_array)
        call set_arg(2,make_array_dim(context,opcode2,&
@@ -1258,7 +1364,7 @@ contains
             arg(3),arg(4),arg(5),ve))
     case(op_array_get_elem)
        errno=0
-       if(pm_fast_isnull(arg(4))) goto 999
+       if(pm_fast_isnull(arg(3))) goto 999
        call set_arg(2,array_index(context,arg(3),&
             arg(4),ve,esize,errno))
        if(errno/=0) goto 997
@@ -1312,9 +1418,6 @@ contains
        new2=pm_fast_new(context,pm_pointer,&
             int(pm_fast_esize(arg(3)),pm_p)+1_pm_p)
        do j=0,pm_fast_esize(arg(3))
-!!$          write(*,*) 'J=',j
-!!$          call pm_dump_tree(context,6,arg(1),2)
-!!$          call pm_dump_tree(context,6,arg(3),2)
           call pm_ptr_assign(context,new2,j,import_vector(context,&
                arg(3)%data%ptr(arg(3)%offset+j),&
                arg(1)%data%ptr(arg(1)%offset+1)))
@@ -1325,14 +1428,12 @@ contains
     case(op_export)
        call export_vector(context,arg(2),arg(3),arg(1)%data%ptr(arg(1)%offset+1))
     case(op_export_param)
-!!$       write(*,*) 'Export'
-!!$       call pm_dump_tree(context,6,arg(3),2)
-       call  set_arg(2,export_vector_as_new(context,arg(3),arg(1)%data%ptr(arg(1)%offset+1),ve))
+       call  set_arg(2,&
+            export_vector_as_new(context,arg(3),arg(1)%data%ptr(arg(1)%offset+1),ve))
     case(op_extractelm)
        call set_arg(2,get_elem_ref(context,arg(3),esize,errno))
        if(errno/=0) goto 997
        
- 
     case(op_make_poly)
        newve=shrink_ve(context,ve,esize)
        call set_arg(2,poly_new(context,arg(3),newve,esize))
@@ -1340,20 +1441,17 @@ contains
        call set_arg(2,pm_fast_typeno(context,opcode2))
     case(op_any)
        newve=poly_check_type(context,arg(4),opcode2,ve,esize)
-       k=-1
-       do j=0,esize
-          if(newve%data%l(newve%offset+j)) then
-             k=j
+       kk=count(newve%data%l(newve%offset:newve%offset+esize))
+       do i=0,esize
+          if(newve%data%l(newve%offset+i)) then
+             k=i
              exit
           endif
        enddo
-       if(k==-1) then
-          newve=empty_vector
-       else
-          kk=count(newve%data%l(newve%offset+k:newve%offset+esize))
-          if(esize+1>kk*pm_shrink_thresh) then
-             newve=shrink_ve(context,newve,esize,kk)
-          endif
+       if(esize+1>kk*pm_shrink_thresh) then
+          newve=shrink_ve(context,newve,esize,kk)
+       endif
+       if(kk>0) then
           new2=empty_copy_vector(context,&
                arg(4)%data%ptr(arg(4)%offset+k),esize+1)
           errno=0
@@ -1361,8 +1459,10 @@ contains
           if(errno/=0) then
              goto 997
           endif
-          call set_arg(3,new2)
+       else
+          new2=pm_null_obj
        endif
+       call set_arg(3,new2)
        ve=make_new_ve(newve,arg(1))
        call set_arg(2,ve)
     case(op_as)
@@ -1396,7 +1496,7 @@ contains
     case(op_get_dims)
        n=(nargs-2)/2
        call alloc_args_to_long(2,n+1)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1411,7 +1511,7 @@ contains
        end do
     case(op_wshare)
        v=alloc_arg(pm_long,2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1429,7 +1529,7 @@ contains
        enddo
     case(op_intersect_seq)
        call alloc_args_to_long(2,5)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1445,7 +1545,7 @@ contains
           call set_args_from_ibuffer(j,2,5,ibuffer2)
        enddo
     case(op_intersect_aseq)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1481,7 +1581,7 @@ contains
        enddo
     case(op_includes_aseq)
        p=alloc_arg(pm_logical,2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1500,7 +1600,7 @@ contains
        enddo
     case(op_index_aseq,op_in_aseq)
        p=alloc_arg(merge(pm_logical,pm_long,opcode==op_in_aseq),2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1525,7 +1625,7 @@ contains
           endif
        enddo
     case(op_expand_aseq)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1546,7 +1646,7 @@ contains
        enddo
        
     case(op_intersect_bseq)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1587,7 +1687,7 @@ contains
        enddo
     case(op_gcd)
        v=alloc_arg(pm_long,2)
-       do jj=0,merge(esize,pm_fast_esize(ve),pm_fast_vkind(ve)/=pm_long)
+       do jj=0,merge(esize,pm_fast_esize(ve)-1,pm_fast_vkind(ve)/=pm_long)
           if(pm_fast_vkind(ve)==pm_null) then
              j=jj
           elseif(pm_fast_vkind(ve)==pm_logical) then
@@ -1605,7 +1705,7 @@ contains
        v=alloc_arg(pm_logical,2)
        if(pm_fast_vkind(ve)==pm_long) then
           v%data%l(v%offset:v%offset+esize)=.false.
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=.true.
           enddo
@@ -1617,7 +1717,7 @@ contains
        v=alloc_arg(pm_logical,2)
        if(pm_fast_vkind(ve)==pm_long) then
           v%data%l(v%offset:v%offset+esize)=.false.
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=.true.
           enddo
@@ -1626,7 +1726,7 @@ contains
        endif
        call vector_eq(context,arg(3),arg(4),v,esize,ve)
        if(pm_fast_vkind(ve)==pm_long) then
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)= .not.v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)
@@ -1650,7 +1750,7 @@ contains
           arg(2)%data%i(arg(2)%offset:arg(2)%offset+esize)=&
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%i(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%i(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -1668,7 +1768,7 @@ contains
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1690,7 +1790,7 @@ contains
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1712,7 +1812,7 @@ contains
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1755,12 +1855,12 @@ contains
        else
           if(any(arg(4)%data%i(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1803,12 +1903,12 @@ contains
        else
           if(any(arg(4)%data%i(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=modulo(&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1830,7 +1930,7 @@ contains
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1852,7 +1952,7 @@ contains
                max(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1874,7 +1974,7 @@ contains
                min(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1894,7 +1994,7 @@ contains
           v%data%i(v%offset:v%offset+esize)=&
                -arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1914,7 +2014,7 @@ contains
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1936,7 +2036,7 @@ contains
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1958,7 +2058,7 @@ contains
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -1980,7 +2080,7 @@ contains
                arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2000,7 +2100,7 @@ contains
                   arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2018,7 +2118,7 @@ contains
                   arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2036,7 +2136,7 @@ contains
                   arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2054,7 +2154,7 @@ contains
           v%data%i(v%offset:v%offset+esize)=&
                abs(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=abs(&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2072,7 +2172,7 @@ contains
           v%data%i(v%offset:v%offset+esize)=&
                not(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=not(&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2092,7 +2192,7 @@ contains
                iand(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   iand(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2114,7 +2214,7 @@ contains
                ior(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ior(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2136,7 +2236,7 @@ contains
                ieor(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ieor(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2158,7 +2258,7 @@ contains
                ishft(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ishft(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2180,7 +2280,7 @@ contains
                dim(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2202,7 +2302,7 @@ contains
                sign(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2224,7 +2324,7 @@ contains
                mod(arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2244,7 +2344,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                (arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2262,7 +2362,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                (arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2280,7 +2380,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                (arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2298,7 +2398,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                (arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2316,7 +2416,7 @@ contains
           v%data%lln(v%offset:v%offset+esize)=&
                (arg(3)%data%i(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i(ve%data%ln(ve%offset+j)+&
@@ -2340,7 +2440,7 @@ contains
                   arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%ln(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%ln(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2360,7 +2460,7 @@ contains
                arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2383,7 +2483,7 @@ contains
                arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2405,7 +2505,7 @@ contains
                arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2448,12 +2548,12 @@ contains
        else
           if(any(arg(4)%data%ln(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2496,12 +2596,12 @@ contains
        else
           if(any(arg(4)%data%ln(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   modulo(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2523,7 +2623,7 @@ contains
                arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2545,7 +2645,7 @@ contains
                max(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2567,7 +2667,7 @@ contains
                min(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2587,7 +2687,7 @@ contains
           v%data%ln(v%offset:v%offset+esize)=&
                -arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2607,7 +2707,7 @@ contains
                arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2629,7 +2729,7 @@ contains
                arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2651,7 +2751,7 @@ contains
                arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2673,7 +2773,7 @@ contains
                arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2693,7 +2793,7 @@ contains
                   arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2711,7 +2811,7 @@ contains
                   arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2729,7 +2829,7 @@ contains
                   arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2747,7 +2847,7 @@ contains
           v%data%ln(v%offset:v%offset+esize)=&
                abs(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=abs(&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2765,7 +2865,7 @@ contains
           v%data%ln(v%offset:v%offset+esize)=&
                not(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=not(&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2785,7 +2885,7 @@ contains
                iand(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   iand(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2807,7 +2907,7 @@ contains
                ior(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ior(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2829,7 +2929,7 @@ contains
                ieor(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ieor(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2851,7 +2951,7 @@ contains
                ishft(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ishft(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2873,7 +2973,7 @@ contains
                dim(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2895,7 +2995,7 @@ contains
                sign(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2917,7 +3017,7 @@ contains
                mod(arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%ln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2937,7 +3037,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                (arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2955,7 +3055,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                (arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2973,7 +3073,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                (arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -2991,7 +3091,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                (arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -3009,7 +3109,7 @@ contains
           v%data%lln(v%offset:v%offset+esize)=&
                (arg(3)%data%ln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%ln(ve%data%ln(ve%offset+j)+&
@@ -3033,7 +3133,7 @@ contains
                   arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%lln(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%lln(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -3052,7 +3152,7 @@ contains
                arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3074,7 +3174,7 @@ contains
                arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3096,7 +3196,7 @@ contains
                arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3139,12 +3239,12 @@ contains
        else
           if(any(arg(4)%data%lln(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3187,12 +3287,12 @@ contains
        else
           if(any(arg(4)%data%lln(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   modulo(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3214,7 +3314,7 @@ contains
                arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3236,7 +3336,7 @@ contains
                max(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3258,7 +3358,7 @@ contains
                min(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3278,7 +3378,7 @@ contains
           v%data%lln(v%offset:v%offset+esize)=&
                -arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3298,7 +3398,7 @@ contains
                arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3320,7 +3420,7 @@ contains
                arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3342,7 +3442,7 @@ contains
                arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3364,7 +3464,7 @@ contains
                arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3384,7 +3484,7 @@ contains
                   arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3402,7 +3502,7 @@ contains
                   arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3420,7 +3520,7 @@ contains
                   arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3438,7 +3538,7 @@ contains
                   arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3456,7 +3556,7 @@ contains
           v%data%lln(v%offset:v%offset+esize)=&
                abs(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=abs(&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3474,7 +3574,7 @@ contains
           v%data%lln(v%offset:v%offset+esize)=&
                not(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=not(&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3494,7 +3594,7 @@ contains
                iand(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   iand(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3516,7 +3616,7 @@ contains
                ior(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ior(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3538,7 +3638,7 @@ contains
                ieor(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ieor(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3560,7 +3660,7 @@ contains
                ishft(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ishft(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3582,7 +3682,7 @@ contains
                dim(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3604,7 +3704,7 @@ contains
                sign(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3626,7 +3726,7 @@ contains
                mod(arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%lln(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3646,7 +3746,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                (arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3664,7 +3764,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                (arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3682,7 +3782,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                (arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3700,7 +3800,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                (arg(3)%data%lln(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%lln(ve%data%ln(ve%offset+j)+&
@@ -3719,7 +3819,7 @@ contains
                   arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%i8(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%i8(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -3738,7 +3838,7 @@ contains
                arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3760,7 +3860,7 @@ contains
                arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3782,7 +3882,7 @@ contains
                arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3825,12 +3925,12 @@ contains
        else
           if(any(arg(4)%data%i8(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3873,12 +3973,12 @@ contains
        else
           if(any(arg(4)%data%i8(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   modulo(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3900,7 +4000,7 @@ contains
                arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3922,7 +4022,7 @@ contains
                max(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3944,7 +4044,7 @@ contains
                min(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3964,7 +4064,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                -arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -3984,7 +4084,7 @@ contains
                arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4006,7 +4106,7 @@ contains
                arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4028,7 +4128,7 @@ contains
                arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4050,7 +4150,7 @@ contains
                arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4070,7 +4170,7 @@ contains
                   arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4088,7 +4188,7 @@ contains
                   arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4106,7 +4206,7 @@ contains
                   arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4124,7 +4224,7 @@ contains
                   arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4142,7 +4242,7 @@ contains
                   arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4160,7 +4260,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                abs(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=abs(&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4178,7 +4278,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                not(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=not(&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4198,7 +4298,7 @@ contains
                iand(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   iand(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4220,7 +4320,7 @@ contains
                ior(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ior(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4242,7 +4342,7 @@ contains
                ieor(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ieor(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4264,7 +4364,7 @@ contains
                ishft(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ishft(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4286,7 +4386,7 @@ contains
                dim(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4308,7 +4408,7 @@ contains
                sign(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4330,7 +4430,7 @@ contains
                mod(arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i8(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4350,7 +4450,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                (arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4368,7 +4468,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                (arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4386,7 +4486,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                (arg(3)%data%i8(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i8(ve%data%ln(ve%offset+j)+&
@@ -4405,7 +4505,7 @@ contains
                   arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%i16(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%i16(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -4424,7 +4524,7 @@ contains
                arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4446,7 +4546,7 @@ contains
                arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4468,7 +4568,7 @@ contains
                arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4511,12 +4611,12 @@ contains
        else
           if(any(arg(4)%data%i16(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4559,12 +4659,12 @@ contains
        else
           if(any(arg(4)%data%i16(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   modulo(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4586,7 +4686,7 @@ contains
                arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4608,7 +4708,7 @@ contains
                max(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4630,7 +4730,7 @@ contains
                min(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4650,7 +4750,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                -arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4670,7 +4770,7 @@ contains
                arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4692,7 +4792,7 @@ contains
                arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4714,7 +4814,7 @@ contains
                arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4736,7 +4836,7 @@ contains
                arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4756,7 +4856,7 @@ contains
                   arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4774,7 +4874,7 @@ contains
                   arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4792,7 +4892,7 @@ contains
                   arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4810,7 +4910,7 @@ contains
                   arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4828,7 +4928,7 @@ contains
                   arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4846,7 +4946,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                abs(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=abs(&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4864,7 +4964,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                not(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=not(&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4884,7 +4984,7 @@ contains
                iand(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   iand(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4906,7 +5006,7 @@ contains
                ior(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ior(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4928,7 +5028,7 @@ contains
                ieor(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ieor(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4950,7 +5050,7 @@ contains
                ishft(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ishft(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4972,7 +5072,7 @@ contains
                dim(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -4994,7 +5094,7 @@ contains
                sign(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -5016,7 +5116,7 @@ contains
                mod(arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i16(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -5036,7 +5136,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                (arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -5054,7 +5154,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                (arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -5072,7 +5172,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                (arg(3)%data%i16(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i16(ve%data%ln(ve%offset+j)+&
@@ -5091,7 +5191,7 @@ contains
                   arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%i32(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%i32(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -5110,7 +5210,7 @@ contains
                arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5132,7 +5232,7 @@ contains
                arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5154,7 +5254,7 @@ contains
                arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5197,12 +5297,12 @@ contains
        else
           if(any(arg(4)%data%i32(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5245,12 +5345,12 @@ contains
        else
           if(any(arg(4)%data%i32(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   modulo(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5272,7 +5372,7 @@ contains
                arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5294,7 +5394,7 @@ contains
                max(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5316,7 +5416,7 @@ contains
                min(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5336,7 +5436,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                -arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5356,7 +5456,7 @@ contains
                arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5378,7 +5478,7 @@ contains
                arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5400,7 +5500,7 @@ contains
                arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5422,7 +5522,7 @@ contains
                arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5442,7 +5542,7 @@ contains
                   arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5460,7 +5560,7 @@ contains
                   arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5478,7 +5578,7 @@ contains
                   arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5496,7 +5596,7 @@ contains
                   arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5514,7 +5614,7 @@ contains
                   arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5532,7 +5632,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                abs(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=abs(&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5550,7 +5650,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                not(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=not(&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5570,7 +5670,7 @@ contains
                iand(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   iand(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5592,7 +5692,7 @@ contains
                ior(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ior(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5614,7 +5714,7 @@ contains
                ieor(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ieor(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5636,7 +5736,7 @@ contains
                ishft(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ishft(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5658,7 +5758,7 @@ contains
                dim(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5680,7 +5780,7 @@ contains
                sign(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5702,7 +5802,7 @@ contains
                mod(arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i32(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5722,7 +5822,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                (arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5740,7 +5840,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                (arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5758,7 +5858,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                (arg(3)%data%i32(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i32(ve%data%ln(ve%offset+j)+&
@@ -5782,7 +5882,7 @@ contains
                   arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%i64(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%i64(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -5801,7 +5901,7 @@ contains
                arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -5823,7 +5923,7 @@ contains
                arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -5845,7 +5945,7 @@ contains
                arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -5888,12 +5988,12 @@ contains
        else
           if(any(arg(4)%data%i64(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -5936,12 +6036,12 @@ contains
        else
           if(any(arg(4)%data%i64(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   modulo(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -5963,7 +6063,7 @@ contains
                arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -5985,7 +6085,7 @@ contains
                max(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6007,7 +6107,7 @@ contains
                min(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6027,7 +6127,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                -arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6047,7 +6147,7 @@ contains
                arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6069,7 +6169,7 @@ contains
                arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6091,7 +6191,7 @@ contains
                arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6113,7 +6213,7 @@ contains
                arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6133,7 +6233,7 @@ contains
                   arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6151,7 +6251,7 @@ contains
                   arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6169,7 +6269,7 @@ contains
                   arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6187,7 +6287,7 @@ contains
                   arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6205,7 +6305,7 @@ contains
                   arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6223,7 +6323,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                abs(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=abs(&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6241,7 +6341,7 @@ contains
           v%data%i64(v%offset:v%offset+esize)=&
                not(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=not(&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6261,7 +6361,7 @@ contains
                iand(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   iand(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6283,7 +6383,7 @@ contains
                ior(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ior(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6305,7 +6405,7 @@ contains
                ieor(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ieor(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6327,7 +6427,7 @@ contains
                ishft(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ishft(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6349,7 +6449,7 @@ contains
                dim(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6371,7 +6471,7 @@ contains
                sign(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6393,7 +6493,7 @@ contains
                mod(arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%i64(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i64(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6413,7 +6513,7 @@ contains
           v%data%i8(v%offset:v%offset+esize)=&
                (arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i8(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6431,7 +6531,7 @@ contains
           v%data%i16(v%offset:v%offset+esize)=&
                (arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i16(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6449,7 +6549,7 @@ contains
           v%data%i32(v%offset:v%offset+esize)=&
                (arg(3)%data%i64(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i32(ve%data%ln(ve%offset+j)+&
                   v%offset)=(&
                   arg(3)%data%i64(ve%data%ln(ve%offset+j)+&
@@ -6474,7 +6574,7 @@ contains
                   arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%r(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%r(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -6492,7 +6592,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6514,7 +6614,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6536,7 +6636,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6579,12 +6679,12 @@ contains
        else
           if(any(arg(4)%data%r(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6627,12 +6727,12 @@ contains
        else
           if(any(arg(4)%data%r(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=modulo(&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6654,7 +6754,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6676,7 +6776,7 @@ contains
                max(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6698,7 +6798,7 @@ contains
                min(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6718,7 +6818,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                -arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6738,7 +6838,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6760,7 +6860,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6782,7 +6882,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6804,7 +6904,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6824,7 +6924,7 @@ contains
                   arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6842,7 +6942,7 @@ contains
                   arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6860,7 +6960,7 @@ contains
                   arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6878,7 +6978,7 @@ contains
                   arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6896,7 +6996,7 @@ contains
                   arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6916,7 +7016,7 @@ contains
                arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=cmplx(&
                   arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6936,7 +7036,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                abs(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   abs(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -6972,12 +7072,12 @@ contains
        else
           if(any(abs(arg(3)%data%r(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))>1)) then
+               ve%offset+pm_fast_esize(ve)-1)))>1)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Argument for acos not in range -1..1')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   acos(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7013,12 +7113,12 @@ contains
        else
           if(any(abs(arg(3)%data%r(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))>1)) then
+               ve%offset+pm_fast_esize(ve)-1)))>1)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Argument for asin not in range -1..1')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   asin(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7036,7 +7136,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                atan(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   atan(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7056,7 +7156,7 @@ contains
                atan2(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   atan2(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7076,7 +7176,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                cos(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   cos(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7116,13 +7216,13 @@ contains
        else
           if(any(abs(arg(3)%data%r(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))>=log(huge(1.0)))) then
+               ve%offset+pm_fast_esize(ve)-1)))>=log(huge(1.0)))) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,&
                   'Argument for cosh would result in overflow')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   cosh(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7161,12 +7261,12 @@ contains
        else
           if(any(arg(3)%data%r(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))>=log(huge(1.0)))) then
+               ve%offset+pm_fast_esize(ve)-1))>=log(huge(1.0)))) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Argument for exp would result in overflow')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   exp(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7202,12 +7302,12 @@ contains
        else
           if(any(arg(3)%data%r(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))<=0)) then
+               ve%offset+pm_fast_esize(ve)-1))<=0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Non-positive argument to log')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   log(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7243,12 +7343,12 @@ contains
        else
           if(any(arg(3)%data%r(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))<=0)) then
+               ve%offset+pm_fast_esize(ve)-1))<=0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Non-positive argument to log')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   log10(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7266,7 +7366,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                sin(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sin(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7306,13 +7406,13 @@ contains
        else
           if(any(abs(arg(3)%data%r(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))>=log(huge(1.0)))) then
+               ve%offset+pm_fast_esize(ve)-1)))>=log(huge(1.0)))) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,&
                   'Argument for sinh would result in overflow')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sinh(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7348,12 +7448,12 @@ contains
        else
           if(any(arg(3)%data%r(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))<=0)) then
+               ve%offset+pm_fast_esize(ve)-1))<=0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Negative argument to sqrt')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sqrt(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7371,7 +7471,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                tan(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   tan(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7389,7 +7489,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                tanh(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   tanh(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7407,7 +7507,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                floor(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   floor(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7425,7 +7525,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                ceiling(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ceiling(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7445,7 +7545,7 @@ contains
                mod(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7467,7 +7567,7 @@ contains
                sign(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7489,7 +7589,7 @@ contains
                dim(arg(3)%data%r(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%r(ve%data%ln(ve%offset+j)+&
@@ -7514,7 +7614,7 @@ contains
                   arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%d(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%d(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -7532,7 +7632,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7554,7 +7654,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7576,7 +7676,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7619,12 +7719,12 @@ contains
        else
           if(any(arg(4)%data%d(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7667,12 +7767,12 @@ contains
        else
           if(any(arg(4)%data%d(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'mod zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=modulo(&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7694,7 +7794,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7716,7 +7816,7 @@ contains
                max(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   max(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7738,7 +7838,7 @@ contains
                min(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   min(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7758,7 +7858,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                -arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7778,7 +7878,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7800,7 +7900,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7822,7 +7922,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)>&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7844,7 +7944,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)>=&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7865,7 +7965,7 @@ contains
                   arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%i(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7883,7 +7983,7 @@ contains
                   arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%ln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7901,7 +8001,7 @@ contains
                   arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%lln(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7919,7 +8019,7 @@ contains
                   arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7937,7 +8037,7 @@ contains
                   arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7957,7 +8057,7 @@ contains
                arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize),kind=pm_d)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=cmplx(&
                   arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -7977,7 +8077,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                abs(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   abs(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8013,12 +8113,12 @@ contains
        else
           if(any(abs(arg(3)%data%d(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))>1)) then
+               ve%offset+pm_fast_esize(ve)-1)))>1)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Argument for acos not in range -1..1')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   acos(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8054,12 +8154,12 @@ contains
        else
           if(any(abs(arg(3)%data%d(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))>1)) then
+               ve%offset+pm_fast_esize(ve)-1)))>1)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Argument for asin not in range -1..1')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   asin(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8077,7 +8177,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                atan(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   atan(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8097,7 +8197,7 @@ contains
                atan2(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   atan2(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8117,7 +8217,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                cos(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   cos(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8157,13 +8257,13 @@ contains
        else
           if(any(abs(arg(3)%data%d(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))>=log(huge(1.0d0)))) then
+               ve%offset+pm_fast_esize(ve)-1)))>=log(huge(1.0d0)))) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,&
                   'Argument for cosh would result in overflow')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   cosh(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8204,13 +8304,13 @@ contains
        else
           if(any(arg(3)%data%d(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))>=log(huge(1.0d0)))) then
+               ve%offset+pm_fast_esize(ve)-1))>=log(huge(1.0d0)))) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,&
                   'Argument for exp would result in overflow')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   exp(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8246,12 +8346,12 @@ contains
        else
           if(any(arg(3)%data%d(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))<=0)) then
+               ve%offset+pm_fast_esize(ve)-1))<=0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Non-positive argument to log')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   log(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8287,12 +8387,12 @@ contains
        else
           if(any(arg(3)%data%d(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))<=0)) then
+               ve%offset+pm_fast_esize(ve)-1))<=0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Non-positive argument to log')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   log10(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8310,7 +8410,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                sin(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sin(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8350,13 +8450,13 @@ contains
        else
           if(any(abs(arg(3)%data%d(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve))))>=log(huge(1.0d0)))) then
+               ve%offset+pm_fast_esize(ve)-1)))>=log(huge(1.0d0)))) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,&
                   'Argument for sinh would result in overflow')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sinh(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8392,12 +8492,12 @@ contains
        else
           if(any(arg(3)%data%d(arg(3)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))<=0)) then
+               ve%offset+pm_fast_esize(ve)-1))<=0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'Negative argument to sqrt')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sqrt(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8415,7 +8515,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                tan(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   tan(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8433,7 +8533,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                tanh(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   tanh(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8451,7 +8551,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                floor(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   floor(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8469,7 +8569,7 @@ contains
           v%data%d(v%offset:v%offset+esize)=&
                ceiling(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   ceiling(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8489,7 +8589,7 @@ contains
                mod(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   mod(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8511,7 +8611,7 @@ contains
                sign(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sign(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8533,7 +8633,7 @@ contains
                dim(arg(3)%data%d(arg(3)%offset:arg(3)%offset+esize),&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   dim(arg(3)%data%d(ve%data%ln(ve%offset+j)+&
@@ -8554,7 +8654,7 @@ contains
                   arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%c(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%c(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -8572,7 +8672,7 @@ contains
                arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%c(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8594,7 +8694,7 @@ contains
                arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%c(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8616,7 +8716,7 @@ contains
                arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%c(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8659,12 +8759,12 @@ contains
        else
           if(any(arg(4)%data%c(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8686,7 +8786,7 @@ contains
                arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%r(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8708,7 +8808,7 @@ contains
                arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%c(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8728,7 +8828,7 @@ contains
           v%data%c(v%offset:v%offset+esize)=&
                -arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8748,7 +8848,7 @@ contains
                arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%c(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8770,7 +8870,7 @@ contains
                arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%c(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8790,7 +8890,7 @@ contains
                   real(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   real(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8808,7 +8908,7 @@ contains
           v%data%c(v%offset:v%offset+esize)=&
                abs(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   abs(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8831,7 +8931,7 @@ contains
                   acos(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   acos(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8854,7 +8954,7 @@ contains
                   asin(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   asin(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8872,7 +8972,7 @@ contains
           v%data%c(v%offset:v%offset+esize)=&
                atan(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   atan(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8890,7 +8990,7 @@ contains
           v%data%c(v%offset:v%offset+esize)=&
                cos(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   cos(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8913,7 +9013,7 @@ contains
                   cosh(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   cosh(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8937,7 +9037,7 @@ contains
                   exp(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   exp(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8960,7 +9060,7 @@ contains
                   log(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   log(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -8978,7 +9078,7 @@ contains
           v%data%c(v%offset:v%offset+esize)=&
                sin(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sin(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -9001,7 +9101,7 @@ contains
                   sinh(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sinh(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -9024,7 +9124,7 @@ contains
                   sqrt(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sqrt(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -9042,7 +9142,7 @@ contains
           v%data%c(v%offset:v%offset+esize)=&
                tan(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   tan(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -9060,7 +9160,7 @@ contains
           v%data%c(v%offset:v%offset+esize)=&
                tanh(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   tanh(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -9079,7 +9179,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                aimag(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   aimag(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -9097,7 +9197,7 @@ contains
           v%data%c(v%offset:v%offset+esize)=&
                conjg(arg(3)%data%c(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%c(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   conjg(arg(3)%data%c(ve%data%ln(ve%offset+j)+&
@@ -9117,7 +9217,7 @@ contains
                   arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%dc(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%dc(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -9135,7 +9235,7 @@ contains
                arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)+&
                arg(4)%data%dc(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9157,7 +9257,7 @@ contains
                arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)-&
                arg(4)%data%dc(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9179,7 +9279,7 @@ contains
                arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)*&
                arg(4)%data%dc(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9222,12 +9322,12 @@ contains
        else
           if(any(arg(4)%data%dc(arg(4)%offset+&
                ve%data%ln(ve%offset:&
-               ve%offset+pm_fast_esize(ve)))==0)) then
+               ve%offset+pm_fast_esize(ve)-1))==0)) then
              errno=1
              call runtime_error(context,func,pc,ve,noexit,'divide by zero')
              goto 999
           endif
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9249,7 +9349,7 @@ contains
                arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%d(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9272,7 +9372,7 @@ contains
                arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)**&
                arg(4)%data%dc(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9292,7 +9392,7 @@ contains
           v%data%dc(v%offset:v%offset+esize)=&
                -arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   -arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9312,7 +9412,7 @@ contains
                arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)==&
                arg(4)%data%dc(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9334,7 +9434,7 @@ contains
                arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize)/=&
                arg(4)%data%dc(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9354,7 +9454,7 @@ contains
                   real(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize),kind=pm_d)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%d(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   real(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9372,7 +9472,7 @@ contains
           v%data%dc(v%offset:v%offset+esize)=&
                abs(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   abs(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9395,7 +9495,7 @@ contains
                   acos(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   acos(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9418,7 +9518,7 @@ contains
                   asin(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   asin(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9436,7 +9536,7 @@ contains
           v%data%dc(v%offset:v%offset+esize)=&
                atan(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   atan(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9454,7 +9554,7 @@ contains
           v%data%dc(v%offset:v%offset+esize)=&
                cos(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   cos(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9477,7 +9577,7 @@ contains
                   cosh(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   cosh(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9501,7 +9601,7 @@ contains
                   exp(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   exp(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9524,7 +9624,7 @@ contains
                   log(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   log(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9542,7 +9642,7 @@ contains
           v%data%dc(v%offset:v%offset+esize)=&
                sin(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sin(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9565,7 +9665,7 @@ contains
                   sinh(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sinh(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9588,7 +9688,7 @@ contains
                   sqrt(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
           endif
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   sqrt(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9606,7 +9706,7 @@ contains
           v%data%dc(v%offset:v%offset+esize)=&
                tan(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   tan(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9624,7 +9724,7 @@ contains
           v%data%dc(v%offset:v%offset+esize)=&
                tanh(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   tanh(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9642,7 +9742,7 @@ contains
           v%data%r(v%offset:v%offset+esize)=&
                aimag(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%r(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   aimag(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9660,7 +9760,7 @@ contains
           v%data%dc(v%offset:v%offset+esize)=&
                conjg(arg(3)%data%dc(arg(3)%offset:arg(3)%offset+esize))
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%dc(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   conjg(arg(3)%data%dc(ve%data%ln(ve%offset+j)+&
@@ -9686,7 +9786,7 @@ contains
                   arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              arg(2)%data%l(arg(2)%offset+ve%data%ln(ve%offset+j))=&
                   arg(3)%data%l(arg(3)%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -9704,7 +9804,7 @@ contains
                arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize).and.&
                arg(4)%data%l(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%l(ve%data%ln(ve%offset+j)+&
@@ -9726,7 +9826,7 @@ contains
                arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize).or.&
                arg(4)%data%l(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%l(ve%data%ln(ve%offset+j)+&
@@ -9748,7 +9848,7 @@ contains
                arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize).eqv.&
                arg(4)%data%l(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%l(ve%data%ln(ve%offset+j)+&
@@ -9770,7 +9870,7 @@ contains
                arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize).neqv.&
                arg(4)%data%l(arg(4)%offset:arg(4)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   arg(3)%data%l(ve%data%ln(ve%offset+j)+&
@@ -9790,7 +9890,7 @@ contains
           v%data%l(v%offset:v%offset+esize)=&
                .not.arg(3)%data%l(arg(3)%offset:arg(3)%offset+esize)
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              v%data%l(ve%data%ln(ve%offset+j)+&
                   v%offset)=&
                   .not.arg(3)%data%l(ve%data%ln(ve%offset+j)+&
@@ -9803,90 +9903,6 @@ contains
        call pm_panic('unknown opcode')
     end select
 
-    goto 10
-    
-30  continue
-
-    ! ***********************************
-    ! This section implements a call
-    !************************************
-    ! save current stack top
-    newpc=newfunc%data%ptr(newfunc%offset)
-    stacksize=newpc%data%i16(newpc%offset)
-    i=newpc%data%i16(newpc%offset+1)
-
-    newstack=pm_fast_new(context,pm_stack,int(stacksize,pm_p))
-    if(pm_debug_level>3) then
-       write(*,*) 'NEWSTACK>',newstack%offset,newstack%data%esize,&
-            modulo(newstack%offset-1,newstack%data%esize+1)
-    endif
-    if(pm_debug_checks) then
-       if(modulo(newstack%offset-1,newstack%data%esize+1)/=0) &
-            call pm_panic('stack alloc')
-    endif
-    newstack%data%ptr(newstack%offset)=&
-         pm_fast_tinyint(context,stacksize-1)
-    newstack%data%ptr(newstack%offset+pm_stack_pc)=pc
-    newstack%data%ptr(newstack%offset+pm_stack_oldstack)=stack
-    newstack%data%ptr(newstack%offset+pm_stack_func)=func
-    newstack%data%ptr(newstack%offset+pm_stack_nullve)=context%null_ve
-    if(i<nargs) then
-       if(pm_debug_level>3) write(*,*) 'TRIM ARG LIST>',i,nargs
-       newstack%data%ptr(newstack%offset+pm_stack_locals:&
-            newstack%offset+i+pm_stack_locals-1)=&
-            arg(1:i)
-       context%temp_obj1=newstack
-       v=pm_fast_newnc(context,pm_pointer,nargs-i)
-       v%data%ptr(v%offset:v%offset+nargs-i-1)=arg(i+1:nargs)
-       newstack%data%ptr(newstack%offset+i+pm_stack_locals)=v
-       context%temp_obj1=pm_null_obj
-       nargs=i+1
-    else
-       if(pm_debug_checks) then
-          if(i/=nargs) then
-             write(*,*) opcode2,&
-                  trim(pm_name_as_string(context,proc_get_name(newfunc)))
-             write(*,*) 'Num Args=',nargs,'Num pars expected=',i
-             call dump_stack(context,stack,func,pc,ve)
-             call pm_panic('Arg/param mismatch')
-          endif
-       endif
-       if(nargs>0) then
-          newstack%data%ptr(newstack%offset+pm_stack_locals:&
-               newstack%offset+pm_stack_locals+nargs-1)=&
-               arg(1:nargs)
-       endif
-    endif
-    !write(*,*) trim(pm_name_as_string(context,proc_get_name(newfunc)))
-    pc=newpc
-    pc%offset=pc%offset+3_pm_p
-    stack=newstack
-    func=newfunc
-
-    context%call_depth=context%call_depth+1
-    if(context%call_depth>512) then
-       call runtime_error(context,func,pc,ve,noexit,&
-            'Too many nested calls - possible infinite recursion')
-       goto 999
-    endif
-    if(pm_debug_level>2.or.trace_calls) then
-       call proc_line_module(func,&
-            max(int(pc%offset-func%data%ptr(func%offset)%offset)-4,1),line,modl)
-       !vm_depth=vm_depth+1
-       write(*,*) spaces(1:min(10,vm_depth)*2),'CALL>',opcode2,&
-            pm_name_as_string(context,proc_get_name(func)),&
-            '@',trim(pm_name_as_string(context,modl)),'#',line
-    endif
-    if(pm_debug_level>3) then
-       write(*,*) '======CALL==NEW STACK======',&
-            nargs,stack%data%esize,stack%offset
-       do i=pm_stack_locals,nargs+pm_stack_locals-1
-          write(*,*) i,nargs+4
-          call vector_dump(context,stack%data%ptr(stack%offset+i),1)
-       enddo
-       write(*,*) '============================'
-    endif
-      
     goto 10
 
     
@@ -9943,6 +9959,96 @@ contains
     include 'ftypeof.inc'
     include 'fname.inc'
     include 'ftypeno.inc'
+
+    ! ***********************************
+    ! Implement a call
+    !************************************
+
+    function run_call(newfunc) result(iserr)
+      type(pm_ptr),intent(in):: newfunc
+      logical:: iserr
+      type(pm_ptr):: newpc,newstack
+
+      iserr=.false.
+      
+      ! save current stack top
+      newpc=newfunc%data%ptr(newfunc%offset)
+      stacksize=newpc%data%i16(newpc%offset)
+      i=newpc%data%i16(newpc%offset+1)
+
+      newstack=pm_fast_new(context,pm_stack,int(stacksize,pm_p))
+      if(pm_debug_level>3) then
+         write(*,*) 'NEWSTACK>',newstack%offset,newstack%data%esize,&
+              modulo(newstack%offset-1,newstack%data%esize+1)
+      endif
+      if(pm_debug_checks) then
+         if(modulo(newstack%offset-1,newstack%data%esize+1)/=0) &
+              call pm_panic('stack alloc')
+      endif
+      newstack%data%ptr(newstack%offset)=&
+           pm_fast_tinyint(context,stacksize-1)
+      newstack%data%ptr(newstack%offset+pm_stack_pc)=pc
+      newstack%data%ptr(newstack%offset+pm_stack_oldstack)=stack
+      newstack%data%ptr(newstack%offset+pm_stack_func)=func
+      newstack%data%ptr(newstack%offset+pm_stack_nullve)=context%null_ve
+      if(i<nargs) then
+         if(pm_debug_level>3) write(*,*) 'TRIM ARG LIST>',i,nargs
+         newstack%data%ptr(newstack%offset+pm_stack_locals:&
+              newstack%offset+i+pm_stack_locals-1)=&
+              arg(1:i)
+         context%temp_obj1=newstack
+         v=pm_fast_newnc(context,pm_pointer,nargs-i)
+         v%data%ptr(v%offset:v%offset+nargs-i-1)=arg(i+1:nargs)
+         newstack%data%ptr(newstack%offset+i+pm_stack_locals)=v
+         context%temp_obj1=pm_null_obj
+         nargs=i+1
+      else
+         if(pm_debug_checks) then
+            if(i/=nargs) then
+               write(*,*) opcode2,&
+                    trim(pm_name_as_string(context,proc_get_name(newfunc)))
+               write(*,*) 'Num Args=',nargs,'Num pars expected=',i
+               call dump_stack(context,stack,func,pc,ve)
+               call pm_panic('Arg/param mismatch')
+            endif
+         endif
+         if(nargs>0) then
+            newstack%data%ptr(newstack%offset+pm_stack_locals:&
+                 newstack%offset+pm_stack_locals+nargs-1)=&
+                 arg(1:nargs)
+         endif
+      endif
+      !write(*,*) trim(pm_name_as_string(context,proc_get_name(newfunc)))
+      pc=newpc
+      pc%offset=pc%offset+3_pm_p
+      stack=newstack
+      func=newfunc
+      
+      context%call_depth=context%call_depth+1
+      if(context%call_depth>512) then
+         call runtime_error(context,func,pc,ve,noexit,&
+              'Too many nested calls - possible infinite recursion')
+         iserr=.true.
+         return
+      endif
+      if(pm_debug_level>2.or.trace_calls) then
+         call proc_line_module(func,&
+              max(int(pc%offset-func%data%ptr(func%offset)%offset)-4,1),line,modl)
+         if(trace_call_indent) vm_depth=vm_depth+1
+         write(*,*) spaces(1:min(10,vm_depth)*2),'CALL>',opcode2,&
+              trim(pm_name_as_string(context,proc_get_name(func))),&
+              '@',trim(pm_name_as_string(context,modl)),'#',line
+      endif
+      if(trace_call_stacks) then
+         write(*,*) '======CALL==NEW STACK======',&
+              nargs,stack%data%esize,stack%offset
+         do i=pm_stack_locals,nargs+pm_stack_locals-1
+            write(*,*) i,nargs+4
+            call vector_dump(context,stack%data%ptr(stack%offset+i),1)
+         enddo
+         write(*,*) '============================'
+      endif
+    end function  run_call
 
     subroutine set_arg(iarg,val)
       integer,intent(in):: iarg
@@ -10045,9 +10151,11 @@ contains
     function make_new_ve(ve_vec,oldve) result(ve)
       type(pm_ptr),intent(in):: ve_vec,oldve
       type(pm_ptr):: ve
+      context%temp_obj2=ve_vec
       ve=pm_fast_newnc(context,pm_pointer,2)
       ve%data%ptr(ve%offset)=ve_vec
       ve%data%ptr(ve%offset+1)=oldve%data%ptr(oldve%offset+1)
+      context%temp_obj2=pm_null_obj
     end function make_new_ve
 
     function pack_in_place(p,q,n) result(m)
@@ -10144,7 +10252,7 @@ contains
     integer(pm_ln),intent(in):: old_esize
     logical,intent(in):: noexit
     integer:: errno
-    type(pm_ptr):: newpc,newve,hash
+    type(pm_ptr):: newpc,newve,hash,ignore
     integer(pm_ln):: n,m
     newpc=pc
     newpc%offset=newpc%offset+4_pm_p
@@ -10167,7 +10275,7 @@ contains
        errno=pm_run(context,func,stack,newpc,-1,0,&
             arg,num_args,nesting,noexit)
     else
-       newve%data%ptr(newve%offset)=pm_fast_tinyint(context,0)
+       ignore=pm_assign_new(context,newve,0_pm_ln,pm_long,1_pm_ln,.false.)
        newve=pm_assign_new(context,newve,1_pm_ln,pm_long,n+4_pm_ln,.false.)
        newve%data%ln(newve%offset)=0
        newve%data%ln(newve%offset+1)=0
@@ -10217,7 +10325,7 @@ contains
              errno=0
              return
           else
-             p=pm_assign_new(context,newve,0_pm_ln,pm_long,size(disps,kind=pm_ln),.false.)
+             p=pm_assign_new(context,newve,0_pm_ln,pm_long,size(disps,kind=pm_ln)+1,.false.)
              p%data%ln(p%offset:p%offset+size(disps)-1)=disps
           endif
        else
@@ -10253,6 +10361,15 @@ contains
     include 'ftiny.inc'
   end function remote_call_block
 
+  function ve_is_empty(ve) result(ok)
+    type(pm_ptr):: ve
+    logical:: ok
+    ok=.not.(pm_fast_vkind(ve)/=pm_long.or.pm_fast_esize(ve)>0)
+  contains
+    include 'fesize.inc'
+    include 'fvkind.inc'
+  end function ve_is_empty
+
   ! Make vector engine length n, no masking
   function make_simple_ve(context,n) result(ve)
     type(pm_context),pointer:: context
@@ -10262,17 +10379,19 @@ contains
     integer:: extra
     extra=merge(1,0,n>1)
     ve1=pm_fast_newnc(context,pm_long,4+extra)
-    ve1%data%ln(ve1%offset)=n-1
+    ve1%data%ln(ve1%offset)=max(n-1,0)
     ve1%data%ln(ve1%offset+1)=0_pm_ln
     ve1%data%ln(ve1%offset+2)=0_pm_ln
     ve1%data%ln(ve1%offset+3)=n
     if(extra/=0) ve1%data%ln(ve1%offset+4)=n
     context%temp_obj1=ve1
     ve=pm_fast_newnc(context,pm_pointer,2)
-    ve%data%ptr(ve%offset)=merge(pm_null_obj,pm_fast_tinyint(context,0),&
-         n>0)
+    context%temp_obj2=ve
+    ve%data%ptr(ve%offset)=pm_null_obj
+    if(n==0)  ve%data%ptr(ve%offset)=pm_new(context,pm_long,1_pm_ln)
     ve%data%ptr(ve%offset+1)=ve1
     context%temp_obj1=pm_null_obj
+    context%temp_obj2=pm_null_obj
   contains
     include 'fnewnc.inc'
     include 'ftiny.inc'
@@ -10417,7 +10536,7 @@ contains
     vec=v%data%ptr(v%offset+pm_array_vect)
     len=v%data%ptr(v%offset+pm_array_length)
     off=v%data%ptr(v%offset+pm_array_offset)
-    do i=0,pm_fast_esize(ve)
+    do i=0,pm_fast_esize(ve)-1
        j=ve%data%ln(ve%offset+i)
        start=off%data%ln(off%offset+j)
        size=len%data%ln(len%offset+j)

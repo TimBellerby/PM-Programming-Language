@@ -331,7 +331,7 @@ contains
        wcd%proc_shared_inline=.false.
        wcd%npar=cnode_get_num(pr,pr_nret)+&
             cnode_get_num(pr,pr_nkeys)+wcd%loop_extra_arg
-       if(pm_is_compiling) then
+      if(pm_is_compiling) then
           if(rv%data%i(rv%offset)==-1) then
              wcd%retvar=alloc_result_var(wcd,int(pm_null))
           else
@@ -361,7 +361,8 @@ contains
        endif
        if(debug_wcode) then
           write(*,*) 'WCODE PROC> #',i,'SIGNO>',n,'VE>',ve,&
-               'NRET>',wcd%npar,'CAN INLINE> ',wcd%proc_can_inline
+               'NRET>',wcd%npar,'NVAR>',wcd%nvar,&
+               'CAN INLINE> ',wcd%proc_can_inline,'CHAN>',wcd%proc_is_chan
        endif
        cblock=cnode_get(pr,pr_cblock)
        call wcode_proc_body(wcd,cblock,rv,ve)
@@ -584,6 +585,8 @@ contains
           endif
           wcd%rdata(slot+wcd%base)=alloc_param_var(wcd,&
                typ,isref,.false.,isshared,cnode_get_num(p,var_name))
+          if(debug_wcode) write(*,*) 'TO>',wcd%rdata(slot+wcd%base)
+          
           npar=npar+1
           p=cnode_get(p,var_link)
           if(pm_fast_isnull(p)) exit
@@ -1160,7 +1163,7 @@ contains
              new_ve=wcd%vevar
           endif
           if(wcd%proc_is_chan) then
-             call wc_simple_call(wcd,op_chan,0,2,new_ve)
+             call wc_simple_call(wcd,op_chan,1,2,new_ve)
              new_ve=alloc_var(wcd,pm_ve_type)
              call wc(wcd,-new_ve)
              break=wcode_cblock(wcd,cnode_arg(args,n),rv,new_ve)
@@ -1277,7 +1280,7 @@ contains
        call release_var(wcd,new_ve)
     case(sym_pm_recv_assn)
        call wc_call(wcd,callnode,op_recv_assn_call,&
-            merge(1,0,check_arg_type(wcd,args,rv,6)==wcd%true_name),6,ve)
+            merge(1,0,check_arg_type(wcd,args,rv,6)==wcd%true_name),7,ve)
        if(pm_is_compiling) then
           call comp_link_dref(wcd,cnode_arg(args,2),cnode_arg(args,4))
           new_ve=0
@@ -1290,6 +1293,7 @@ contains
        call wc_arg(wcd,cnode_arg(args,2),.true.,rv,ve)     ! x-new
        call wc_arg(wcd,cnode_arg(args,4),.false.,rv,ve)    ! x
        call wc_arg(wcd,cnode_arg(args,3),.true.,rv,ve)     ! y-new
+       call wc_arg(wcd,cnode_arg(args,5),.false.,rv,ve)    ! x
        break2=wcode_cblock(wcd,cnode_arg(args,7),rv,new_ve)
        if(pm_is_compiling) call comp_finish_block(wcd,pc)
        call release_var(wcd,new_ve)
@@ -1341,9 +1345,10 @@ contains
           break2=wcode_cblock(wcd,cnode_arg(args,1),rv,ve)
           call comp_finish_block(wcd,pc)
        else
-          jmp=wc_jump_call(wcd,callnode,op_head_node,0,1,ve)
-          break2=wcode_cblock(wcd,cnode_arg(args,1),rv,ve)
-          call set_jump_to_here(wcd,jmp)
+          new_ve=alloc_var(wcd,pm_ve_type)
+          call wc_call(wcd,callnode,op_head_node,0,2,ve)
+          call wc(wcd,-new_ve)
+          break2=wcode_cblock(wcd,cnode_arg(args,1),rv,new_ve)
        endif
     case(sym_pm_dref:sym_pm_ref)
        if(pm_is_compiling) then

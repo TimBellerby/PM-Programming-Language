@@ -89,7 +89,7 @@ contains
        enddo
     else
        ptr%data%ln(ptr%offset:ptr%offset+siz)=z
-       do j=0,pm_fast_esize(ve)
+       do j=0,pm_fast_esize(ve)-1
           i=ve%data%ln(ve%offset+j)
           ptr%data%ln(ptr%offset+i)=v%data%ln(v%offset+i)
        enddo
@@ -126,21 +126,23 @@ contains
     include 'ftypeno.inc'
   end function make_array
 
-  ! LHS value for single array element <array[index]>
-  function make_elem_ref(context,array,index,ve,errno) result(ptr)
+  ! LHS value for single array element <array[index]> !!! Needs to use ve
+  function make_elem_ref(context,array,aindex,ve,errno) result(ptr)
     type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: array,index,ve
+    type(pm_ptr),intent(in):: array,aindex,ve
     integer,intent(inout):: errno
-    type(pm_ptr):: ptr
+    type(pm_ptr):: ptr,index
     type(pm_ptr)::a
-    type(pm_root),pointer:: root
+    type(pm_root),pointer:: root,root2
     type(pm_ptr):: w,vec,newvec,oldoff,off,newoff,idx,newidx
     integer(pm_ln):: esize,i,j
     root=>pm_new_as_root(context,pm_usr,int(pm_elemref_size,pm_ln))
     ptr=root%ptr
     ptr%data%ptr(ptr%offset)=pm_fast_typeno(context,int(pm_elemref_type))
  
-    esize=pm_fast_esize(index)
+    esize=pm_fast_esize(aindex)
+    index=vector_zero_unused(context,aindex,ve)
+    root2=>pm_add_root(context,index)
     newidx=pm_assign_new(context,ptr,int(pm_elemref_idx,pm_ln),&
          pm_long,esize+1_pm_ln,.false.)
     newoff=pm_assign_new(context,ptr,int(pm_elemref_offset,pm_ln),&
@@ -183,6 +185,7 @@ contains
             vec)
     endif
     call pm_delete_root(context,root)
+    call pm_delete_root(context,root2)
   contains
     include 'ftiny.inc'
     include 'ftypeof.inc'
@@ -248,32 +251,6 @@ contains
     include 'ftypeno.inc'
     include 'fnewnc.inc'
   end function elem_ref_get_struct_elem
-
-  ! Create a new aray {a1.elem, a2.elem,...} from {a1, a2, ...}
-  ! ONLY WORKS from array created with make_array_from_vect
-  function array_get_struct_elem(context,ptr,n,tno) result(newarray)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: ptr
-    integer,intent(in):: n,tno
-    type(pm_ptr):: newarray
-    type(pm_ptr):: oldvec,newvec,vec
-    type(pm_root),pointer:: root
-    oldvec=ptr%data%ptr(ptr%offset+pm_array_vect)
-    vec=oldvec%data%ptr(oldvec%offset)
-    vec=vec%data%ptr(vec%offset+n)
-    root=>pm_new_as_root(context,pm_pointer,pm_fast_esize(oldvec)+1)
-    newvec=root%ptr
-    newvec%data%ptr(newvec%offset:newvec%offset+pm_fast_esize(newvec))=vec
-    newarray=make_array(context,pm_array_type,&
-         tno,&  
-         newvec,&
-         ptr%data%ptr(ptr%offset+pm_array_dom),&
-         ptr%data%ptr(ptr%offset+pm_array_length),&
-         ptr%data%ptr(ptr%offset+pm_array_offset))
-    call pm_delete_root(context,root)
-  contains
-    include "fesize.inc"
-  end function array_get_struct_elem
 
   ! Return domain of an array / reference to array
   function array_dom(context,v,esize) result(ptr)
@@ -364,6 +341,7 @@ contains
     len=vector_zero_unused(context,j,ve)
     n=sum(len%data%ln(len%offset:len%offset+esize))
     vecs=make_vector(context,val,len,0_pm_ln,0_pm_ln,n,.true.)
+ 
     vec=pm_new(context,pm_pointer,esize+1_pm_ln)
     vec%data%ptr(vec%offset:vec%offset+esize)=vecs
     off=pm_new(context,pm_long,esize+1_pm_ln)
@@ -451,7 +429,7 @@ contains
        enddo
        o=o+s
     enddo
-    if(k/=esize+1) call pm_panic('make_array_from_vect')
+    k=max(k,esize+1)
     domv=copy_vector(context,dom,pm_null_obj,0_pm_ln,-1_pm_ln)
     ptr=make_array(context,pm_array_type,typno,vect,domv,len,off)
     call pm_delete_register(context,reg)
@@ -1083,7 +1061,7 @@ contains
     reg=>pm_register(context,'polynw',p,idx)
     p=pm_new(context,pm_pointer,esize+1)
     idx=pm_fast_newnc(context,pm_long,1)
-    do i=0,pm_fast_esize(ve)
+    do i=0,pm_fast_esize(ve)-1
        j=ve%data%ln(ve%offset+i)
        idx%data%ln(idx%offset)=j
        call pm_ptr_assign(context,p,j,vector_get_elems(&
@@ -1120,7 +1098,7 @@ contains
           endif
        enddo
     else
-       do i=0,pm_fast_esize(ve)
+       do i=0,pm_fast_esize(ve)-1
           j=ve%data%ln(ve%offset+i)
           p=w%data%ptr(w%offset+j)
           call assign_single(context,v,j,p,errno)
@@ -1155,7 +1133,7 @@ contains
        enddo
     else
        ptr%data%l(ptr%offset:ptr%offset+esize)=.false.
-       do j=0,esize
+       do j=0,pm_fast_esize(ve)-1
           i=ve%data%ln(ve%offset+j)
           ptr%data%l(ptr%offset+i)=&
                full_type(v%data%ptr(v%offset+i))==tno
@@ -1377,7 +1355,7 @@ contains
     index=root%ptr
     k=0
     j=0
-    if(pm_fast_vkind(ve)==pm_null.or.pm_fast_vkind(ve)==pm_tiny_int) then
+    if(pm_fast_vkind(ve)==pm_null) then
        do i=4,pm_fast_esize(import_vec)
           index%data%ln(index%offset+i-4)=j
           j=j+import_vec%data%ln(import_vec%offset+i)
@@ -1399,7 +1377,7 @@ contains
           do while(ve%data%ln(ve%offset+k)<j)
              k=k+1
           enddo
-          if(k<=pm_fast_esize(ve)) index%data%ln(index%offset+i-4)=ve%data%ln(ve%offset+k)
+          if(k<pm_fast_esize(ve)) index%data%ln(index%offset+i-4)=ve%data%ln(ve%offset+k)
           j=j+import_vec%data%ln(import_vec%offset+i)
        enddo
     endif
@@ -1792,12 +1770,12 @@ contains
           oldvec=v%data%ptr(v%offset+pm_array_vect)
           oldoff=v%data%ptr(v%offset+pm_array_offset)
           do i=0,esize
-             if(len%data%ln(len%offset+i)>0) then
+             !if(len%data%ln(len%offset+i)>0) then
                 call pm_ptr_assign(context,vec,i,copy_vector(context,&
                      oldvec%data%ptr(oldvec%offset+i+start),pm_null_obj,&
                      oldoff%data%ln(oldoff%offset+i+start),&
-                     len%data%ln(len%offset+i)))
-             endif
+                     max(1,len%data%ln(len%offset+i))))
+             !endif
           enddo
           ptr=make_array(context,pm_array_type,&
                int(v%data%ptr(v%offset+pm_array_typeof)%offset),&
@@ -2146,7 +2124,7 @@ contains
              endif
           enddo
        else
-          do k=0,pm_fast_esize(ve)
+          do k=0,pm_fast_esize(ve)-1
              j=ve%data%ln(ve%offset+k)
              call pm_ptr_assign(context,lhs,j,&
                   copy_vector(context,rhs%data%ptr(rhs%offset+j),&
@@ -2163,7 +2141,7 @@ contains
                   rhs%data%i(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%i(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%i(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2178,7 +2156,7 @@ contains
                   rhs%data%ln(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%ln(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%ln(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2193,7 +2171,7 @@ contains
                   rhs%data%lln(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%lln(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%lln(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2208,7 +2186,7 @@ contains
                   rhs%data%i8(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%i8(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%i8(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2223,7 +2201,7 @@ contains
                   rhs%data%i16(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%i16(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%i16(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2238,7 +2216,7 @@ contains
                   rhs%data%i32(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%i32(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%i32(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2253,7 +2231,7 @@ contains
                   rhs%data%i64(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%i64(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%i64(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2268,7 +2246,7 @@ contains
                   rhs%data%r(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%r(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%r(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2283,7 +2261,7 @@ contains
                   rhs%data%d(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%d(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%d(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2298,7 +2276,7 @@ contains
                   rhs%data%c(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%c(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%c(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2313,7 +2291,7 @@ contains
                   rhs%data%dc(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%dc(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%dc(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
@@ -2328,11 +2306,15 @@ contains
                   rhs%data%l(rhs%offset:rhs%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              lhs%data%l(lhs%offset+ve%data%ln(ve%offset+j))=&
                   rhs%data%l(rhs%offset+ve%data%ln(ve%offset+j))
           enddo
        endif
+
+    case default
+       write(*,*) 'vector assign',trim(pm_typ_as_string(context,int(tno))),tno,&
+            2595,trim(pm_typ_as_string(context,2595))
        
     end select
   contains
@@ -2439,7 +2421,7 @@ contains
              endif
           enddo
        else
-          do i=0,pm_fast_esize(ve)
+          do i=0,pm_fast_esize(ve)-1
              j=ve%data%ln(ve%offset+i)
              call vector_eq(context,v1%data%ptr(v1%offset+j),&
                   v2%data%ptr(v2%offset+j),eq,esize,ve)
@@ -2459,7 +2441,7 @@ contains
                   v2%data%i(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2484,7 +2466,7 @@ contains
                   v2%data%ln(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2509,7 +2491,7 @@ contains
                   v2%data%lln(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2534,7 +2516,7 @@ contains
                   v2%data%i8(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2559,7 +2541,7 @@ contains
                   v2%data%i16(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2584,7 +2566,7 @@ contains
                   v2%data%i32(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2609,7 +2591,7 @@ contains
                   v2%data%i64(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2634,7 +2616,7 @@ contains
                   v2%data%r(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2659,7 +2641,7 @@ contains
                   v2%data%d(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2684,7 +2666,7 @@ contains
                   v2%data%c(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2709,7 +2691,7 @@ contains
                   v2%data%dc(v2%offset:v2%offset+esize)
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -2734,7 +2716,7 @@ contains
                   v2%data%l(v2%offset:v2%offset+esize))
           end where
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              eq%data%l(ve%data%ln(ve%offset+j)+&
                   eq%offset)=&
                   eq%data%l(ve%data%ln(ve%offset+j)+&
@@ -3449,7 +3431,7 @@ contains
              endif
           enddo
        else
-          do m=0,pm_fast_esize(ve)
+          do m=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+m)
              call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno)
           enddo
@@ -3475,7 +3457,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              call pm_ptr_assign(context,v,ix%data%ln(ix%offset),&
                   copy_vector(context,e%data%ptr(e%offset+i),&
@@ -3494,7 +3476,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%i(v%offset+ix%data%ln(ix%offset+i))=e%data%i(e%offset+i)
           enddo
@@ -3511,7 +3493,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%ln(v%offset+ix%data%ln(ix%offset+i))=e%data%ln(e%offset+i)
           enddo
@@ -3528,7 +3510,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%lln(v%offset+ix%data%ln(ix%offset+i))=e%data%lln(e%offset+i)
           enddo
@@ -3545,7 +3527,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%i8(v%offset+ix%data%ln(ix%offset+i))=e%data%i8(e%offset+i)
           enddo
@@ -3562,7 +3544,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%i16(v%offset+ix%data%ln(ix%offset+i))=e%data%i16(e%offset+i)
           enddo
@@ -3579,7 +3561,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%i32(v%offset+ix%data%ln(ix%offset+i))=e%data%i32(e%offset+i)
           enddo
@@ -3596,7 +3578,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%i64(v%offset+ix%data%ln(ix%offset+i))=e%data%i64(e%offset+i)
           enddo
@@ -3613,7 +3595,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%r(v%offset+ix%data%ln(ix%offset+i))=e%data%r(e%offset+i)
           enddo
@@ -3630,7 +3612,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%d(v%offset+ix%data%ln(ix%offset+i))=e%data%d(e%offset+i)
           enddo
@@ -3647,7 +3629,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%c(v%offset+ix%data%ln(ix%offset+i))=e%data%c(e%offset+i)
           enddo
@@ -3664,7 +3646,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%dc(v%offset+ix%data%ln(ix%offset+i))=e%data%dc(e%offset+i)
           enddo
@@ -3681,7 +3663,7 @@ contains
              endif
           enddo
        else
-          do j=0,pm_fast_esize(ve)
+          do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
              v%data%ln(v%offset+ix%data%ln(ix%offset+i))=e%data%ln(e%offset+i)
           enddo
@@ -4263,7 +4245,7 @@ contains
           ptr%data%ln(ptr%offset+i)=j+off%data%ln(off%offset+i)
        enddo
     elseif(pm_fast_vkind(ve)==pm_logical) then
-       siz=pm_fast_esize(ve)
+       siz=pm_fast_esize(ve)-1
        psiz=0
        do i=0,siz
           if(ve%data%l(ve%offset+j)) then
@@ -4287,7 +4269,7 @@ contains
           endif
        endif
     else
-       psiz=pm_fast_esize(ve)
+       psiz=pm_fast_esize(ve)-1
        ptr=pm_new(context,pm_long,siz)
        iserr=.false.
        do k=0,psiz
@@ -4389,7 +4371,7 @@ contains
     type(pm_ptr),target:: vec,len,off
     type(pm_reg),pointer:: reg
     reg=>pm_register(context,'make_string',vec,len,off)
-    vsize=pm_fast_esize(ve)
+    vsize=pm_fast_esize(ve)-1
     esize=pm_fast_esize(v)
     len=pm_new(context,pm_long,esize+1)
     len%data%ln(len%offset:len%offset+esize)=0
@@ -4418,7 +4400,7 @@ contains
     integer(pm_ln):: i,j,k,start1,start2,size,size1,size2,vsize,esize
     type(pm_reg),pointer:: reg
     reg=>pm_register(context,'concat',vec,len,off)
-    vsize=pm_fast_esize(ve)
+    vsize=pm_fast_esize(ve)-1
     vec1=v1%data%ptr(v1%offset+pm_array_vect)
     vec2=v2%data%ptr(v2%offset+pm_array_vect)
     len1=v1%data%ptr(v1%offset+pm_array_length)
@@ -4855,11 +4837,11 @@ contains
     type(pm_ptr):: ind
     integer(pm_ln):: j,k
     if(pm_fast_isnull(mask)) then
-       ind=pm_new(context,pm_long,esize+1)
+       ind=pm_new(context,pm_long,esize+2)
        do j=0,esize
           ind%data%ln(ind%offset+j)=j
        enddo
-    elseif(pm_fast_vkind(mask)==pm_long.or.pm_fast_vkind(mask)==pm_tiny_int) then
+    elseif(pm_fast_vkind(mask)==pm_long) then
        ind=mask
     else
        if(present(n)) then
@@ -4872,11 +4854,7 @@ contains
              endif
           enddo
        endif
-       if(k==0) then
-          ind=pm_fast_tinyint(context,0)
-          return
-       endif
-       ind=pm_new(context,pm_long,k)
+       ind=pm_new(context,pm_long,k+1)
        k=0
        do j=0,esize
           if(mask%data%l(mask%offset+j)) then

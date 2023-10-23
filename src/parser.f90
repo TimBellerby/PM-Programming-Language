@@ -2704,9 +2704,9 @@ contains
        if(rhs(parser,n)) return
        call make_node(parser,sym_define,2)
        if(subexpr(parser)) return
-    elseif(present(moded_stmt)) then
+    elseif(present(moded_stmt).or..true.) then
        call parse_error(parser,'Must include an initialising expression in a "'//&
-            sym_names(sym)//' '//sym_names(moded_stmt)//' statement')
+            sym_names(sym)//' statement')
     elseif(nu+ne>0) then
        call parse_error(parser,'Cannot have "_" or "(...)" in unitialised '//&
             trim(sym_names(sym))//' declaration')
@@ -2930,17 +2930,17 @@ contains
           using=pop_val(parser)
           parser%vstack(base+1)=using
        elseif(parser%error_count==0) then
-          p=node_arg(using,node_numargs(using))
-          if(.not.pm_fast_isnull(p)) then
+          p=node_arg(using,sym_work-sym_distr+1)
+          if(node_sym(p)/=sym_null) then
              call parse_error(parser,&
                   'Cannot have "work=" at both start'//&
-                  ' of "par" statement and in "do :" clauses')
+                  ' of "par" statement and in "task :" clauses')
              return
           endif
        endif
        if(parser%error_count==0) then
           call pm_ptr_assign(parser%context,using,&
-               pm_fast_esize(using),top_val(parser))
+               int(node_args+sym_work-sym_distr,pm_ln),top_val(parser))
        endif
     endif
     if(parser%error_count>0) then
@@ -4713,7 +4713,7 @@ contains
     ! Assign flags to proc_flags slot
     parser%vstack(parser%vtop-&
          proc_num_args-node_args+proc_flags+1)%offset=flags
-    
+   
     ! Assign number of returns to proc_numret slot
     parser%vstack(parser%vtop-&
          proc_num_args-node_args+proc_numret+1)%offset=nret

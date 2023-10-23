@@ -2252,7 +2252,7 @@ contains
     type(gen_state):: g
     integer,intent(in):: v
     integer,intent(out):: nloops
-    integer:: i,ndim,vdesc,vdim,vblock,vsize
+    integer:: i,ndim,vdesc,vdim,vblock,vsize,array
     if(g_kind(g,v)/=v_is_group) call pm_panic('nested loop var not a group')
     vdesc=g_ptr(g,v,1)
     if(g_kind(g,v)/=v_is_group) call pm_panic('nested loop desc var not a group')
@@ -2286,6 +2286,19 @@ contains
                    call out_arg(g,g_ptr(g,vdim,3),0)
                    call out_new_line(g)
                    nloops=nloops+1
+                case(4)
+                   ! map seq
+                   call out_simple(g,'DO I$N__$M=1,$I',&
+                        n=i,m=g%lthis,x=g_ptr(g,vdim,2))
+                   array=g_ptr(g,vdim,1)
+                   if(g_kind(g,array)==v_is_group) then
+                      call out_simple(g,'I$N_$M=$I(I$N__$M)',&
+                           n=i,m=g%lthis,x=g_ptr(g,array,1))
+                   else
+                      call out_simple(g,'I$N_$M=$I%E1%P(I$N__$M)',&
+                           n=i,m=g%lthis,x=array)
+                   endif
+                   nloops=nloops+1
                 case(5)
                    ! blocked seq
                    call out_simple_part(g,'DO I$N__$M=($I)-',&
@@ -2306,6 +2319,7 @@ contains
                    nloops=nloops+2
                 end select
              else
+                ! Array
                 call out_simple(g,'DO I$N__$M=1,SIZE($I%P)',&
                      n=i,m=g%lthis,x=g_ptr(g,vdim,1))
                 call out_simple(g,'I$N_$M=$I(I$N__$M)',&
@@ -2332,9 +2346,8 @@ contains
                 select case(g_v1(g,vdim))
                 case(1)
                    ! single point
-                   call out_simple(g,'I$N_$M=$I+1  !!! poo',&
+                   call out_simple(g,'I$N_$M=$I+1',&
                         n=i,m=g%lthis,x=g_ptr(g,vdim,1))
-                   !nloops=nloops+1
                 case(2)
                    ! range
                    call out_simple_part(g,'DO I$N__$M=$I,',&
@@ -3909,7 +3922,7 @@ contains
     integer,intent(in):: tno,mode
     character(len=*),intent(in):: dv,dv1,dv2
     integer,intent(in),optional:: dvv
-    integer:: grid_tuple,grid_dim,i,j
+    integer:: grid_tuple,grid_dim,offsets,i,j,n_arg
     type(pm_ptr):: tv
     if(present(dvv)) then
        if(g_kind(g,dvv)==v_is_group) then
@@ -3926,27 +3939,28 @@ contains
              if(g_kind(g,grid_dim)/=v_is_group) then
                 call pm_panic('norm grid dim not a group')
              endif
-             if(g_v1(g,grid_dim)==1) then
-                grid_dim=g_ptr(g,grid_dim,1)
-                if(g_kind(g,grid_dim)==v_is_group) then
-                   if(g_v2(g,grid_dim)/=v_is_array.and.g_v2(g,grid_dim)/=v_is_var_array) then
+             if(g_v1(g,grid_dim)==2) then
+                offsets=g_ptr(g,grid_dim,1)
+                if(g_kind(g,offsets)==v_is_group) then
+                   if(g_v2(g,offsets)/=v_is_array.and.g_v2(g,offsets)/=v_is_var_array) then
                       call pm_panic('grid dim array not array')
                    endif
                    call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A,1_PM__LN,JTYPE_N)',&
-                        x=g_ptr(g,grid_dim,1))
-                   call out_line(g,'JTYPE=JTYPE_N')
-                elseif(pm_typ_kind(g%context,g_type(g,grid_dim))==pm_typ_is_array) then
+                        x=g_ptr(g,offsets,1))
+                elseif(pm_typ_kind(g%context,g_type(g,offsets))==pm_typ_is_array) then
                    call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A%E1%P,1_PM__LN,JTYPE_N)',&
-                        x=grid_dim)
-                   call out_line(g,'JTYPE=JTYPE_N')
+                        x=offsets)
+                else
+                   call pm_panic('grid dim array is not an array')
                 endif
+                n_arg=2
              else
                 if(g_v1(g,grid_dim)/=6) then
                    call pm_panic('grid_dim incorrect number of entries')
                 endif
                 call out_str(g,'CALL PM__GET_MPI_SUBRANGE_TYPE(JTYPE,')
                 tv=pm_typ_vect(g%context,g_type(g,grid_dim))
-                do j=1,6
+                do j=2,6
                    if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,j)),pm_typ_has_storage)/=0) then
                       call out_arg(g,g_ptr(g,grid_dim,j),0)
                       call out_char(g,',')
@@ -3956,6 +3970,13 @@ contains
                    endif
                 enddo
                 call out_line(g,'JTYPE_N)')
+                n_arg=1
+             endif
+             if(i/=g_v1(g,grid_tuple)) then
+                call out_line(g,'CALL MPI_TYPE_GET_EXTENT_X(JTYPE,ILB,ISIZ,JERRNO)')
+                call out_simple(g,'CALL MPI_TYPE_CREATE_RESIZED(JTYPE_N,0_PM__LN,ISIZ*$I,JTYPE,JERRNO)',&
+                     x=g_ptr(g,grid_dim,n_arg))
+             else
                 call out_line(g,'JTYPE=JTYPE_N')
              endif
           enddo

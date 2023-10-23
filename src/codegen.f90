@@ -202,16 +202,15 @@ module pm_codegen
   integer,parameter:: par_state_nhd=0
   integer,parameter:: par_state_outer=1
   integer,parameter:: par_state_for=2
-  integer,parameter:: par_state_sync=3
-  integer,parameter:: par_state_loop=4
-  integer,parameter:: par_state_cond_loop=5
+  integer,parameter:: par_state_loop=3
+  integer,parameter:: par_state_cond_loop=4
   ! -- The following are conditional states (can check >=par_state_cond)
-  integer,parameter:: par_state_cond=6
-  integer,parameter:: par_state_par=7
-  integer,parameter:: par_state_masked=8
-  integer,parameter:: par_state_over=9
-  integer,parameter:: par_state_any=10
-  integer,parameter:: par_state_labelled=11
+  integer,parameter:: par_state_cond=5
+  integer,parameter:: par_state_par=6
+  integer,parameter:: par_state_masked=7
+  integer,parameter:: par_state_over=8
+  integer,parameter:: par_state_any=9
+  integer,parameter:: par_state_labelled=10
 
   ! Reference flags
   integer,parameter:: ref_is_val=1
@@ -313,7 +312,7 @@ module pm_codegen
      integer:: proc_base,proc_nret,proc_key_base,proc_ncalls
      integer:: run_mode,run_flags,par_state
      type(pm_ptr):: label,default_label
-     logical:: fixed,aliased
+     logical:: fixed,aliased,in_sync
 
      ! This point in a subscript tuple
      integer:: subs_index
@@ -422,6 +421,7 @@ contains
     coder%supress_errors=.false.
     coder%fixed=.false.
     coder%aliased=.false.
+    coder%in_sync=.false.
     coder%subs_index=-1
 
   contains
@@ -1760,7 +1760,7 @@ contains
     call code_val(coder,coder%var(env_base))
     call code_val(coder,coder%var(iter+lv_idx))
     call code_val(coder,coder%var(env_base+1))
-    call make_sys_call(coder,cblock2,node,sym_get_chunk,4,1,aflags=proc_run_shared)
+    call make_sys_call(coder,cblock2,node,sym_get_chunk,4,1,aflags=proc_run_shared+proc_run_always)
     call code_val(coder,coder%var(block_base))
     call make_comm_sys_call(coder,cblock2,node_arg(node,5),sym_pm_over,2,1)
     call make_do_over(coder,cblock2,node,node,node_arg(node,5),over_base)
@@ -2709,7 +2709,7 @@ contains
     integer:: i
     select case(coder%par_state)
     case(par_state_for,par_state_loop,par_state_masked,par_state_over,&
-         par_state_labelled,par_state_sync)
+         par_state_labelled)
        continue
     case(par_state_outer)
        call code_error(coder,node,&
@@ -2932,7 +2932,7 @@ contains
     call trav_expr(coder,cblock,node,node_arg(node,n))
     call check_par_nesting(coder,cblock,pnode,.false.)
     save_par_state=coder%par_state
-    coder%par_state=par_state_sync
+    coder%in_sync=.true.
     if(n==3) then
        call make_assignment_noalias(coder,cblock,node,node_arg(node,2))
     else
@@ -3041,7 +3041,7 @@ contains
       logical,intent(in):: outer,simple
       logical,intent(in):: has_pling
       type(pm_ptr):: v,w
-      if(coder%par_state/=par_state_sync) then
+      if(.not.coder%in_sync) then
          call swap_code(coder)
          call make_assign_call(coder,cblock,pnode,&
               merge(sym_aliased_assign,&
@@ -3078,7 +3078,7 @@ contains
        return
     endif
     outmode=trav_ref(coder,cblock,pnode,node,0)
-    if(coder%par_state==par_state_sync) then
+    if(coder%in_sync) then
        v=pop_code(coder)
        w=pop_code(coder)
        call make_comm_call_args(coder,cblock,pnode)
@@ -3414,7 +3414,7 @@ contains
     endif
     call code_val(coder,var)
     if(iand(mode,ref_is_val)==0) then
-       if(coder%par_state>par_state_outer.and.coder%par_state/=par_state_sync&
+       if(coder%par_state>par_state_outer.and..not.coder%in_sync&
             .and.iand(mode,ref_ignores_rules)==0) then
           if(par_depth(coder,var)<coder%par_depth) then
              call make_basic_sp_call(coder,cblock,pnode,sym_amp_error,&
@@ -3472,7 +3472,7 @@ contains
                 acall=merge(sym_make_nodelhs,sym_make_sublhs,sym==sym_dot_sub)
              endif
           endif
-          if(coder%par_state==par_state_sync.or.&
+          if(coder%in_sync.or.&
                coder%par_state>par_state_outer.and.iand(mode,ref_is_val)/=0) then
              call make_comm_call_args(coder,cblock,pnode)
              call code_val(coder,p)
@@ -3530,7 +3530,7 @@ contains
           coder%run_flags=save_run_flags
           outmode=0
        case(sym_at)
-          if(iand(mode,ref_is_val+ref_ignores_rules)==0.and.coder%par_state/=par_state_sync) then
+          if(iand(mode,ref_is_val+ref_ignores_rules)==0.and..not.coder%in_sync) then
              call code_error(coder,node,&
                   'Cannot change value of "@" expression outside of a "sync" statement') 
           endif
@@ -4448,10 +4448,9 @@ contains
   !==================================================================
   ! Name in usual expression context (may be variable or parameter)
   !==================================================================
-  subroutine trav_name(coder,cblock,node,sym,name,proc)
+  subroutine trav_name(coder,cblock,node,sym,name)
     type(code_state):: coder
     type(pm_ptr),intent(in):: cblock,node,name
-    type(pm_ptr),intent(out),optional:: proc
     integer:: sym
     type(pm_ptr):: p
 
@@ -4461,16 +4460,14 @@ contains
           p=find_imported_decl(coder,node,&
                name,node_arg(node,2),&
                modl_proc)
-          if(present(proc)) then
-             proc=p
+  
+          if(pm_fast_isnull(p)) then
+             ! Note find_imported decl gives own error messages
+             call make_var(coder,cblock,node,name,0)
           else
-             if(pm_fast_isnull(p)) then
-                ! Note find_imported decl gives own error messages
-                call make_var(coder,cblock,node,name,0)
-             else
-                call proc_const_from_decl(coder,cblock,node,p)
-             endif
+             call proc_const_from_decl(coder,cblock,node,p)
           endif
+          
        else
           call code_val(coder,p)
        endif
@@ -4479,18 +4476,9 @@ contains
        if(pm_fast_isnull(p)) then
           p=find_param(coder,cblock,node,name)
           if(pm_fast_isnull(p)) then
-             p=find_decl(coder,node,name,modl_proc)
-             if(pm_fast_isnull(p)) then
-                call code_error(coder,node,&
-                     'Name not defined:',name)
-                call make_var(coder,cblock,node,name,0)
-             else
-                if(present(proc)) then
-                   proc=find_decl(coder,node,name,modl_proc)
-                else
-                   call proc_const(coder,cblock,node,name)
-                endif
-             endif
+             call code_error(coder,node,&
+                  'Name not defined:',name)
+             call make_var(coder,cblock,node,name,0)
           else
              call code_val(coder,p)
           endif
@@ -6250,7 +6238,7 @@ contains
          save_subs_index,save_run_mode,save_run_flags
     type(pm_ptr):: save_sub_array,save_loop_cblock, &
          save_proc_keys,save_label
-    logical:: save_aliased
+    logical:: save_aliased,save_in_sync
 
     integer:: pr_flags
     type(pm_reg),pointer:: reg
@@ -6355,6 +6343,8 @@ contains
           return
        endif
 
+       write(70,*) trim(pm_name_as_string(coder%context,&
+            node_get_num(node,proc_name))),'par',coder%par_state
        old_complete=coder%par_state<par_state_cond
        
        call save_proc_state
@@ -6430,6 +6420,8 @@ contains
           endif
        endif
 
+       write(70,*) trim(pm_name_as_string(coder%context,&
+            node_get_num(node,proc_name))),pr_flags,complete,old_complete,coder%par_state
        
        ! Create proc code object 
        call code_num(coder,coder%index)                   ! Maximum index
@@ -6489,6 +6481,7 @@ contains
        save_run_mode=coder%run_mode
        save_run_flags=coder%run_flags
        save_aliased=coder%aliased
+       save_in_sync=coder%in_sync
     end subroutine save_proc_state
 
     subroutine init_proc_state
@@ -6505,6 +6498,7 @@ contains
        coder%subs_index=-1
        coder%run_flags=0
        coder%aliased=.false.
+       coder%in_sync=.false.
     end subroutine init_proc_state
 
    subroutine restore_proc_state
@@ -6524,6 +6518,7 @@ contains
        coder%label=save_label
        coder%subs_index=save_subs_index
        coder%aliased=save_aliased
+       coder%in_sync=save_in_sync
     end subroutine restore_proc_state
 
     subroutine code_params(cblock,iscomm)
@@ -9274,11 +9269,11 @@ contains
        endif
        write(iunit,*) spaces(1:depth*2),')'
     case(cnode_is_proc)
-       write(iunit,'(A,A,i2,A,i2,A,i2,A,i3,A)') spaces(1:depth*2),&
+       write(iunit,'(A,A,i2,A,i2,A,i2,A,i3,A,i3,A)') spaces(1:depth*2),&
             'Proc [nargs=',&
             cnode_get_num(node,pr_nargs),',nkeys=',&
             cnode_get_num(node,pr_nkeys),',nret=',cnode_get_num(node,pr_nret),&
-            ',ncalls=',cnode_get_num(node,pr_ncalls),'] ('
+            ',ncalls=',cnode_get_num(node,pr_ncalls),',flags=',cnode_get_num(node,pr_flags),'] ('
        if(cnode_flags_set(node,pr_flags,proc_is_comm)) &
             write(iunit,*) spaces(1:depth*2+1),'[loop]'
        if(cnode_flags_set(node,pr_flags,proc_is_each_proc)) &
