@@ -233,8 +233,8 @@ module pm_symbol
   integer,parameter:: sym_distr= num_sym + 5
   integer,parameter:: sym_topo = num_sym + 6
   integer,parameter:: sym_simplify = num_sym + 7
-  integer,parameter:: sym_sched = num_sym + 8
-  integer,parameter:: sym_work = num_sym + 9
+  integer,parameter:: sym_work = num_sym + 8
+  integer,parameter:: sym_sched = num_sym + 9
   integer,parameter:: sym_block = num_sym + 10
   integer,parameter:: num_using_clauses = sym_block-sym_distr+1
   

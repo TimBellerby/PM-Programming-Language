@@ -1431,7 +1431,7 @@ contains
           endif
           call prc_cblock(coder,cnode_arg(args,4),base)
           tno=arg_type(3)
-          if(arg_type(1)/=pm_string_type) then
+          if(arg_type(1)/=pm_string_type.and.arg_type(1)/=error_type) then
              call infer_error_with_trace(coder,cnode_arg(args,1),&
                   'Check message is not a string, got:'//&
                   trim(pm_typ_as_string(coder%context,arg_type(1))))

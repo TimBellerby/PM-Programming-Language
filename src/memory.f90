@@ -1349,6 +1349,7 @@ contains
     major_cycle=force_major_cycle.or.context%tick>max_ticks
     10 continue
 
+
     if(pm_debug_level>1) write(*,*) 'Clearing bitmaps'
 
     ! Set up collection cycle

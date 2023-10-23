@@ -1495,7 +1495,7 @@ contains
        endif
        call isend_val(node,v%data%ptr(v%offset+3),0_pm_ln,-1_pm_ln,mess_tag+1,xcomm)
     case(pm_pointer)
-       write(*,*) 'SEND'
+       !write(*,*) 'SEND'
        call mpi_isend(buffer,0,MPI_CHARACTER,node,mess_tag,comm,mess,errno)
        call push_message(mess)
        do j=0,pm_fast_esize(v)
@@ -2443,8 +2443,10 @@ contains
     type(pm_ptr),intent(in):: offsets
     integer(pm_ln),intent(in):: noff,offstart
     integer,intent(out):: mpi_typ
-    integer:: errno,typ,i,j
+    integer:: errno,typ,i,j,new_mpi_typ
     type(pm_ptr):: seq,v,off
+    integer(MPI_COUNT_KIND):: lb,siz
+    integer(pm_ln):: gsize
     typ=pm_fast_typeof(offsets)
     if(typ==pm_long.or.noff==0) then
        mpi_typ=mpi_disp_type(typ_for_pm(tno),offsets,offstart,noff)
@@ -2453,15 +2455,25 @@ contains
        off=offsets%data%ptr(offsets%offset+2)
        do i=2,pm_fast_esize(off)
           seq=off%data%ptr(off%offset+i)
-          if(pm_fast_esize(seq)==2) then
+          if(pm_fast_esize(seq)==3) then
+             gsize=arg(2)
              seq=seq%data%ptr(seq%offset+2)
              v=seq%data%ptr(seq%offset+pm_array_vect)
              v=v%data%ptr(v%offset)
-             mpi_typ=mpi_disp_type(mpi_typ,v,0_pm_ln,&
+             new_mpi_typ=mpi_disp_type(mpi_typ,v,0_pm_ln,&
                   pm_fast_esize(v)+1)
           else
-             mpi_typ=mpi_subrange_type(mpi_typ,arg(1),arg(2),&
+             new_mpi_typ=mpi_subrange_type(mpi_typ,arg(2),&
                   arg(3),arg(4),arg(5),arg(6))
+             gsize=arg(1)
+          endif
+          if(i/=pm_fast_esize(off)) then
+             call mpi_type_get_extent_x(mpi_typ,lb,siz,errno)
+             call mpi_type_create_resized(new_mpi_typ,&
+                  int(0,MPI_ADDRESS_KIND),int(gsize*siz,MPI_ADDRESS_KIND),&
+                  mpi_typ,errno)
+          else
+             mpi_typ=new_mpi_typ
           endif
        enddo
     endif
@@ -2530,15 +2542,15 @@ contains
   end subroutine mpi_disp_short_type
 
   ! Create MPI type for subrange (start..end by step [width,align]) of (0..gsize)
-  function mpi_subrange_type(tno,gsize,start,end,step,width,align) result(tno2)
+  function mpi_subrange_type(tno,start,end,step,width,align) result(tno2)
     integer,intent(in):: tno
-    integer(pm_ln),intent(in):: gsize,start,end,step,width,align
+    integer(pm_ln),intent(in):: start,end,step,width,align
     integer:: tno2
     integer(pm_ln):: n
     integer(MPI_COUNT_KIND):: lb,siz
     integer(MPI_ADDRESS_KIND):: displ(3)
     integer:: blk(3),types(3),errno,m,tno3
-    if(debug_mess) write(*,*) sys_node,'SUBRANGE',gsize,start,end,step,width,align
+    if(debug_mess) write(*,*) sys_node,'SUBRANGE',start,end,step,width,align
     call mpi_type_get_extent_x(tno,lb,siz,errno)
     n=(end-start)/step+1
     if(width>1.and.(align>0.or.start+(n-1)*step+width>end)) then
@@ -2549,15 +2561,12 @@ contains
        displ(1)=start*siz
        displ(2)=(start-align+step)*siz
        displ(3)=(start-align+(n-1)*step)*siz
-       call mpi_type_create_struct(3,blk,displ,types,tno3,errno)
+       call mpi_type_create_struct(3,blk,displ,types,tno2,errno)
     else
-       tno2=mpi_strided_block_type(tno,n,step,width,m)
+       tno3=mpi_strided_block_type(tno,n,step,width,m)
        displ(1)=start*siz
-       call mpi_type_create_hindexed_block(1,m,displ,tno2,tno3,errno)
+       call mpi_type_create_hindexed_block(1,m,displ,tno3,tno2,errno)
     endif
-    call mpi_type_create_resized(tno3,&
-         int(0,MPI_ADDRESS_KIND),int(gsize*siz,MPI_ADDRESS_KIND),&
-         tno2,errno)
   end function mpi_subrange_type
 
   ! Create an mpi type for 0..step*n by step with given width
@@ -2860,12 +2869,10 @@ contains
     nnode=par_frame(par_depth)%this_nnode
     comm=par_frame(par_depth)%this_comm
     this_node=par_frame(par_depth)%this_node
-    if(pm_fast_vkind(ve)==pm_tiny_int) then
-       ntot=0
-    elseif(pm_fast_isnull(ve)) then
+    if(pm_fast_isnull(ve)) then
        ntot=pm_fast_esize(node)+1
     else
-       ntot=pm_fast_esize(ve)+1
+       ntot=pm_fast_esize(ve)
     endif
 
     partial=.false.
@@ -3111,12 +3118,10 @@ contains
     
     if(par_frame(par_depth)%shared_node>0) then
        ntot=0
-    elseif(pm_fast_vkind(ve)==pm_tiny_int) then
-       ntot=0
     elseif(pm_fast_isnull(ve)) then
        ntot=pm_fast_esize(node)+1
     else
-       ntot=pm_fast_esize(ve)+1
+       ntot=pm_fast_esize(ve)
     endif
 
     if(ntot>0) then
@@ -3409,13 +3414,15 @@ contains
     
     if(issend.and.par_frame(par_depth)%shared_node>0) then
        ntot=0
-    elseif(pm_fast_vkind(ve)==pm_tiny_int) then
-       ntot=0
     elseif(pm_fast_isnull(ve)) then
        ntot=pm_fast_esize(node)+1
     else
-       ntot=pm_fast_esize(ve)+1
+       ntot=pm_fast_esize(ve)
     endif
+
+    !write(*,*) 'ntot=',ntot
+    !call pm_dump_tree(context,6,ve,2)
+    
 
     if(debug_mess) then
        write(*,*) this_node,'REMOTE_CALL> ntot=',ntot,'top=',message_top,'ve_kind=',pm_fast_vkind(ve)
@@ -3481,7 +3488,7 @@ contains
                 if(i==this_node.or.start(i)==start(i+1)) cycle
                 if(start(i)==start(i+1)) cycle
                 if(debug_mess) then
-                   write(*,'(a8,8i8)') 'send',this_node,i
+                   write(*,'(a8,8i8)') 'send',this_node,i,sbuffer(i)
                 endif
                 sbuffer(i)=start(i+1)-start(i)
                 call mpi_issend(sbuffer(i),&
@@ -3520,6 +3527,8 @@ contains
                    write(*,*) 'GOT',sys_node,rq,message_top,MPI_UNDEFINED
                 endif
                 if(rq==1) then
+                   
+                   !if(rbuffer(1)>32000) call pm_panic("Big!!")
                    
                    ! Service data request
                    inode=istat(MPI_SOURCE)
@@ -3817,7 +3826,7 @@ contains
        
     else
 
-       if(debug_mess) write(*,*) 'Collecting/serving requests'
+       if(debug_mess) write(*,*) 'Collecting/serving requests',nnode
 
        ! Post speculative request receive
        if(nnode>1) then
@@ -3851,6 +3860,7 @@ contains
           if(debug_mess) then
              write(*,*) 'COLLECTING at', this_node,'ncomplete=',ncomplete,&
                   'nnode=',nnode,'top=',message_top
+             write(*,*) 'MESS>',message_stack(message_base+1:message_top)
           endif
           call mpi_waitany(message_top-message_base,message_stack(message_base+1:),rq,istat,errno)
           if(debug_mess) write(*,*) 'REVD',rq
@@ -3909,7 +3919,7 @@ contains
                   1,&
                   MPI_AINT,MPI_ANY_SOURCE,req_tag,&
                   comm,mess,errno)
-             message_stack(1)=mess
+             message_stack(message_base+1)=mess
           endif
        enddo
        
