@@ -86,6 +86,7 @@ contains
     call dcl_uproc(parser,'++(x,y)=$++.(string(x),string(y))',line)
     call dcl_uproc(parser,'string(x:string)=x',line)
     call dcl_uproc(parser,'string(x:null)="null"',line)
+    call dcl_uproc(parser,'fmt(x,y)=x:test """fmt"" operator not yet implmented"=>''false',line)
     
     ! sint type
     call dcl_proc(parser,'PM__assign_var(&sint,sint)',&
@@ -3392,7 +3393,8 @@ contains
          '{tt=_tup(t);check_contains(#(x),tt);var xx=varray(_arb(x),empty(#x));'//&
          'return PM__drefs(xx,x,tt,p,_p_ref) '//&
          'where p=nodes_for_grid((#x).dist,tt)}',line)
-    call dcl_uproc(parser,'PM__subref%(x:shared any^dshape,t:invar indexed) <<complete,always>> {'//&
+    call dcl_uproc(parser,'PM__subref%(x:shared any^dshape,t:invar indexed)<<cond>>=PM__subref%(x,*t)',line)
+    call dcl_uproc(parser,'PM__subref%(x:shared any^dshape,t:invar indexed) <<uncond>> {'//&
          'check_contains(#x,_dmap(t,here));'//&
          'return PM__drefi(_arb(x),x,tt,[tt,#x],_d_ref) where tt=_tup(t)}',line)
 
@@ -3725,9 +3727,9 @@ contains
     call dcl_uproc(parser,'PM__makeidxdim(x:seq)=[PM__makeidxdim(x,''1)]',line)
 
     !!! Obsolete?
-    call dcl_uproc(parser,'PM__makeidx(x:indexed_dim or tuple(indexed_dim or int))='//&
+    call dcl_uproc(parser,'PM__makeidx(x:indexed_dim or indexed)='//&
          'new _indexed {_t=_tup(x),_r=null}',line)
-    call dcl_uproc(parser,'PM__makeidx(x:indexed_dim or tuple(indexed_dim or int),y)='//&
+    call dcl_uproc(parser,'PM__makeidx(x:indexed_dim or indexed,y)='//&
          'new _indexed {_t=_tup(x),_r=y}',line)
     call dcl_uproc(parser,'PM__makeidx(x,y)=x :test "Malformed indexed expression" => ''false',line)
     call dcl_uproc(parser,'PM__makeidx(x)=x :test "Malformed indexed expression" => ''false',line)
@@ -3762,7 +3764,7 @@ contains
     call dcl_uproc(parser,'string(x:indexed_dim(''1,''1))="$here."++x._n++"+"++x._c',line)
     call dcl_uproc(parser,'string(x:indexed_dim(''1,''1,''0))="$here."++x._n',line)
 
-    call dcl_uproc(parser,'_correct(x:tuple(indexed_dim),y:extent)=map($-,x,low(y))',line)
+    call dcl_uproc(parser,'_correct(x:indexed,y:extent)=map($-,x,low(y))',line)
 
     call dcl_uproc(parser,'_dmap(x:any_int,n:int)=x',line)
     call dcl_uproc(parser,'_dmap(x:any_int,n:grid_slice_dim)=single_point(x)',line)
@@ -3774,15 +3776,15 @@ contains
          'where lo=_dmap(x,low(n)),hi=_dmap(x,high(n))',line)
     call dcl_uproc(parser,'_dmap(x:indexed_dim(''1,''1),n:strided_range)=n._lo+x._c..n._hi+x._c  by n._st',line)
     call dcl_uproc(parser,'_dmap(x:indexed_dim(''1,''1),n:block_seq)='//&
-         'block_seq(n._lo+x._c,n._hi+x._c,n._st.n._b,n._align)',line)
+         'block_seq(n._lo+x._c,n._hi+x._c,n._st,n._b,n._align)',line)
     call dcl_uproc(parser,'_dmap(x:tuple(indexed_dim or any_int),n:tuple(int) or grid_slice)='//&
          'map_const($_dmap,x,n)',line)
     call dcl_uproc(parser,'_dmap(x:tuple(indexed_dim or any_int),n:tuple(int) or grid_slice,s:extent)='//&
          's#map_const($_dmap,x,n)',line)
 
     call dcl_uproc(parser,'_drev(x:indexed_dim,n)=new indexed_dim {_m=x._d,_c=-x._c,_d=x._m,_n=n}',line)
-    call dcl_uproc(parser,'_drev(n,x:tuple(indexed_dim))=_drev(get_dim(x,n),n)',line)
-    call dcl_uproc(parser,'_drev(x:tuple(indexed_dim),y:tuple(fix int))=map_const($_drev,y,x)',line)
+    call dcl_uproc(parser,'_drev(n,x:indexed)=_drev(get_dim(x,n),n)',line)
+    call dcl_uproc(parser,'_drev(x:indexed,y:tuple(fix int))=map_const($_drev,y,x)',line)
 
     call dcl_type(parser,'_round_up is unique',line)
     call dcl_type(parser,'_round_down is unique',line)
@@ -3795,7 +3797,7 @@ contains
     call dcl_uproc(parser,&
          '_dun(x:indexed_dim,m:range(int),n:extent)=replace(n,x._n,intersect(get_dim(n,x._n),_dunmap(x,m)))',line)
     call dcl_uproc(parser,'_dun(x:int,m:range(int),n:extent)=n',line)
-    call dcl_uproc(parser,'_dunmap(x:tuple(indexed_dim or int),m:grid_slice or tuple(int),n:extent)='//&
+    call dcl_uproc(parser,'_dunmap(x:indexed,m:grid_slice or tuple(int),n:extent)='//&
          '_dun(x.1,m.1,nn) where nn=_dunmap(tail(x),tail(m),n)',line)
     call dcl_uproc(parser,'_dunmap(x:[indexed_dim or int],m:grid_slice or tuple(int),n:extent)='//&
          '_dun(x.1,m.1,n)',line)
@@ -3809,7 +3811,7 @@ contains
 
     ! Resolve x[indexed]
     call dcl_uproc(parser,&
-         '_get_dindex(&a,x,shapex,local_tile,local_region,t:tuple(indexed_dim),at) {'//&
+         '_get_dindex(&a,x,shapex,local_tile,local_region,t:indexed,at) {'//&
          'tt=_correct(t,shapex._mshape);'//&
          'if size(_dmap(tt,local_region._mshape))*4>size(local_region._mshape) {'//&
          '  if at or a is <_comp^any> {'//&
@@ -3828,7 +3830,7 @@ contains
     ! Resolve x[indexed] for cases where size(x[indexed])>=size(region)
     ! -- in this case send one value for every point in current (sub)region
     call dcl_uproc(parser,&
-         '_get_dindex_s(&a:any^any,x,shapex,local_tile,local_region,t:tuple(indexed_dim),at) {'//&
+         '_get_dindex_s(&a:any^any,x,shapex,local_tile,local_region,t:indexed,at) {'//&
          'PM__head_node{'//&
          ' shapexx=#shapex._mshape;'//&
          ' this_tile=shapex._tile;'//&
@@ -3857,7 +3859,7 @@ contains
     ! Resolve x[indexed] for cases where size(x[indexed])<=size(region)
     ! -- in this case send those values in x which are needed to calculate x[indexed]
     call dcl_uproc(parser,&
-         '_get_dindex_r(&a:any^any,x,shapex,local_tile,local_region,t:tuple(indexed_dim),at) {'//&
+         '_get_dindex_r(&a:any^any,x,shapex,local_tile,local_region,t:indexed,at) {'//&
          'shapexx=#shapex._mshape;'//&
          'src_range=_dmap(t,local_tile);var b=array(_arb(a),#src_range);'//&
          'foreach p in nodes_for_grid(shapex.dist,src_range) {'//&
@@ -3887,7 +3889,7 @@ contains
     ! -- in this case send one value for every point in current (sub)region
     ! -- Version for more complex types that need sync receive
     call dcl_uproc(parser,&
-         '_get_dindex_ss(&a:any^any,x,shapex,local_tile,local_region,t:tuple(indexed_dim),at) {'//&
+         '_get_dindex_ss(&a:any^any,x,shapex,local_tile,local_region,t:indexed,at) {'//&
          'shapexx=#shapex._mshape;'//&
          'this_tile=shapex._tile;'//&
          'dest_range=_dunmap(t,shapex._tile,local_region._mshape);'//&
@@ -3916,7 +3918,7 @@ contains
     ! -- in this case send those values in x which are needed to calculate x[indexed]
     ! -- Version for more complex types that need sync receive
     call dcl_uproc(parser,&
-         '_get_dindex_rs(&a:_comp^any,x,shapex,local_tile,local_region,t:tuple(indexed_dim),at) {'//&
+         '_get_dindex_rs(&a:_comp^any,x,shapex,local_tile,local_region,t:indexed,at) {'//&
          'PM__head_node {'//&
          'shapexx=#shapex._mshape;'//&
          'dest_range=_dunmap(t,shapex._tile,local_region._mshape);'//&
@@ -3956,7 +3958,7 @@ contains
 
    ! Resolve x[ indexed ][ indexed or shared ] ... 
     call dcl_uproc(parser,&
-         '_get_dindex_from_dref(&a:any^any,x,shapex,local_tile,local_region,tt:tuple(indexed_dim),at) {'//&
+         '_get_dindex_from_dref(&a:any^any,x,shapex,local_tile,local_region,tt:indexed,at) {'//&
          't=_correct(tt,shapex._mshape);shapexx=#shapex._mshape;'//&
          'this_tile=shapex._tile;'//&
          'dest_range=_dunmap(t,shapex._tile,local_region._mshape);'//&
@@ -3989,7 +3991,7 @@ contains
    
     ! Resolve x[ indexed ][ indexed or shared ] ... 
     call dcl_uproc(parser,&
-         '_get_dindex_from_dref_s(&a:_comp^any,x,shapex,local_tile,local_region,tt:tuple(indexed_dim),at) {'//&
+         '_get_dindex_from_dref_s(&a:_comp^any,x,shapex,local_tile,local_region,tt:indexed,at) {'//&
          't=_correct(tt,shapex._mshape);shapexx=#shapex._mshape;'//&
          'this_tile=shapex._tile;'//&
          'dest_range=_dunmap(t,shapex._tile,local_region._mshape);'//&
@@ -4021,7 +4023,7 @@ contains
 
     ! Resolve x[ indexed ][ priv ]
     call dcl_uproc(parser,&
-         '_get_dindex_from_ref(&a,x,shapex,this_tile,local_region,t:tuple(indexed_dim),complt,at) {'//&
+         '_get_dindex_from_ref(&a,x,shapex,this_tile,local_region,t:indexed,complt,at) {'//&
          'dest_range=_dmap(t,this_tile,#shapex._mshape);'//&
          ' foreach p in nodes_for_grid(shapex.dist,dest_range){'//&
          '  i=index(dims(local_region.dist),p);'//&
@@ -4050,7 +4052,7 @@ contains
 
     ! Resolve x[ indexed ][ whatever ] <pr> = priv
     call dcl_uproc(parser,&
-         '_set_dindex_of_ref(&x,y,shapex,this_tile,local_region,tt:tuple(indexed_dim),'//&
+         '_set_dindex_of_ref(&x,y,shapex,this_tile,local_region,tt:indexed,'//&
          '     pr:proc,complt,at) {'//&
          't=_correct(tt,shapex._mshape);dest_range=_dmap(t,this_tile,#shapex._mshape);'//&
          'PM__head_node{foreach p in nodes_for_grid(shapex.dist,dest_range){'//&
@@ -4908,7 +4910,7 @@ contains
          ' where s=ii*b._b where ii=int(i)',&
          line)
     call dcl_uproc(parser,&
-         'empty(b:block_cyclic_distr)=block_seq(1,0,1,1)',line)
+         'empty(b:block_cyclic_distr)=block_seq(1,0,1,1,0)',line)
     call dcl_uproc(parser,'nodes_for_grid(b:block_cyclic_distr,g)='//&
          'cyclic_range(lo,high,p) where high=if(hi-lo>=p=>lo+p-1,hi+if(hi>lo=>0,p))'//&
          '   where lo=low(g)/b._b mod p,hi=high(g)/b._b mod p where p=b._p',&
@@ -4928,6 +4930,8 @@ contains
     call dcl_uproc(parser,'node_nhd(b:block_cyclic_distr,p:int,d:range(int))='//&
          'p+(low(d)-b._b+1)/b._b..p+(high(d)+b._b-1)/b._b',line)
 
+    call dcl_uproc(parser,'nodes_for_grid(b,g:single_point)=nodes_for_grid(b,g._t..g._t)',line)
+    
     ! Tuple of distributions
     call dcl_uproc(parser,&
          'distribute(dis:tuple(distr_template_dim),d:tuple(int),t:tuple(int))='//&
@@ -4952,7 +4956,7 @@ contains
     call dcl_uproc(parser,'tile_size(b:tuple(distr_dim),i:tuple(int))'//&
          '=map($tile_size,b,i)',line)
     call dcl_uproc(parser,'empty(b:tuple(distr_dim))=map($empty,b)',line)
-    call dcl_uproc(parser,'nodes_for_grid(b:tuple(distr_dim),g:grid)'//&
+    call dcl_uproc(parser,'nodes_for_grid(b:tuple(distr_dim),g:grid_slice)'//&
          '=map($nodes_for_grid,b,g)',line)
     call dcl_uproc(parser,'node_num_for(b:tuple(distr_dim),j:tuple(int))'//&
          '=index(dims(b),map($node_for,b,j))',line)
