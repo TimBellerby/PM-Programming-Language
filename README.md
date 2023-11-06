@@ -22,11 +22,33 @@ The PM interpreter uses a parallel virtual machine and is designed for debugging
 
 The language specification (available in /doc) while incomplete in places, will give
 a good view of the features of the version 0.4 of the language.
-    
+
+## Status
+
+This is a pre-release version of the PM language. While syntax and semantics are now well
+developed, there may be further changes to both in response to feedback.
+
+The implementation is not yet fully free of bugs or unimplemented features. If you encounter
+a problem, then please check the latest code on GitHub. If this does not work, then please
+raise an issue.
+
+## Contribution
+
+This is an open source project and outside contributions are entirely welcome.
+
+At this stage the most effective contributions are in the are of testing and
+feedback on the language design and implementation.
+
+A refactoring of compiler/interpreter source code is underway for version 0.5. 
+One goal of this will be to make the code more accessible to outside contributors.
+In the meantime, bug-fix contributions to the source code by the brave are certainly welcome.
+
 
 ## Installation and use
 
-This is an initial release of version 0.4 of the language.
+This is an initial release of version 0.4 of the language. At the moment
+the code is designed to be compiled and installed on a Linux system with
+MPI. It should be possible to compile on other systems with MPI and Fortan.
 
 To compile PM:
 
