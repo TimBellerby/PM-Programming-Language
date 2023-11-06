@@ -1493,6 +1493,11 @@ contains
        call gen_active_check_end(g,l)
     case(op_broadcast_shared)
        call gen_active_check_start(g,l)
+       if(n==3) then
+          call out_simple(g,'JNODE=$2',l)
+       else
+          call out_line(g,'JNODE=0')
+       endif
        call gen_mpi_bcast(g,g%codes(a+1),isshared=.true.)
        call gen_active_check_end(g,l)
     case(op_broadcast_val)
@@ -3527,9 +3532,9 @@ contains
              call out_simple(g,'CALL PM__PACKVEC$N(NA,$A)',n=tno,x=v)
           endif
           if(present(isshared)) then
-             call out_line(g,'CALL PM__BCAST_BUFFER(0,PM__NODE_FRAME(PM__NODE_DEPTH)%SHARED_COMM)')
+             call out_line(g,'CALL PM__BCAST_BUFFER(JNODE,PM__NODE_FRAME(PM__NODE_DEPTH)%SHARED_COMM)')
              call out_line(g,'ELSE')
-             call out_line(g,'CALL PM__BCAST_BUFFER(0,PM__NODE_FRAME(PM__NODE_DEPTH)%SHARED_COMM)')
+             call out_line(g,'CALL PM__BCAST_BUFFER(JNODE,PM__NODE_FRAME(PM__NODE_DEPTH)%SHARED_COMM)')
           else
              call out_line(g,'CALL PM__BCAST_BUFFER(JNODE,PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM)')
              call out_line(g,'ELSE')
@@ -3564,7 +3569,7 @@ contains
           endif
           if(present(isshared)) then
              call out_line(g,&
-                  ',JN,JTYPE,0,PM__NODE_FRAME(PM__NODE_DEPTH)%SHARED_COMM,JERRNO)')
+                  ',JN,JTYPE,JNODE,PM__NODE_FRAME(PM__NODE_DEPTH)%SHARED_COMM,JERRNO)')
           else
              call out_line(g,&
                   ',JN,JTYPE,JNODE,PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM,JERRNO)')

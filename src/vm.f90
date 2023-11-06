@@ -605,9 +605,10 @@ contains
     case(op_pop_node)
        ! op_pop_node ve
        if(.not.ve_is_empty(ve)) then
-          if(conc_depth==0) then
+         if(conc_depth==0) then
              if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
           endif
+ 
           call pop_node(context)
        endif
        
@@ -620,8 +621,13 @@ contains
     case(op_broadcast_shared)
        ! op_broadcast_shared ve vec
        if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
+       if(nargs==3) then
+          i=arg(3)%data%ln(arg(3)%offset)
+       else
+          i=0
+       endif
        if(.not.ve_is_empty(ve)) then
-          call broadcast(context,0,arg(2),&
+          call broadcast(context,i,arg(2),&
                par_frame(par_depth)%shared_comm,par_frame(par_depth)%shared_node)
        endif
     case(op_broadcast_val)
@@ -900,7 +906,7 @@ contains
            call set_arg(2,arg(1))
            v=alloc_arg(pm_long,3)
            call set_arg(4,arg(5))
-           if(opcode==op_recv_assn_call.and..false.) then
+           if(opcode==op_recv_assn_call) then
               call set_arg(6,arg(7))
            endif
         else

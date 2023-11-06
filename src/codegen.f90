@@ -2382,7 +2382,8 @@ contains
     call make_sp_call(coder,coder%loop_cblock,node,sym_for,1,0)
 
     call code_val(coder,coder%var(coder%par_base+lv_distr))
-    call make_sys_call(coder,coder%loop_cblock,node,sym_pop_node,1,0,aflags=call_ignore_rules)
+    call make_sys_call(coder,coder%loop_cblock,node,sym_pop_node,1,0,&
+         aflags=call_ignore_rules+proc_run_shared+proc_run_always)
     
     ! Close loop cblock
     call close_cblock(coder,coder%loop_cblock)
