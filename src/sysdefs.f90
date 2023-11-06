@@ -1299,10 +1299,13 @@ contains
     call dcl_uproc(parser,'#(x:single_point,y:index)=''0',line)
     call dcl_uproc(parser,'#(x:single_point,y:grid_slice_dim)=''0..''0',line)
     call dcl_uproc(parser,'#(x:single_point,y:single_point)=''0..''0',line)
-    call dcl_uproc(parser,'#(x:grid_slice_dim,y:single_point)=xx..xx where xx=x#y._t',line)
+    call dcl_uproc(parser,'#(x:grid_slice_dim,y:single_point)=single_point(xx) where xx=x#y._t',line)
     call dcl_uproc(parser,'overlap(x:single_point(any_int),y:single_point(any_int))=0..if(x._t==y._t=>0,-1)',line)
     call dcl_uproc(parser,'overlap(x:grid_slice_dim,y:single_point(any_int))=if(y._t in x=>x#y._t..x#y._t,0..-1)',line)
     call dcl_uproc(parser,'overlap(x:single_point(any_int),y:grid_slice_dim)=0..if(x._t in y=>0,-1)',line)
+    call dcl_uproc(parser,'overlap(x:single_point(any_int),y:single_point(any_int))=overlap(x,y),overlap(y,x)',line)
+    call dcl_uproc(parser,'overlap(x:grid_slice_dim,y:single_point(any_int))=overlap(x,y),overlap(y,x)',line)
+    call dcl_uproc(parser,'overlap(x:single_point(any_int),y:grid_slice_dim)=overlap(x,y),overlap(y,x)',line)
     call dcl_uproc(parser,'intersect(x:single_point(any_int),y:grid_slice_dim)=x._t..if(x._t in y=>x._t,x._t-1)',line)
     call dcl_uproc(parser,'intersect(y:grid_slice_dim,x:single_point(any_int))=x._t..if(x._t in y=>x._t,x._t-1)',line)
     call dcl_uproc(parser,'intersect(x:single_point(any_int),y:single_point(any_int))='//&
@@ -1747,6 +1750,10 @@ contains
     call dcl_uproc(parser,'_sliceit(arg...)=tuple(arg...)',line)
     call dcl_uproc(parser,'active_dims(x:iterable_grid)=map_apply($_act,$_sliceit,x)',line)
     call dcl_uproc(parser,'active_dims(x:single_point)=null',line)
+    call dcl_proc(parser,'_act(x:single_point,y:any)->PM__tinyint',op_miss_arg,0,line,0)
+    call dcl_uproc(parser,'_act(x,y)=y',line)
+    call dcl_uproc(parser,'active_dims(x:iterable_grid,y:tuple)=map_apply($_act,$_sliceit,x,y)',line)
+    call dcl_uproc(parser,'active_dims(x:single_point,y)=null',line)
     call dcl_uproc(parser,'_ar(x:single_point)=''0',line)
     call dcl_uproc(parser,'_ar(x)=''1',line)
     call dcl_uproc(parser,'rank(x:iterable_grid)=map_reduce($_ar,$+,x)',line)
@@ -1872,7 +1879,7 @@ contains
     call dcl_uproc(parser,'_local_size(x:mshape)=size(x._extent)',line)
 
     ! Convert an extent to have a zero base
-    call dcl_uproc(parser,'zero_base(x:range)=0..size(x)',line)
+    call dcl_uproc(parser,'zero_base(x:range)=0..size(x)-1',line)
     call dcl_uproc(parser,'zero_base(x:extent)=map($zero_base,x)',line)
 
     ! Extent of a mshape
@@ -2702,8 +2709,8 @@ contains
          'for *i in sz,zz in z.array {'//&
          'var s=matrix_element_zero(_arb(z.array));'//&
          'foreach invar k in #(sx.1) {'//&
-         ' s=matrix_element_add(s,matrix_element_multiply(x.array[i.1,sx.2[k]],y.array[sy.1[k],i.2]))};'//&
-         'zz=s};'//&
+         ' s=matrix_element_add(s,matrix_element_multiply(x.array[i.1,sx.2[k]],y.array[sy.1[k],i.2]))'//&
+         '};zz=s};'//&
          'return z }',line)
     
     ! *****************************************
@@ -2751,12 +2758,13 @@ contains
          'dist=d.dist,_tile=d._tile,_tilesz=d._tilesz,_size=d._size,'//&
          '_level=d._level,_dtag=d._dtag}',line)
     call dcl_uproc(parser,'[](d:dshape,s:index)=d._mshape._extent[s]',line)
-    call dcl_uproc(parser,'[](d:dshape,s:subs)=new dshape{_mshape=shape(#active_dims(ss)),'//&
+    call dcl_uproc(parser,'[](d:dshape,s:subs)=_dshape_slice(d,ss)'//&
+         ' where ss=fill_in(#d._mshape._extent,s,''true){'//&
+         ' check_contains(#(d._mshape._extent),s)}',line)
+    call dcl_uproc(parser,'_dshape_slice(d:dshape,ss)=new dshape{_mshape=shape(#active_dims(ss)),'//&
          'dist=dist,_tile=tile,_tilesz=#tile,_size=size(tile),'//&
          '_level=d._level,_dtag=d._dtag} where tile=element(dist,_shrd_node())'//&
-         ' where dist=sliced_distr(d.dist,ss)'//&
-         ' where ss=fill_in(#d._mshape._extent,s,''true){'//&
-         ' check_contains(d._mshape._extent,s)}',line)
+         ' where dist=sliced_distr(d.dist,ss)',line)
     
     ! *****************************************
     ! DISTRIBUTED ARRAY AND SHAPE TEMPLATES
@@ -2842,7 +2850,7 @@ contains
     call dcl_uproc(parser,'PM__local(a:any^mshape)=a',line)
     call dcl_uproc(parser,'element(a:any^dshape,t) { '//&
          'p,i=node_and_index((#a).dist,(#a)._mshape#_tup(t));'//&
-         'var r=_arb(a);if p==_this_node():r=_get_aelem(a,i);PM__broadcast(&r,p);return r} ',line)
+         'var r=_arb(a);if p==_this_node():r=_get_aelem(a,i);_bcast_shared(&r,p);return r} ',line)
     call dcl_uproc(parser,'_set_elem(&a:any^dshape,v,t) {'//&
          ' p,i=node_and_index((#a).dist,(#a)._mshape#_tup(t));'//&
          ' if p==_this_node():PM__setaelem(&a,i,v)}',line)
@@ -2857,7 +2865,7 @@ contains
     call dcl_type(parser,'array_slice(a,s) is struct^{_a:a,_s:s}',line)
     call dcl_uproc(parser,'_arb(x:array_slice)=_arb(x._a)',line)
     call dcl_uproc(parser,'#(x:array_slice)=#(x._s)',line)
-    call dcl_uproc(parser,'#(x:array_slice(any^dshape))=d[d._mshape._extent#x._s] where d=#(x._a)',line)
+    call dcl_uproc(parser,'#(x:array_slice(any^dshape))=_dshape_slice(d,d._mshape._extent#x._s) where d=#(x._a)',line)
     call dcl_uproc(parser,'conform(x:mshape,y:array_slice)='//&
          'map_reduce($_conform,$and,x,y._s)',line)
     call dcl_uproc(parser,'conform(x:dshape,y:array_slice)='//&
@@ -2873,7 +2881,7 @@ contains
     call dcl_uproc(parser,'PM__dup(x:array_slice(any^mshape,))'//&
          '{var a=array(_arb(x),#x);a=x;return a}',line) 
     call dcl_uproc(parser,'PM__dup(x:array_slice(any^dshape,))'//&
-         '{d=#x._a;ss=(#x._a)._mshape#x._s;var a=array(_arb(x._a),d[ss]);'//&
+         '{d=#x._a;ss=(#x._a)._mshape#x._s;var a=array(_arb(x._a),_dshape_slice(d,ss));'//&
          '_set_slice(&^(PM__local(a)),#(#a)._tile,'//&
          ' PM__local(x._a),overlap((#x._a)._tile,ss));'//&
          'return a}',line) 
@@ -2913,7 +2921,7 @@ contains
          'if _copy_array(&xx,x):_sync_messages(xx,x)}',line)
     call dcl_uproc(parser,'_array_assign(&xx:array_slice,x:array_slice,v:''true)'//&
          '{check_conform(extent(#xx),extent(#x));'//&
-         'if _copy_array(&xx,PM__dup(x)):_sync_messages(xx,x)}',line)
+         'if _copy_array(&xx,x):_sync_messages(xx,x)}',line)
     call dcl_uproc(parser,'_array_assign(&xx:varray,x,v:''true) '//&
          '{_assign_element(&xx,x)}',line)
     call dcl_uproc(parser,'_array_assign(&xx:varray,x:array_template,v:''true) '//&
@@ -2964,13 +2972,13 @@ contains
          '   i=index(dims(dist),p);'//&
          '   if i==_this_node() { '//&
          '     forall kk in PM__local(x),j in tile { '//&
-         '       var k=kk;PM__broadcast(&k,i);'//&
+         '       var k=kk;_bcast_shared(&k,i);'//&
          '       _set_elem(&a,k,(#a)[j] <<PM__ignore>>)'//&
          '     }'//&
          '   } else { '//&
          '     forall j in tile { '//&
          '       var k=_arb(a);'//&
-         '       PM__broadcast(&k,i);'//&
+         '       _bcast_shared(&k,i);'//&
          '       _set_elem(&a,k,(#a)[j] <<PM__ignore>>);'//&
          '     }'//&
          '   }'//&
@@ -2986,13 +2994,13 @@ contains
          '   if i==_this_node() {'//&
          '     forall j in utile, jj in elem { '//&
          '       var k=element(PM__local(x._a),j); '//&
-         '       PM__broadcast(&k,i);'//& 
+         '       _bcast_shared(&k,i);'//& 
          '       _set_elem(&v,k,(#v)[jj] <<PM__ignore>>)'//&
          '     }'//&
          '   } else { '//&
          '     forall j in elem {'//&
          '       var k=_arb(x._a);'//&
-         '       PM__broadcast(&k,i);'//&
+         '       _bcast_shared(&k,i);'//&
          '       _set_elem(&v,k,(#v)[j] <<PM__ignore>>)'//&
          '     }'//&
          '   }'//&
@@ -3006,181 +3014,22 @@ contains
     
     call dcl_type(parser,'_comp is contains(array or *any or ^*(,,,,))',line)
     
-    call dcl_uproc(parser,'_copy_array(&xx:any^dshape,x:any^dshape) {'//&
-         'newd=#xx;oldd=#x;'//&
-         'foreach pp in nodes_for_grid(oldd.dist,newd._tile) {'//&
-         '  p=index(dims(oldd.dist),pp);'//&
-         '  if p/=_this_node() {tile=element(oldd.dist,p);'//&
-         '  _recv_slice(p,&xx,overlap(newd._tile,tile))}'//&
-         '};'//&
-         'foreach pp in nodes_for_grid(newd.dist,oldd._tile) {'//&
-         '  p=index(dims(newd.dist),pp);'//&
-         '  if p/=_this_node() {tile=element(newd.dist,p);'//&
-         '  _send_slice(p,x,overlap(oldd._tile,tile))}'//&
-         '};'//&
-         'o,oo=overlap(newd._tile,oldd._tile);'//&
-         '_set_slice(&^(PM__local(^(&xx))),o,PM__local(x),oo);'//&
-         'return ''true}',line)
-    
-!!$    call dcl_uproc(parser,'_copy_array(&xx:array_slice(any^dshape,),'//&
-!!$         'x:array_slice(any^dshape,)) {'//&
-!!$         'newd=#(xx._a);oldd=#(x._a);'//&
-!!$         'xs=(#(x._a))._mshape#x._s;xxs=(#(xx._a))._mshape#xx._s;'//&
-!!$         'oldpart,oldtile=overlap(xs,oldd._tile);'//&
-!!$         'newpart,newtile=overlap(xxs,newd._tile);'//&
-!!$         'foreach pp in nodes_for_grid(oldd.dist,element(xs,newpart)) {'//&
-!!$         '  p=index(dims(oldd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '   tile=element(xxs,overlap(xs,element(oldd.dist,p)));'//&
-!!$         '   _recv_slice(p,&^(PM__local(^(&xx._a))),overlap(newd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'foreach pp in nodes_for_grid(newd.dist,element(xxs,oldpart)) {'//&
-!!$         '  p=index(dims(newd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '  tile=element(xs,overlap(xxs,element(newd.dist,p)));'//&
-!!$         '  _send_slice(p,PM__local(x._a),overlap(oldd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'o,oo=overlap(newpart,oldpart);'//&
-!!$         '_set_slice(&^(PM__local(^(&xx._a))),element(newtile,o),PM__local(x._a),'//&
-!!$         '  element(oldtile,oo));'//&
-!!$         'return ''true}',line)
-!!$
-!!$    call dcl_uproc(parser,'_copy_array(&xx:any^dshape,x:array_slice(any^dshape,)) {'//&
-!!$         'newd=#(xx);oldd=#(x._a);'//&
-!!$         'xs=(#(x._a))._mshape#x._s;'//&
-!!$         'oldpart,oldtile=overlap(xs,oldd._tile);'//&
-!!$         'foreach pp in nodes_for_grid(oldd.dist,element(xs,newd._tile)) {'//&
-!!$         '  p=index(dims(oldd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '   tile=overlap(xs,element(oldd.dist,p));'//&
-!!$         '   _recv_slice(p,&^(PM__local(^(&xx))),overlap(newd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'foreach pp in nodes_for_grid(newd.dist,oldpart) {'//&
-!!$         '  p=index(dims(newd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '  tile=element(xs,element(newd.dist,p));'//&
-!!$         '  _send_slice(p,PM__local(x._a),overlap(oldd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'o,oo=overlap(newd._tile,oldpart);'//&
-!!$         '_set_slice(&^(PM__local(^(&xx))),o,PM__local(x._a),'//&
-!!$         '  element(oldtile,oo));'//&
-!!$         'return ''true}',line)
-!!$
-!!$    call dcl_uproc(parser,'_copy_array(&xx:array_slice(any^dshape,),x:any^dshape) {'//&
-!!$         'newd=#(xx._a);oldd=#x;'//&
-!!$         'xxs=(#(xx._a))._mshape#xx._s;'//&
-!!$         'newpart,newtile=overlap(xxs,newd._tile);'//&
-!!$         'foreach pp in nodes_for_grid(oldd.dist,newpart) {'//&
-!!$         '  p=index(dims(oldd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '   tile=element(xxs,element(oldd.dist,p));'//&
-!!$         '   _recv_slice(p,&^(PM__local(^(&xx._a))),overlap(newd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'foreach pp in nodes_for_grid(newd.dist,element(xxs,oldd._tile)) {'//&
-!!$         '  p=index(dims(newd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '  tile=overlap(xxs,element(newd.dist,p));'//&
-!!$         '  _send_slice(p,PM__local(x),overlap(oldd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'o,oo=overlap(newpart,oldd._tile);'//&
-!!$         '_set_slice(&^(PM__local(^(&xx._a))),element(newtile,o),PM__local(x),'//&
-!!$         '  oo);'//&
-!!$         'return ''true}',line)
-!!$
-!!$    
-    call dcl_uproc(parser,'_copy_array(&xx:_comp^dshape,x:any^dshape) {'//&
-         'newd=#xx;oldd=#x;'//&
-         'foreach pp in nodes_for_grid(newd.dist,oldd._tile) {'//&
-         '  p=index(dims(newd.dist),pp);'//&
-         '  if p/=_this_node() {tile=element(newd.dist,p);'//&
-         '  _send_slice(p,PM__local(x),overlap(oldd._tile,tile))}'//&
-         '};'//&
-         'foreach pp in nodes_for_grid(oldd.dist,newd._tile) {'//&
-         '  p=index(dims(oldd.dist),pp);'//&
-         '  if p/=_this_node() {tile=element(oldd.dist,p);'//&
-         '  _recv_slice_sync(p,&^(PM__local(^(&xx))),overlap(newd._tile,tile))}'//&
-         '};'//&
-         'o,oo=overlap(newd._tile,oldd._tile);'//&
-         '_set_slice(&^(PM__local(^(&xx))),o,PM__local(x),oo);'//&
-         'return ''true}',line)
-!!$
-!!$    call dcl_uproc(parser,'_copy_array(&xx:array_slice(_comp^dshape,),'//&
-!!$         'x:array_slice(any^dshape,)) {'//&
-!!$         'newd=#(xx._a);oldd=#(x._a);'//&
-!!$         'xs=(#(x._a))._mshape#x._s;xxs=(#(xx._a))._mshape#xx._s;'//&
-!!$         'oldpart,oldtile=overlap(xs,oldd._tile);'//&
-!!$         'newpart,newtile=overlap(xxs,newd._tile);'//&
-!!$         'foreach pp in nodes_for_grid(newd.dist,element(xxs,oldpart)) {'//&
-!!$         '  p=index(dims(newd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '  tile=element(xs,overlap(xxs,element(newd.dist,p)));'//&
-!!$         '  _send_slice(p,PM__local(x._a),overlap(oldd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'o,oo=overlap(newpart,oldpart);'//&
-!!$         '_set_slice(&^(PM__local(^(&xx._a))),element(newtile,o),PM__local(x._a),'//&
-!!$         '  element(oldtile,oo));'//&
-!!$         'foreach pp in nodes_for_grid(oldd.dist,element(xs,newpart)) {'//&
-!!$         '  p=index(dims(oldd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '   tile=element(xxs,overlap(xs,element(oldd.dist,p)));'//&
-!!$         '   _recv_slice_sync(p,&xx._a,overlap(newd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'return ''true}',line)
-!!$
-!!$    call dcl_uproc(parser,'_copy_array(&xx:_comp^dshape,x:array_slice(any^dshape,)) {'//&
-!!$         'newd=#xx;oldd=#(x._a);'//&
-!!$         'xs=(#(x._a))._mshape#x._s;'//&
-!!$         'oldpart,oldtile=overlap(xs,oldd._tile);'//&
-!!$         'foreach pp in nodes_for_grid(newd.dist,oldpart) {'//&
-!!$         '  p=index(dims(newd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '  tile=element(xs,element(newd.dist,p));'//&
-!!$         '  _send_slice(p,PM__local(x._a),overlap(oldd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'o,oo=overlap(newd._tile,oldpart);'//&
-!!$         '_set_slice(&^(PM__local(^(&xx))),o,PM__local(x._a),'//&
-!!$         '  element(oldtile,oo));'//&
-!!$         'foreach pp in nodes_for_grid(oldd.dist,element(xs,newd._tile)) {'//&
-!!$         '  p=index(dims(oldd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '   tile=overlap(xs,element(oldd.dist,p));'//&
-!!$         '   _recv_slice_sync(p,&^(PM__local(^(&xx))),overlap(newd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'return ''true}',line)
-!!$
-!!$    call dcl_uproc(parser,'_copy_array(&xx:array_slice(_comp^dshape,),x:any^dshape) {'//&
-!!$         'newd=#(xx._a);oldd=#x;'//&
-!!$         'xxs=(#(xx._a))._mshape#xx._s;'//&
-!!$         'newpart,newtile=overlap(xxs,newd._tile);'//&
-!!$         'foreach pp in nodes_for_grid(newd.dist,element(xxs,oldd._tile)) {'//&
-!!$         '  p=index(dims(newd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '  tile=overlap(xxs,element(newd.dist,p));'//&
-!!$         '  _send_slice(p,PM__local(x),overlap(oldd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'o,oo=overlap(newpart,oldd._tile);'//&
-!!$         '_set_slice(&^(PM__local(^(&xx._a))),element(newtile,o),PM__local(x),'//&
-!!$         '  oo);'//&
-!!$         'foreach pp in nodes_for_grid(oldd.dist,newpart) {'//&
-!!$         '  p=index(dims(oldd.dist),pp);'//&
-!!$         '  if p/=_this_node() {'//&
-!!$         '   tile=element(xxs,element(oldd.dist,p));'//&
-!!$         '   _recv_slice_sync(p,&^(PM__local(^(&xx._a))),overlap(newd._tile,tile))}'//&
-!!$         '};'//&
-!!$         'return ''true}',line)
-
     call dcl_uproc(parser,'_copy_array(&xx:array_slice(any^dshape,),x:array_slice(any^dshape)) {'//&
          '_copy_darray_slice(&^(PM__local(^(&xx._a))),xxd,xxd._mshape#xx._s,'//&
-         '     PM__local(x),xd,xd._mshape#x._s,xd._tile)'//&
+         '     PM__local(x._a),xd,xd._mshape#x._s,xd._tile)'//&
          ' where xxd=#(xx._a),xd=#(x._a);return ''true}',line)
     call dcl_uproc(parser,'_copy_array(&xx:any^dshape,x:array_slice(any^dshape)) {'//&
          '_copy_darray_slice(&^(PM__local(^(&xx))),xxd,zero_base(xxd._mshape._extent),'//&
-         '     PM__local(x),xd,xd._mshape#x._s,xd._tile)'//&
+         '     PM__local(x._a),xd,xd._mshape#x._s,xd._tile)'//&
          ' where xxd=#xx,xd=#(x._a);return ''true}',line)
     call dcl_uproc(parser,'_copy_array(&xx:array_slice(any^dshape,),x:any^dshape) {'//&
          '_copy_darray_slice(&^(PM__local(^(&xx._a))),xxd,xxd._mshape#xx._s,'//&
          '     PM__local(x),xd,zero_base(xd._mshape._extent),xd._tile)'//&
          ' where xxd=#(xx._a),xd=#x;return ''true}',line)
+    call dcl_uproc(parser,'_copy_array(&xx:any^dshape,x:any^dshape) {'//&
+         '_copy_darray_slice(&^(PM__local(^(&xx))),xxd,zero_base(xxd._mshape._extent),'//&
+         '     PM__local(x),xd,zero_base(xd._mshape._extent),xd._tile)'//&
+         ' where xxd=#xx,xd=#x;return ''true}',line)
 
     call dcl_uproc(parser,'_assign_internal_slice(&xx:array_slice(any^mshape),s) {'//&
          'x=xx._a[s];xx=x}',line)
@@ -3188,29 +3037,36 @@ contains
          'xxd=#(xx._a);xxs=xxd._mshape#xx._s;xs=xxd._mshape#s;ltile=intersect(xxd._tile,xs);ls=#ltile;'//&
          'var x=array(_arb(xx),ls);_set_slice(&x,ls,PM__local(xx._a),overlap(xxd._tile,ltile));'//&
          '_copy_darray_slice(&^(PM__local(^(&xx._a))),xxd,xxs,'//&
-         '     &x,xxd,xxd._mshape#s,ltile)}',line)
+         '     x,xxd,xxd._mshape#s,ltile)}',line)
     
     call dcl_uproc(parser,'_copy_darray_slice(&xx,newd,xxs,x,oldd,xs,otile) {'//&
+         '_push_node_dist();'//&
          'oldpart,oldtile=overlap(xs,oldd._tile);'//&
          'newpart,newtile=overlap(xxs,newd._tile);'//&
-         'foreach pp in nodes_for_grid(oldd.dist,element(xs,newpart)) {'//&
+         'if size(newpart)>0:foreach pp in nodes_for_grid(oldd.dist,element(xs,active_dims(xxs,newpart))) {'//&
          '  p=index(dims(oldd.dist),pp);'//&
          '  if p/=_this_node() {'//&
-         '   tile=element(xxs,overlap(xs,element(oldd.dist,p)));'//&
-         '   _recv_slice(p,&xx,overlap(newd._tile,tile))}'//&
+         '   tile=element(xxs,active_dims(xs,overlap(xs,element(oldd.dist,p))));'//&
+         '   ov=overlap(newd._tile,tile);'//&
+         '   if size(ov)>0:_recv_slice(p,&xx,ov)}'//&
          '};'//&
-         'foreach pp in nodes_for_grid(newd.dist,element(xxs,oldpart)) {'//&
+         'if size(oldpart)>0:foreach pp in nodes_for_grid(newd.dist,element(xxs,active_dims(xs,oldpart))) {'//&
          '  p=index(dims(newd.dist),pp);'//&
          '  if p/=_this_node() {'//&
-         '  tile=element(xs,overlap(xxs,element(newd.dist,p)));'//&
-         '  _send_slice(p,x,overlap(otile,tile))}'//&
+         '  tile=element(xs,active_dims(xxs,overlap(xxs,element(newd.dist,p))));'//&
+         '  ov=overlap(otile,tile);if size(ov)>0:_send_slice(p,x,ov)}'//&
          '};'//&
-         'o,oo=overlap(newpart,oldpart);'//&
-         '_set_slice(&xx,element(newtile,o),x,element(oldtile,oo))'//& 
-         '}',line)
+         'if size(newpart)>0 and size(oldpart)>0 {'//&
+         'oo,o=overlap(active_dims(xxs,newpart),active_dims(xs,oldpart));'//&
+         '_set_slice(&xx,element(map($_xp,xxs,newtile),oo),x,element(map($_xp,xs,oldtile),o))'//& 
+         '};PM__pop_node(newd)}',line)
+
+    call dcl_uproc(parser,'_xp(x:single_point,y)=single_point(low(y))',line)
+    call dcl_uproc(parser,'_xp(x,y)=y',line)
+    
 
     call dcl_uproc(parser,'_copy_darray_slice(&xx:_comp^any,newd,xxs,x,oldd,xs,otile) {'//&
-         'oldpart,oldtile=overlap(xs,oldd._tile);'//&
+         '_push_node_dist();oldpart,oldtile=overlap(xs,oldd._tile);'//&
          'newpart,newtile=overlap(xxs,newd._tile);'//&
          'foreach pp in nodes_for_grid(newd.dist,element(xxs,oldpart)) {'//&
          '  p=index(dims(newd.dist),pp);'//&
@@ -3226,8 +3082,8 @@ contains
          '  if p/=_this_node() {'//&
          '   tile=element(xxs,overlap(xs,element(oldd.dist,p)));'//&
          '   _recv_slice_sync(p,&xx,overlap(newd._tile,tile))}'//&
-         '}'//&
-         '}',line)
+         '};'//&
+         'PM__pop_node()}',line)
     
     !*************************************************
     ! REFERENCES (SUBSCRIPTS AND SLICES)
@@ -3308,7 +3164,7 @@ contains
     call dcl_uproc(parser,'PM__valref(x)=x',line)
     call dcl_uproc(parser,'PM__valref(x:^*(,,,,)) {'//&
          ' var v=_v1(x);if _v4(x)==_this_node() { v=_getref(x,null)};'//&
-         ' PM__broadcast(&v,_v4(x));return v }',line)
+         ' _bcast_shared(&v,_v4(x));return v }',line)
     !call dcl_uproc(parser,'PM__getref(x:^!(,,,,))=PM__valref(x)',line)
     
     ! Assign to a reference
@@ -4069,7 +3925,7 @@ contains
          'foreach p in nodes_for_grid(local_region.dist,src_range) {'//&
          ' i=index(dims(shapex.dist),p);'//&
          ' if contains(#(local_region.dist),p) and i/=_this_node()  {'//&
-         '    PM__recv_assn pp,xx,yy,x,y,at{PM__assign(&^(_getlhs(^(&xx),null)),yy,pr)}'//&
+         'PM__recv_assn pp,xx,yy,x,y,at{PM__assign(&^(_getlhs(^(&xx),null)),yy,pr)}'//&
          '}};'//&
          '_sync_messages(x,y)}',line)
 
@@ -4972,7 +4828,7 @@ contains
 
     ! Slice of a tuple of distributions
     call dcl_type(parser,'sliced_distr(t,s) is rec{_t:t,_s:s}',line)
-    call dcl_uproc(parser,'sliced_distr(t:tuple(distr_dim),s:subs)='//&
+    call dcl_uproc(parser,'sliced_distr(t:tuple(distr_dim),s:tuple(seq(int) or single_point(int)))='//&
          'new sliced_distr{_t=t,_s=s}',line)
     call dcl_uproc(parser,'node_for(t:sliced_distr,j:tuple(int))=node_for(t._t,t._s[j])',line)
     call dcl_uproc(parser,'#(t:sliced_distr)=#t._t',line)
@@ -5025,10 +4881,12 @@ contains
          '{_set_elem(&^(PM__local(^(&x))),v,i <<PM__ignore>>)}',line)
 
     call dcl_uproc(parser,'PM__get_elem%(x:shared array_slice(any^dshape),j,h)='//&
-         'element(PM__local(x._a),i) check p==_this_node() '//&
+         '_get_aelem(x._a,i) check p==_this_node() '//&
          '  where p,i=node_and_index((#x._a).dist,(#x._a)._mshape._extent#x._s[h])',line)   !!!!!
-    call dcl_uproc(parser,'PM__set_elem%(&x:invar array_slice(any^dshape),v:complete,j,h) '//&
-         '{_set_elem(&^(PM__local(^(&x._a))),v,i <<PM__ignore>>) check p==_this_node() '//&
+    call dcl_uproc(parser,'PM__set_elem%(&x:invar array_slice(any^dshape),v:complete,j,h){'//&
+         'print(h++x._s[h]++(#x._a)._mshape._extent#x._s[h]++(#x._a)._tile);'//&
+         'print(ii++"<"++size(#x._a)) where pp,ii=node_and_index((#x._a).dist,(#x._a)._mshape._extent#x._s[h]);'//&
+         'PM__setaelem(&x._a,i,v <<PM__ignore>>) check p==_this_node() '//&
          '  where p,i=node_and_index((#x._a).dist,(#x._a)._mshape._extent#x._s[h]) }',line) !!!
     
     call dcl_uproc(parser,'_assemble(&a:any^mshape,region:mshape) {}',line)
@@ -5608,6 +5466,8 @@ contains
 !!$    call dcl_proc(parser,'_bcast_slice_shared(j:any,p:any,&x:any)',&
 !!$         op_broadcast_disp,1,line,proc_is_impure+proc_is_dcomm)
     call dcl_proc(parser,'_bcast_shared(&x:any)',op_broadcast_shared,0,line,proc_is_impure)
+    call dcl_proc(parser,'_bcast_shared(&x:any,p:int)',op_broadcast_shared,0,line,proc_is_impure)
+    
     call dcl_type(parser,'_ct is array_slice,^*(,,,,),any^any,^^(any)',line)
 
     call dcl_uproc(parser,'PM__sync_messages(x)<<inline>>:_sync_messages(x)',line)
