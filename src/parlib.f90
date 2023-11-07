@@ -229,7 +229,7 @@ contains
     integer,intent(in):: root
     integer:: error,newcomm
     integer:: this_comm
-    this_comm=par_frame(par_depth)%this_comm
+    this_comm=par_frame(par_depth)%shared_comm
     call mpi_comm_split(this_comm,root,par_frame(par_depth)%this_node,&
          newcomm,error)
     par_depth=par_depth+1

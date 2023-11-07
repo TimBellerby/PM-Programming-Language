@@ -1340,9 +1340,10 @@ contains
        endif
     case(sym_pm_head_node)
        if(pm_is_compiling) then
-          call wc_call(wcd,callnode,op_head_node,0,2,ve)
+          new_ve=0
+          call wc_call(wcd,callnode,op_head_node,0,2,new_ve)
           pc=comp_start_block(wcd)
-          break2=wcode_cblock(wcd,cnode_arg(args,1),rv,ve)
+          break2=wcode_cblock(wcd,cnode_arg(args,1),rv,new_ve)
           call comp_finish_block(wcd,pc)
        else
           new_ve=alloc_var(wcd,pm_ve_type)
@@ -1793,7 +1794,7 @@ contains
               'Cannot have communicating operations in partition/workshare')
       endif
       if(check_arg_type(wcd,args,rv,2)==pm_null) then
-         call for_body
+         call for_body(ve)
       else
          v=cnode_arg(args,8)
          v=cnode_arg(v,1)
@@ -1810,25 +1811,25 @@ contains
          else
             pc=wc_jump_call(wcd,callnode,op_jmp_noshare,0,1,ve)
          endif
-         call for_body
+         call for_body(merge(0,ve,pm_is_compiling))
          v=cnode_arg(u,2)
          rv%data%i(rv%offset+slot:rv%offset+slot2)=&
               v%data%i(v%offset:v%offset+slot2-slot)
         if(pm_is_compiling) then
            call comp_start_else_block(wcd,pc)
-            if(wcd%num_errors==0) call for_body
+            if(wcd%num_errors==0) call for_body(0)
             call comp_finish_else_block(wcd,pc)
          else
             jmp=wc_jump_call(wcd,callnode,op_jmp,0,1,ve)
             call set_jump_to_here(wcd,pc)
-            if(wcd%num_errors==0) call for_body
+            if(wcd%num_errors==0) call for_body(ve)
             call set_jump_to_here(wcd,jmp)
          endif
       endif
     end subroutine for_statement
     
-    subroutine for_body
-      integer:: j
+    subroutine for_body(ve)
+      integer:: j,ve
       integer:: save_xbase,save_top
       save_xbase=wcd%xbase
       save_top=wcd%top
