@@ -173,12 +173,7 @@ contains
        trace_var_changed=.false.
     endif
     
-    if(trace_opcodes) then
-       call proc_line_module(func,&
-            max(int(pc%offset-func%data%ptr(func%offset)%offset)-4,1),line,modl)
-       write(*,*) sys_node,pc%offset,op_names(opcode),opcode2,'(',n,' args)',&
-            '@',trim(pm_name_as_string(context,modl)),'#',line,trace_var_kind
-    endif
+
    
     oparg=pc%data%i16(pc%offset+3_pm_p)
     arg(1)=stack%data%ptr(stack%offset+oparg)
@@ -207,6 +202,13 @@ contains
        esize=ve%data%ln(ve%offset)
        ve=arg(1)%data%ptr(arg(1)%offset)
        start_arg=2
+    endif
+
+    if(trace_opcodes) then
+       call proc_line_module(func,&
+            max(int(pc%offset-func%data%ptr(func%offset)%offset)-4,1),line,modl)
+       write(*,*) sys_node,pc%offset,op_names(opcode),opcode2,'(',n,' args)',&
+            '@',trim(pm_name_as_string(context,modl)),'#',line,trace_var_kind,.not.ve_is_empty(ve)
     endif
     if(trace_opargs) then
        write(*,*) 've.kind=',arg(1)%data%vkind,&
@@ -573,7 +575,7 @@ contains
        endif
     case(op_push_node_split)
        if(.not.ve_is_empty(ve)) then
-          ! op_push_node_split ve colours
+          ! op_push_node_split ve colour
           call push_node_split(context,&
                int(arg(2)%data%ln(arg(2)%offset)))
        endif
@@ -1316,10 +1318,14 @@ contains
           call set_arg(2,elem_ref_get_struct_elem(context,arg(3),opcode2,esize))
        else
           if(pm_fast_vkind(arg(3))/=pm_usr) then
-             write(*,*) 'Internal error on',sys_node,opcode2
-             goto 999
+             if(.not.ve_is_empty(ve)) then
+                write(*,*) 'Internal error (not struct or rec) on',sys_node,opcode2
+                call pm_dump_tree(context,6,arg(3),2)
+                goto 999
+             endif
+          else
+             call set_arg(2,arg(3)%data%ptr(arg(3)%offset+opcode2))
           endif
-          call set_arg(2,arg(3)%data%ptr(arg(3)%offset+opcode2))
        endif
     case(op_chan_array_vect)
        v=arg(3)%data%ptr(arg(3)%offset+pm_array_vect)

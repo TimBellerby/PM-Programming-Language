@@ -4372,7 +4372,7 @@ contains
     type(pm_reg),pointer:: reg
     reg=>pm_register(context,'make_string',vec,len,off)
     vsize=pm_fast_esize(ve)-1
-    esize=pm_fast_esize(v)
+    esize=max(0,pm_fast_esize(v))
     len=pm_new(context,pm_long,esize+1)
     len%data%ln(len%offset:len%offset+esize)=0
     off=pm_new(context,pm_long,esize+1)

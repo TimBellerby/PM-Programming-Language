@@ -2383,7 +2383,7 @@ contains
 
     call code_val(coder,coder%var(coder%par_base+lv_distr))
     call make_sys_call(coder,coder%loop_cblock,node,sym_pop_node,1,0,&
-         aflags=call_ignore_rules+proc_run_shared+proc_run_always)
+         aflags=call_ignore_rules+merge(0,proc_run_shared+proc_run_always,pm_is_compiling))
     
     ! Close loop cblock
     call close_cblock(coder,coder%loop_cblock)
