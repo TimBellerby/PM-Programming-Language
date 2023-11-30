@@ -759,7 +759,7 @@ contains
        vec=array%data%ptr(array%offset+pm_elemref_vect)
        off=array%data%ptr(array%offset+pm_elemref_offset)
        ix=array%data%ptr(array%offset+pm_elemref_idx)
-       idx=vector_zero_unused(context,index,ve,-1_pm_ln)
+       idx=vector_zero_unused(context,index,ve,-987654321_pm_ln)
        esize=pm_fast_esize(idx)
        newvec=pm_new(context,pm_pointer,esize+1)
        newoff=pm_new(context,pm_long,esize+1)
@@ -772,7 +772,8 @@ contains
           newoff%data%ln(newoff%offset+i)=v%data%ln(v%offset+j)
           v=w%data%ptr(w%offset+pm_array_length)
           if(v%data%ln(v%offset+j)<=idx%data%ln(idx%offset+i).or.&
-               idx%data%ln(idx%offset+i)<0) then
+               idx%data%ln(idx%offset+i)<0.and.&
+               idx%data%ln(idx%offset+i)/=-987654321_pm_ln) then
              errno=vector_index_error
              return
           endif

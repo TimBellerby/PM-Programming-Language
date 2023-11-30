@@ -48,12 +48,13 @@ module pm_vmdefs
   integer,parameter:: op_reduce=9
   integer,parameter:: op_jmp_nopar=10
   integer,parameter:: op_jmp_noshare=11
-  integer,parameter:: op_skip_empty=12
-  integer,parameter:: op_skip_empty_local=13
-  integer,parameter:: op_head_node=14
-  integer,parameter:: op_skip_comms=15
+  integer,parameter:: op_skip_any=12
+  integer,parameter:: op_skip_empty=13
+  integer,parameter:: op_skip_empty_local=14
+  integer,parameter:: op_head_node=15
+  integer,parameter:: op_skip_comms=16
 
-  integer,parameter:: last_jmp_op=15
+  integer,parameter:: last_jmp_op=16
 
   integer,parameter:: index_op = last_jmp_op
   integer,parameter:: op_struct = index_op +1
@@ -738,6 +739,7 @@ contains
     op_names(op_par_loop_end)='op_par_loop_end'
     op_names(op_par_find_end)='op_par_find_end'
     op_names(op_skip_empty)='op_skip_empty'
+    op_names(op_skip_any)='op_skip_any'
     op_names(op_skip_empty_local)='op_skip_empty_local'
     op_names(op_check)='op_check'
     op_names(op_dump)='op_dump'
