@@ -1866,6 +1866,7 @@ contains
 
     subroutine any_statement
       logical:: any_break
+      integer:: jmp
       v=cnode_arg(args,4)
       v=cnode_arg(v,1)
       slot=v%data%i(v%offset)
@@ -1894,8 +1895,11 @@ contains
          if(pm_is_compiling) then
             call comp_assign_slots(wcd,callnode,var_slot(wcd,cnode_arg(args,1)),slot3,&
                  .true.,rv,new_ve)
+         else
+            jmp=wc_jump_call(wcd,callnode,op_skip_any,0,1,new_ve)
          endif
          any_break=any_break.or.wcode_cblock(wcd,cnode_arg(args,2),rv,new_ve)
+         if(.not.pm_is_compiling) call set_jump_to_here(wcd,jmp)
       enddo
       call release_var(wcd,new_ve)
     end subroutine any_statement
@@ -5019,7 +5023,7 @@ contains
           v2=merge(v_is_shared_dref,v_is_dref,&
                pm_typ_get_mode(wcd%context,pm_tv_arg(tv,3))>=sym_mirrored)
           wcd%vinfo(n+3)=dptr(pm_tv_arg(tv,1),nflags) !ptr(cvar_alloc(wcd,pm_tv_arg(tv,1),nflags))
-          wcd%vinfo(n+4)=dptr(pm_tv_arg(tv,2),ior(nflags,v_is_ref))
+          wcd%vinfo(n+4)=dptr(pm_tv_arg(tv,2),ior(nflags,iand(flags,v_is_ref)))
           !ptr(cvar_alloc(wcd,pm_tv_arg(tv,2),ior(nflags,v_is_ref)))
           wcd%vinfo(n+5)=dptr(pm_tv_arg(tv,3),nflags) !ptr(cvar_alloc(wcd,pm_tv_arg(tv,3),nflags))
           wcd%vinfo(n+6)=dptr(pm_tv_arg(tv,4),nflags) !ptr(cvar_alloc(wcd,pm_tv_arg(tv,4),nflags))

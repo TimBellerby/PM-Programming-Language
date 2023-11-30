@@ -1587,6 +1587,7 @@ contains
     endif
     tno=pm_fast_typeof(v)
     esize=pm_fast_esize(v)
+    iserr=.false.
     if(debug_mess) then
        write(*,*) 'on',par_frame(par_depth)%this_node,'irecv',tno,'to',node,'top',message_top
     endif
@@ -2555,13 +2556,25 @@ contains
     n=(end-start)/step+1
     if(width>1.and.(align>0.or.start+(n-1)*step+width>end)) then
        ! Partial block at start or end complicates things...
-       types(1)=mpi_contig_type(tno, max(0_pm_ln,width-align),blk(1))
-       types(2)=mpi_strided_block_type(tno,max(0_pm_ln,n-2),step,width,blk(2))
-       types(3)=mpi_contig_type(tno, min(width,end-(start-align+(n-1)*step)),blk(3))
-       displ(1)=start*siz
-       displ(2)=(start-align+step)*siz
-       displ(3)=(start-align+(n-1)*step)*siz
-       call mpi_type_create_struct(3,blk,displ,types,tno2,errno)
+       if(n>2) then
+          types(1)=mpi_contig_type(tno, max(0_pm_ln,width-align),blk(1))
+          types(2)=mpi_strided_block_type(tno,max(0_pm_ln,n-2),step,width,blk(2))
+          types(3)=mpi_contig_type(tno, min(width,end-(start-align+(n-1)*step)+1),blk(3))
+          displ(1)=start*siz
+          displ(2)=(start-align+step)*siz
+          displ(3)=(start-align+(n-1)*step)*siz
+          call mpi_type_create_struct(3,blk,displ,types,tno2,errno)
+       elseif(n==2) then
+          types(1)=mpi_contig_type(tno, max(0_pm_ln,width-align),blk(1))
+          types(2)=mpi_contig_type(tno, min(width,end-(start-align+step)+1),blk(2))
+          displ(1)=start*siz
+          displ(2)=(start-align+step)*siz
+          call mpi_type_create_struct(2,blk,displ,types,tno2,errno)
+       else
+          types(1)=mpi_contig_type(tno,min(end+1,start-align+width)-start,blk(1))
+          displ(1)=start*siz
+          call mpi_type_create_struct(1,blk,displ,types,tno2,errno)
+       endif
     else
        tno3=mpi_strided_block_type(tno,n,step,width,m)
        displ(1)=start*siz

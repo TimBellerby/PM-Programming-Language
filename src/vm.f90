@@ -1477,6 +1477,8 @@ contains
        call set_arg(3,new2)
        ve=make_new_ve(newve,arg(1))
        call set_arg(2,ve)
+    case(op_skip_any)
+       if(ve_is_empty(ve)) pc%offset=pc%offset+opcode2-pm_jump_offset
     case(op_as)
        errno=0
        new2=copy_vector(context,arg(4),ve,0_pm_ln,esize+1)
