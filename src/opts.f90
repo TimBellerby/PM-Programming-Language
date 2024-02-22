@@ -37,6 +37,8 @@ module pm_options
      logical:: show_elems
      logical:: show_members
      logical:: see_all_procs
+     logical:: out_debug_files
+     logical:: old_files
      integer:: proc_list
      logical:: show_variants
      logical:: check_alias
@@ -90,6 +92,8 @@ contains
     pm_opts%out_typelist=.false.
     pm_opts%print_timings=.false.
     pm_opts%hide_sysmod=.true.
+    pm_opts%out_debug_files=.false.
+    pm_opts%old_files=.false.
 
     pm_opts%schedule=.false.
     
@@ -207,13 +211,11 @@ contains
     call pm_stop('  ')
   end subroutine help
   
-  subroutine pm_get_command_line(context,mname,out_debug_files)
+  subroutine pm_get_command_line(context,mname)
     type(pm_context),pointer:: context
     character(len=*),intent(out):: mname
-    logical,intent(out):: out_debug_files
     character(len=pm_max_filename_size):: arg
     integer:: i,n
-    out_debug_files=.false.
     call init_opts(context)
     n=pm_get_cl_count()
     i=1
@@ -232,14 +234,14 @@ contains
           pm_opts%colour=.true.
        elseif(arg(1:2)=='-D') then
           if(arg=='-D') then
-             out_debug_files=.true.
+             pm_opts%out_debug_files=.true.
              pm_opts%out_sysmod=.true.
              pm_opts%out_typelist=.true.
              pm_opts%print_timings=.true.
              pm_opts%hide_sysmod=.false.
              pm_opts%show_all_ref=.true.
           elseif(arg=='-Dfiles') then
-             out_debug_files=.true.
+             pm_opts%out_debug_files=.true.
           elseif(arg=='-Dsys-mod') then
              pm_opts%out_sysmod=.true.
           elseif(arg=='-Dtype-list') then
@@ -248,6 +250,8 @@ contains
              pm_opts%print_timings=.true.
           elseif(arg=='-Dshow-sys-mod') then
              pm_opts%hide_sysmod=.false.
+          elseif(arg=='-Dold-files') then
+             pm_opts%old_files=.true.
           elseif(pm_main_process) then
              write(*,*) 'Not a valid compiler debugging (-D) option:',trim(arg)
              call usage()

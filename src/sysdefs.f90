@@ -4003,7 +4003,7 @@ contains
 
     call dcl_type(parser,'_nhd is rec{_nbhd,_tile,_tilesz,_interior,_limits}',line)
     call dcl_type(parser,'nbhd(t) is struct^{_array:farray(t),_nbhd,_index,_here}',line)
-    call dcl_uproc(parser,'PM__nhd%(x:invar envelope or extent,bound:invar)<<shared>>='//&
+    call dcl_uproc(parser,'PM__nhd%(x:invar envelope or extent,bound:invar)<<shared,always>>='//&
          'new _nhd {_nbhd=x,_tile=t,_tilesz=#t,_interior=overlap(t,region._tile),'//&
          '_limits=_expand_limits(region._extent,envelope(x),bound)} '//&
          'where t=_get_halo(region,region._tile,envelope(x))',line)
@@ -4046,7 +4046,7 @@ contains
     call dcl_uproc(parser,'PM__nhd_join(x)=x._array',line)
     call dcl_uproc(parser,'PM__nhd_join(x,y)=new _join{head=x,tail=y._array}',line)
     call dcl_uproc(parser,'PM__nhd_var%(x,n:_nhd,i,h)<<inline>>='//&
-         'new nbhd{_array=_make_nhd(^(x,shared),n._tilesz <<shared>>),_nbhd=n,_index=i,_here=h}',line)
+         'new nbhd{_array=_make_nhd(^(x,shared),n._tilesz <<shared,always>>),_nbhd=n,_index=i,_here=h}',line)
     call dcl_uproc(parser,'PM__nhd_active(region,nbhd,bound:null)=region._extent',line)
     call dcl_uproc(parser,&
          'PM__nhd_active(region,nbhd,bound:tuple)=map($_nhd_active,region._extent,nbhd,bound)',line)
@@ -4144,7 +4144,7 @@ contains
     call dcl_uproc(parser,'_foot(d,n:envelope)=if(_crss(d)=>n.cross,n.corner)',line)
     call dcl_uproc(parser,'_foot(d,n:extent)=n',line)
 
-    call dcl_uproc(parser,'PM__recv_nhd%(&a:invar,nbhd:invar,b:invar) <<shared>> {'//&
+    call dcl_uproc(parser,'PM__recv_nhd%(&a:invar,nbhd:invar,b:invar) <<shared,always>> {'//&
          'PM__head_node{_apply_boundaries(&a,region,envelope(nbhd._nbhd),nbhd._tile,extent(region),'//&
          '   envelope(nbhd._nbhd),b,rank(extent(region)),''true)}}',line)
     

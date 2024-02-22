@@ -1189,7 +1189,7 @@ contains
     wbase=coder%wtop
     invar=sym==sym_foreach_invar
     c_invar=pm_is_compiling.and.invar
-    rflags=merge(proc_run_shared,0,c_invar)
+    rflags=merge(proc_run_shared+proc_run_always,0,c_invar)
 
     if(debug_codegen) write(*,*) 'TRAVEACH>'
 
@@ -1347,7 +1347,7 @@ contains
 
     if(invar.and.pm_is_compiling) then
        save_run_flags=coder%run_flags
-       coder%run_flags=proc_run_shared
+       coder%run_flags=proc_run_shared+proc_run_always
     endif
     
     iter=coder%top
@@ -1398,7 +1398,7 @@ contains
     
     if(invar.and.pm_is_compiling) then
        save_run_flags=coder%run_flags
-       coder%run_flags=proc_run_shared
+       coder%run_flags=proc_run_shared+proc_run_always
     endif
     
     dvar=coder%var(iter)
@@ -1573,7 +1573,7 @@ contains
        call make_temp_var(coder,cblock,node)
        call swap_and_dup_code(coder)
        call make_sys_call(coder,cblock,node,sym_envelope,1,1,&
-            aflags=merge(proc_run_shared+call_inline_when_compiling,&
+            aflags=merge(proc_run_shared+proc_run_always+call_inline_when_compiling,&
             0,pm_is_compiling))
     else 
        do i=1,nlist/3
@@ -1581,7 +1581,7 @@ contains
           call swap_and_dup_code(coder)
           call dup_expr(coder,coder%vstack(nhd_base+i))
           call make_sys_call(coder,cblock,node,sym_envelope,2,1,&
-            aflags=merge(proc_run_shared+call_inline_when_compiling,&
+            aflags=merge(proc_run_shared+proc_run_always+call_inline_when_compiling,&
             0,pm_is_compiling))
        enddo
     endif
@@ -1593,7 +1593,7 @@ contains
     call code_val(coder,coder%var(coder%par_base+lv_dom))
     call code_val(coder,coder%var(env_base))
     call code_val(coder,coder%var(bounds_base))
-    call make_sys_call(coder,cblock,node,sym_nhd_active,3,1,aflags=proc_run_shared)
+    call make_sys_call(coder,cblock,node,sym_nhd_active,3,1,aflags=proc_run_shared+proc_run_always)
     
     ! Traverse expressions
     expr_base=coder%vtop
@@ -1649,14 +1649,14 @@ contains
        call dup_code(coder)
        call code_val(coder,coder%var(k+nvar_base))
        call make_sys_call(coder,cblock,node,sym_nhd_join,1,1,&
-            aflags=proc_run_shared+call_ignore_rules+call_inline_when_compiling)
+            aflags=proc_run_shared+proc_run_always+call_ignore_rules+call_inline_when_compiling)
        k=k+1
        do j=3,node_numargs(namelist),2
           call make_temp_var(coder,cblock,node)
           call swap_and_dup_code(coder)
           call code_val(coder,coder%var(k+nvar_base))
           call make_sys_call(coder,cblock,node,sym_nhd_join,2,1,&
-               aflags=proc_run_shared+call_ignore_rules+call_inline_when_compiling)
+               aflags=proc_run_shared+proc_run_always+call_ignore_rules+call_inline_when_compiling)
           k=k+1
        enddo
     enddo
@@ -1693,7 +1693,7 @@ contains
     call dup_code(coder)
     call code_val(coder,coder%var(coder%par_base+lv_tile))
     call code_val(coder,coder%var(env_base))
-    call make_sys_call(coder,cblock,node,sym_chunks,2,1,aflags=proc_run_shared)
+    call make_sys_call(coder,cblock,node,sym_chunks,2,1,aflags=proc_run_shared+proc_run_always)
     call define_sys_var(coder,cblock,node,sym_for,var_is_shadowed)
     iter=call_start(coder,cblock,list,.true.)
 
@@ -1709,7 +1709,7 @@ contains
     call code_val(coder,coder%var(env_base))
     call code_val(coder,coder%var(iter+lv_idx))
     call code_val(coder,coder%var(env_base+1))
-    call make_sys_call(coder,cblock,node,sym_get_chunk,4,1,aflags=proc_run_shared)
+    call make_sys_call(coder,cblock,node,sym_get_chunk,4,1,aflags=proc_run_shared+proc_run_always)
     call code_val(coder,coder%var(block_base))
     call make_comm_sys_call(coder,cblock,node_arg(node,5),sym_pm_over,2,1)
     call make_do_over(coder,cblock,node,node,node_arg(node,5),over_base)
@@ -1850,7 +1850,7 @@ contains
           call code_val(coder,coder%vstack(lbase+i))
           if(pm_is_compiling) then
              call make_sys_call(coder,cblock_main,list,sym_make_dollar,1,1,&
-                  aflags=call_ignore_rules+proc_run_shared)
+                  aflags=call_ignore_rules+proc_run_shared+proc_run_always)
           else
              call make_basic_sys_call(coder,cblock_main,list,sym_make_dollar,1,1,&
                   coder%par_depth-1,call_ignore_rules)
@@ -2074,7 +2074,7 @@ contains
           call code_val(coder,coder%vstack(lbase+i))
           if(pm_is_compiling) then
              call make_sys_call(coder,cblock_main,list,sym_make_dollar,1,1,&
-                  aflags=call_ignore_rules+proc_run_shared)
+                  aflags=call_ignore_rules+proc_run_shared+proc_run_always)
           else
              call make_basic_sys_call(coder,cblock_main,list,sym_make_dollar,1,1,&
                   coder%par_depth-1,call_ignore_rules)
@@ -2207,7 +2207,7 @@ contains
        call code_val(coder,coder%var(base))
        call code_val(coder,coder%var(coder%par_base+lv_distr))
        call make_basic_sys_call(coder,cblock2,node,sym_do_over,2,1,&
-            coder%par_depth-1,call_inline_when_compiling+proc_run_shared)
+            coder%par_depth-1,call_inline_when_compiling+proc_run_shared+proc_run_always)
        call make_basic_sys_call(coder,cblock2,node,sym_nested_loop,1,0,&
             coder%par_depth-1,call_inline_when_compiling)
        call close_cblock(coder,cblock2)
@@ -2326,7 +2326,7 @@ contains
        if(pm_is_compiling) then
           call make_sys_call(coder,cblock_main,stmt,&
                sym_generate,3,1,&
-               call_inline_when_compiling+proc_run_shared+call_ignore_rules)
+               call_inline_when_compiling+proc_run_shared+call_ignore_rules+proc_run_always)
           call make_basic_sys_call(coder,cblock_main,stmt,&
                sym_generate,1,1,coder%par_depth-1,0)
        else
@@ -8897,7 +8897,7 @@ contains
     integer,intent(in):: n
     integer(pm_p):: m
     if(.not.pm_fast_vkind(ptr)==pm_pointer) then
-       write(*,*) 'Kind=',ptr%data%vkind
+       write(*,*) 'vKind=',ptr%data%vkind
        call pm_panic('cnode not ptr')
     endif
     if(ptr%data%ptr(ptr%offset)%offset/=cnode_magic_no) then
@@ -9345,6 +9345,409 @@ contains
     include 'fisname.inc'
   end subroutine  qdump_code_tree
 
+  subroutine print_all_sigs(context,iunit,sig_cache,proc_cache)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit
+    type(pm_ptr),intent(in):: sig_cache,proc_cache
+    integer:: i
+
+    do i=1,pm_dict_size(context,proc_cache)
+       call print_sig(context,iunit,sig_cache,proc_cache,i)
+    enddo
+    
+  end subroutine print_all_sigs
+    
+  subroutine print_sig(context,iunit,sig_cache,proc_cache,n)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit,n
+    type(pm_ptr),intent(in):: sig_cache,proc_cache
+    integer:: kind,i
+    type(pm_ptr):: cnode,key
+    key=pm_dict_key(context,proc_cache,int(n,pm_ln))
+    cnode=pm_dict_val(context,proc_cache,int(n,pm_ln))
+    if(pm_fast_vkind(cnode)==pm_pointer) then
+       kind=cnode_get_kind(cnode)
+       !write(*,*) 'KinD=',kind
+       select case(kind)
+       case(cnode_is_resolved_proc)
+          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//&
+               trim(pm_name_as_string(context,&
+               cnode_get_name(cnode_arg(cnode,1),pr_name)))//' {'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_is_recursive)) &
+               write(iunit,'(a)') '  [recursive]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_unfinished)) &
+               write(iunit,'(a)') '  [unfinished]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_is_impure)) &
+               write(iunit,'(a)') '  [impure]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_is_not_inlinable)) &
+               write(iunit,'(a)') '  [not inlinable]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_has_for)) &
+               write(iunit,'(a)') '  [has for]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_is_not_pure_each)) &
+               write(iunit,'(a)') '  [not pure each]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_has_vkeys)) &
+               write(iunit,'(a)') '  [has vkeys]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_is_dcomm)) &
+               write(iunit,'(a)') '  [dcomm]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_is_variant)) &
+               write(iunit,'(a)') '  [variant]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_needs_par)) &
+               write(iunit,'(a)') '  [needs par]'
+          call print_proc_cnode(context,iunit,cnode_arg(cnode,2),&
+               sig_cache,cnode_arg(cnode,1))
+          write(iunit,'(a)') '}'
+       case(cnode_is_arglist)
+          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'{'
+          if(cnode_flags_set(cnode,cnode_args+1,proc_is_var)) then
+             do i=5,cnode_numargs(cnode),2
+                write(iunit,'(a)') trim(pm_name_as_string(context,&
+                     cnode_get_name(cnode,cnode_args+i-1)))//' --> ['//&
+                     trim(pm_int_as_string(cnode_get_num(cnode,cnode_args+i)))//']'
+             enddo
+          else
+             do i=3,cnode_numargs(cnode),2
+                write(iunit,'(a)') '  '//&
+                     trim(pm_name_as_string(context,&
+                     key%data%i(key%offset+pm_fast_esize(key))))//&
+                     trim(pm_typ_as_string(context,&
+                     cnode_num_arg(cnode,i)))//' {'
+                call print_proc_cnode(context,iunit,pm_null_obj,&
+                     sig_cache,cnode_arg(cnode,i+1))
+                write(iunit,'(a)') '  }'
+             enddo
+          endif
+          write(iunit,'(a)') '}'
+       case(cnode_is_any_sig)
+          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'Any{'
+          do i=1,cnode_numargs(cnode)
+             call pm_dump_tree(context,iunit,cnode_arg(cnode,i),2)
+          enddo
+          write(iunit,'(a)') '}'
+       case(cnode_is_autoconv_sig)
+          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'Auto {'
+          do i=1,cnode_numargs(cnode)
+             call pm_dump_tree(context,iunit,cnode_arg(cnode,i),2)
+          enddo
+          write(iunit,'(a)') '}'
+       end select
+    else
+       call pm_dump_tree(context,iunit,cnode,1)
+    endif
+  contains
+    include 'fesize.inc'
+    include 'fvkind.inc'
+  end subroutine print_sig
+
+  subroutine print_proc_cnode(context,iunit,rvec,sig_cache,cnode)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit
+    type(pm_ptr),intent(in):: rvec,sig_cache,cnode
+    integer:: flags
+    if(cnode_get_kind(cnode)==cnode_is_builtin) then
+       write(iunit,'(a)') '   Builtin '//&
+            op_names(cnode_get_num(cnode,cnode_args))//&
+            pm_int_as_string(cnode_get_num(cnode,cnode_args+1))//'{'
+       if(.not.pm_fast_isnull(cnode_get(cnode,bi_rcode))) then
+          call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_get(cnode,bi_rcode),4)
+       endif
+       write(iunit,'(a)') '   }'
+    else
+       write(iunit,'(A,i2,A,i2,A,i2,A,i3,A)') &
+            '   [nargs=',&
+            cnode_get_num(cnode,pr_nargs),',nkeys=',&
+            cnode_get_num(cnode,pr_nkeys),',nret=',cnode_get_num(cnode,pr_nret),&
+            ',ncalls=',cnode_get_num(cnode,pr_ncalls),']'
+       if(cnode_flags_set(cnode,pr_flags,proc_is_comm)) &
+            write(iunit,'(a)') '   [loop]'
+       if(cnode_flags_set(cnode,pr_flags,proc_is_each_proc)) &
+            write(iunit,'(a)') '   [each]'
+       if(cnode_flags_set(cnode,pr_flags,proc_is_dup_each)) &
+            write(iunit,'(a)') '   [dup-each]'
+       if(cnode_flags_set(cnode,pr_flags,proc_is_thru_each)) &
+            write(iunit,'(a)') '   [thru-each]'
+       if(cnode_flags_set(cnode,pr_flags,proc_is_empty_each)) &
+            write(iunit,'(a)') '   [empty-each]'
+       flags=cnode_get_kind(cnode)
+       !write(*,*) 'Kind=',flags
+       call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_arg(cnode,1),4)
+    endif
+  contains
+    include 'fisnull.inc'
+  end subroutine print_proc_cnode
+  
+  subroutine print_cblock_cnode(context,iunit,rvec,sig_cache,cnode,depth)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit,depth
+    type(pm_ptr),intent(in):: rvec,sig_cache,cnode
+    type(pm_ptr)::p
+    p=cnode_get(cnode,cblock_first_call)
+    do while(.not.pm_fast_isnull(p))
+       call print_call_cnode(context,iunit,rvec,sig_cache,p,depth)
+       p=cnode_get(p,call_link)
+    enddo
+  contains
+    include 'fisnull.inc'
+  end subroutine print_cblock_cnode
+  
+  subroutine print_call_cnode(context,iunit,rvec,sig_cache,cnode,depth)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit,depth
+    type(pm_ptr),intent(in):: rvec,sig_cache,cnode
+    integer:: signo,name,i,j,k,nret,nargs,modl,line
+    type(pm_ptr):: p,args,amps
+    character(len=120):: str,location
+    signo=cnode_get_num(cnode,call_sig)
+    if(signo<0) then
+       str=repeat(' ',depth)//pm_name_as_string(context,-signo)
+       i=len_trim(str)+1
+       if(.not.pm_fast_isnull(rvec)) then
+          k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
+          if(k>=0) then
+             call append_to_line(iunit,str,i,&
+                  '['//trim(pm_int_as_string(k))//'] ',.false.,depth)
+          endif
+       endif
+    else
+       p=pm_dict_key(context,sig_cache,&
+            int(signo,pm_ln))
+       name=p%data%i(p%offset+pm_fast_esize(p))
+       if(.not.pm_fast_isnull(cnode_get(cnode,call_var))) then
+          str=repeat(' ',depth)//'call *('
+          i=depth+7
+          call print_value_cnode(context,iunit,rvec,sig_cache,&
+               cnode_get(cnode,call_var),depth,str,i)
+          call append_to_line(iunit,str,i,') ',.false.,depth)
+       elseif(pm_fast_isnull(rvec)) then
+          str=repeat(' ',depth)//'call '//pm_name_as_string(context,name)
+       else
+          k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
+          if(k==spsig_thru) then
+             str=repeat(' ',depth)//'call [thru]'//&
+                  pm_name_as_string(context,name)
+          elseif(k==spsig_dup) then
+             str=repeat(' ',depth)//'call [dup]'//&
+                  pm_name_as_string(context,name)
+          elseif(k==spsig_noop) then
+             str=repeat(' ',depth)//'call [noop]'//&
+                  pm_name_as_string(context,name)
+          elseif(k<0) then
+            str=repeat(' ',depth)//'call [??]'//&
+                  pm_name_as_string(context,name)
+          else
+             str=repeat(' ',depth)//'call '//'['//trim(pm_int_as_string(k))//']'&
+                  //pm_name_as_string(context,name)
+          endif
+       endif
+       i=len_trim(str)
+       call append_proc_call_flags(iunit,str,i,cnode_get_num(cnode,call_flags),.false.,depth)
+       i=i+1
+    end if
+
+    args=cnode_get(cnode,call_args)
+    nargs=cnode_numargs(args)
+    nret=cnode_get_num(cnode,call_nret)
+    amps=cnode_get(cnode,call_amp)
+    amps=pm_name_val(context,int(amps%offset))
+    
+    if(nret>0) then
+       do j=1,nret
+          call print_value_cnode(context,iunit,rvec,sig_cache,cnode_arg(args,j),depth,str,i)
+          i=i+1
+       enddo
+       call append_to_line(iunit,str,i,'<- ',.false.,depth)
+    endif
+    k=0
+    do j=nret+1,nargs
+       if(.not.pm_fast_isnull(amps)) then
+          if(amps%data%i(amps%offset+k)==i-nret) then
+             call append_to_line(iunit,str,i,'&',.false.,depth)
+             k=min(k+1,pm_fast_esize(amps))
+          endif
+       endif
+       call print_value_cnode(context,iunit,rvec,sig_cache,cnode_arg(args,j),depth,str,i)
+       i=i+1
+    enddo
+    modl=cnode_get_num(cnode,cnode_modl_name)
+    line=cnode_get_num(cnode,cnode_lineno)
+    location=trim(pm_name_as_string(context,modl))//':'//pm_int_as_string(line)
+    str(len(str)-len_trim(location)+1:)=location
+    write(iunit,'(a)') str
+
+  contains
+    include 'fesize.inc'
+    include 'fisnull.inc'
+  end subroutine print_call_cnode
+
+  subroutine print_value_cnode(context,iunit,rvec,sig_cache,cnode,depth,str,i)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit,depth
+    type(pm_ptr),intent(in):: rvec,sig_cache,cnode
+    character(len=*),intent(inout):: str
+    integer,intent(inout):: i
+    integer:: kind,name,tno
+    kind=pm_fast_vkind(cnode)
+    if(kind==pm_tiny_int) then
+       call append_to_line(iunit,str,i,&
+            trim(pm_int_as_string(int(cnode%offset))),.false.,depth)
+    elseif(kind==pm_null) then
+       call append_to_line(iunit,str,i,&
+            'NULL',.false.,depth)
+    elseif(kind==pm_name) then
+       call append_to_line(iunit,str,i,&
+            "'"//trim(pm_name_as_string(context,int(cnode%offset))),.false.,depth)
+    elseif(kind==pm_type) then
+       call append_to_line(iunit,str,i,&
+            '<'//trim(pm_typ_as_string(context,int(cnode%offset)))//'>',.false.,depth)
+    else
+       kind=cnode_get_kind(cnode)
+       select case(kind)
+       case(cnode_is_var)
+          name=cnode_get_num(cnode,var_name)
+          if(name==0) then
+             call append_to_line(iunit,str,i,'#'//&
+                  trim(pm_int_as_string(cnode_get_num(cnode,var_index))),.false.,depth)
+          else
+             call append_quoted_to_line(iunit,str,i,&
+                  trim(pm_name_as_string(context,name)),.false.,depth)
+          endif
+          if(.not.pm_fast_isnull(rvec)) then
+             tno=rvec%data%i(rvec%offset+cnode_get_num(cnode,var_index))
+             call append_to_line(iunit,str,i,&
+                  '['//trim(pm_typ_as_string(context,tno))//']',.false.,depth)
+          endif
+       case(cnode_is_const)
+          call append_to_line(iunit,str,i,&
+               trim(pm_value_as_string(context,cnode_arg(cnode,1))),.false.,depth)
+       case(cnode_is_cblock)
+          call append_to_line(iunit,str,i,'{',.true.,depth)
+          call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode,min(50,depth+2))
+          str=' '
+          str(depth+1:depth+1)='}'
+          i=depth+1
+       end select
+    endif
+  contains
+    include 'fvkind.inc'
+    include 'fisnull.inc'
+  end subroutine print_value_cnode
+
+  subroutine append_proc_call_flags(iunit,str,i,flags,proc_flags,depth)
+    integer,intent(in):: iunit
+    character(len=*),intent(inout):: str
+    integer,intent(inout):: i
+    integer,intent(in):: flags
+    logical,intent(in):: proc_flags
+    integer,intent(in):: depth
+    if(iand(flags,call_is_comm)/=0) then
+       call append_to_line(iunit,str,i,'%',.false.,depth)
+    endif
+    if(flags/=iand(flags,call_is_comm)) then
+       call append_to_line(iunit,str,i,'<',.false.,depth)
+       if(iand(flags,proc_run_complete)/=0) then
+          call append_to_line(iunit,str,i,'C',.false.,depth)
+       endif
+       if(iand(flags,proc_run_local)/=0) then
+          call append_to_line(iunit,str,i,'L',.false.,depth)
+       endif
+       if(iand(flags,proc_run_shared)/=0) then
+          call append_to_line(iunit,str,i,'S',.false.,depth)
+       endif
+       if(iand(flags,proc_run_always)/=0) then
+          call append_to_line(iunit,str,i,'A',.false.,depth)
+       endif
+       if(iand(flags,proc_inline)/=0) then
+          call append_to_line(iunit,str,i,'I',.false.,depth)
+       endif
+       if(iand(flags,proc_no_inline)/=0) then
+          call append_to_line(iunit,str,i,'N',.false.,depth)
+       endif
+       if(proc_flags) then
+          if(iand(flags,proc_is_open)/=0) then
+             call append_to_line(iunit,str,i,'o',.false.,depth)
+          endif
+          if(iand(flags,proc_is_each_proc)/=0) then
+             call append_to_line(iunit,str,i,'e',.false.,depth)
+          endif
+          if(iand(flags,proc_is_cond)/=0) then
+             call append_to_line(iunit,str,i,'c',.false.,depth)
+          endif
+          if(iand(flags,proc_is_uncond)/=0) then
+             call append_to_line(iunit,str,i,'u',.false.,depth)
+          endif
+          if(iand(flags,proc_is_abstract)/=0) then
+             call append_to_line(iunit,str,i,'a',.false.,depth)
+          endif
+       else
+          if(iand(flags,call_is_fixed)/=0) then
+             call append_to_line(iunit,str,i,'f',.false.,depth)
+          endif
+          if(iand(flags,call_is_assign_call)/=0) then
+             call append_to_line(iunit,str,i,'a',.false.,depth)
+          endif
+          if(iand(flags,call_is_vararg)/=0) then
+             call append_to_line(iunit,str,i,'v',.false.,depth)
+          endif
+          if(iand(flags,call_inline_when_compiling)/=0) then
+             call append_to_line(iunit,str,i,'i',.false.,depth)
+          endif
+          if(iand(flags,call_dup_result)/=0) then
+             call append_to_line(iunit,str,i,'d',.false.,depth)
+          endif
+          if(iand(flags,call_is_cond)/=0) then
+             call append_to_line(iunit,str,i,'c',.false.,depth)
+          endif
+          if(iand(flags,call_is_no_touch)/=0) then
+             call append_to_line(iunit,str,i,'n',.false.,depth)
+          endif
+          if(iand(flags,call_is_unlabelled)/=0) then
+             call append_to_line(iunit,str,i,'u',.false.,depth)
+          endif
+       endif
+       call append_to_line(iunit,str,i,'>',.false.,depth)
+    end if
+  end subroutine append_proc_call_flags
+
+  subroutine append_quoted_to_line(iunit,str,i,part,break,depth)
+    integer,intent(in):: iunit
+    character(len=*),intent(inout):: str
+    integer,intent(inout):: i
+    character(len=*),intent(in):: part
+    logical,intent(in):: break
+    integer,intent(in):: depth
+    integer:: first
+    first=iachar(part(1:1))
+    if(first>=iachar('a').and.first<=iachar('z').or.&
+         first>=iachar('A').and.first<=iachar('Z')) then
+       call append_to_line(iunit,str,i,part,break,depth)
+    else
+       call append_to_line(iunit,str,i,"'"//trim(part)//"'",break,depth)
+    endif
+  end subroutine append_quoted_to_line
+  
+  subroutine append_to_line(iunit,str,i,part,break,depth)
+    integer,intent(in):: iunit
+    character(len=*),intent(inout):: str
+    integer,intent(inout):: i
+    character(len=*),intent(in):: part
+    logical,intent(in):: break
+    integer,intent(in):: depth
+    integer:: n
+    n=len(part)
+    if(i+n>len(str)) then
+       write(iunit,'(a)') str(1:min(len(str),i))
+       str=repeat(' ',depth+1)//part(1:min(len(str)-depth-1,n))
+       i=depth+1+n
+    else
+       str(i+1:i+n)=part(1:n)
+       i=i+n
+    endif
+    if(break.or.i>len(str)) then
+       write(iunit,'(a)') str(1:i)
+       i=1
+    endif
+  end subroutine append_to_line
+
+  
   !========================================
   ! Return the name of a given signature
   !========================================
@@ -9416,7 +9819,7 @@ contains
   end subroutine dump_sigs
 
 
-    !===================================================================
+  !===================================================================
   ! Procedure signature as a string (including module/line/char info)
   !===================================================================
   function proc_sig_as_str(coder,proc) result(str)
@@ -9629,6 +10032,7 @@ contains
        endif
     endif
   end subroutine cnode_error
+
 
 
 

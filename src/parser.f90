@@ -46,10 +46,6 @@ module pm_parser
   ! (this should not happen so is one test of gc)
   logical,parameter:: check_node_reuse=.false.
 
-  ! Maximum arguments to a PM procedure (must be 2**m-1 for some m)
-  integer,parameter:: pm_max_args=31
-  character(len=3),parameter:: maxargs_str=' 31'
-
   ! Offsets into module objects
   integer,parameter:: modl_name=1
   integer,parameter:: modl_link=2
@@ -1401,7 +1397,7 @@ contains
     call make_node_at(parser,sym_open,5,line,pos)
     if(m+n>pm_max_args) then
        call parse_error(parser,&
-            'Too many arguments to proc call - maximum is:'//maxargs_str)
+            'Too many arguments to proc call - maximum is:'//pm_maxargs_str)
     endif
     if(expect(parser,sym_close)) return
     iserr=.false.

@@ -256,6 +256,38 @@ contains
     end subroutine fix
   end function pm_number_as_string
 
+  
+  function pm_value_as_string(context,v) result(str)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v
+    character(len=82):: str
+    str=''
+    select case(pm_fast_vkind(v))
+    case(pm_logical)
+       if(v%data%l(v%offset)) then
+          str='TRUE'
+       else
+          str='FALSE'
+       endif
+    case(pm_string)
+       str(1:1)='"'
+       do i=0,min(pm_fast_esize(v),76)
+          str(i+2:i+2)=v%data%s(v%offset+i)
+          if(i==76) then
+             str(i+3:)='"...'
+          elseif(i==pm_fast_esize(v)) then
+             str(i+3:i+3)='"'
+          endif
+       end do
+    case default
+       str=pm_number_as_string(context,v,0_pm_ln)
+    end select
+  contains
+    include 'fvkind.inc'
+    include 'fesize.inc'
+  end function pm_value_as_string
+    
+
   ! Left-justified print of integer to a string
   function pm_int_as_string(num) result(str)
     integer,intent(in):: num

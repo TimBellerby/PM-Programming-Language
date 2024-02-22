@@ -451,7 +451,7 @@ contains
     endif
     opcode=g%codes(l+comp_op_opcode)
     opcode2=g%codes(l+comp_op_opcode2)
-    n=g%codes(l+comp_op_nargs)
+    n=iand(g%codes(l+comp_op_nargs),comp_op_nargs_mask)
     a=l+comp_op_arg0
     
     if(debug_g) then
@@ -1176,7 +1176,7 @@ contains
     
     opcode=g%codes(l+comp_op_opcode)
     opcode2=g%codes(l+comp_op_opcode2)
-    n=g%codes(l+comp_op_nargs)
+    n=iand(g%codes(l+comp_op_nargs),comp_op_nargs_mask)
     a=l+comp_op_arg0
 
     if(debug_g) write(*,*) 'GEN OP>',op_names(opcode),opcode2,n,'>',g%codes(a:a+n-1)

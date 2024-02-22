@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2020
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -48,7 +48,7 @@ program pm
   character(len=pm_max_filename_size):: module_name
   type(pm_ptr),target:: root_module,module_dict,visibility
   type(pm_ptr),target:: prog_code,proc_cache,code_cache,poly_cache,typeset
-  logical:: out_debug_files,ok
+  logical:: ok
   type(pm_reg),pointer:: reg
   real:: time,newtime,time0
 
@@ -66,7 +66,7 @@ program pm
        prog_code,proc_cache,code_cache,typeset)
 
   ! Command line 
-  call pm_get_command_line(context,module_name,out_debug_files)
+  call pm_get_command_line(context,module_name)
   
   ! Compilation
   call run_parser(module_name,root_module,module_dict,visibility)
@@ -80,7 +80,7 @@ program pm
   if(pm_is_compiling) then
      if(pm_debug_level>1) write(*,*) 'OPTIMISING...'
      call optimise_prog(context,code_cache,poly_cache)
-     if(out_debug_files) then
+     if(pm_opts%out_debug_files) then
        open(unit=pm_comp_file_unit,file='optimiser.out')
        context%funcs=code_cache
        call dump_wc(context,pm_comp_file_unit)
@@ -124,7 +124,7 @@ contains
     call init_parser(parser,context)
     call sysdefs(parser)
     call pm_gc(context,.false.)
-    if(out_debug_files) then
+    if(pm_opts%out_debug_files) then
        open(unit=9,file='sysmod.dmp')
        call dump_module(context,9,parser%sysmodl)
        close(9)
@@ -164,7 +164,7 @@ contains
        !write(*,*) 'Parsing',trim(str)
        call parse_file_on_unit(parser,pm_comp_file_unit,root==parser%modl)
        close(pm_comp_file_unit)
-       if(out_debug_files) then
+       if(pm_opts%out_debug_files) then
           open(unit=9,file=trim(str)//'.dmp')
           call dump_module(context,9,parser%modl)
           close(9)
@@ -201,7 +201,7 @@ contains
     if(err>0) &
          call pm_stop('Compilation terminated due to errors linking modules')
     call pm_gc(context,.false.)
-    if(out_debug_files) then
+    if(pm_opts%out_debug_files) then
        open(unit=pm_comp_file_unit,file='linker.out')
        call dump_module(context,pm_comp_file_unit,root)
        close(pm_comp_file_unit)
@@ -245,10 +245,16 @@ contains
     call trav_prog(coder,prog)
     if(coder%num_errors>0) &
          call pm_stop('Compilation terminated due to semantic errors')
-    if(out_debug_files) then
+    if(pm_opts%out_debug_files) then
        open(unit=pm_comp_file_unit,file='codegen.out')
-       call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
-       call dump_sigs(coder,pm_comp_file_unit)
+       if(pm_opts%old_files) then
+          call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
+          call dump_sigs(coder,pm_comp_file_unit)
+       else
+          call print_cblock_cnode(coder%context,pm_comp_file_unit,pm_null_obj,coder%sig_cache,&
+               coder%vstack(1),2)
+          call print_all_sigs(coder%context,pm_comp_file_unit,coder%sig_cache,coder%sig_cache)
+       endif
        close(pm_comp_file_unit)
     endif
     if(pm_opts%print_timings) then
@@ -291,11 +297,16 @@ contains
        close(4)
     endif
     
-    
-    if(out_debug_files) then
+    if(pm_opts%out_debug_files) then
        open(unit=pm_comp_file_unit,file='infer.out')
-       call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
-       call dump_res_sigs(coder,pm_comp_file_unit)
+       if(pm_opts%old_files) then
+          call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
+          call dump_res_sigs(coder,pm_comp_file_unit)
+       else
+          call print_cblock_cnode(coder%context,pm_comp_file_unit,cnode_arg(coder%vstack(1),2),coder%sig_cache,&
+               cnode_arg(coder%vstack(1),1),2)
+          call print_all_sigs(coder%context,pm_comp_file_unit,coder%sig_cache,coder%proc_cache)
+       endif
        close(pm_comp_file_unit)
     endif
 
@@ -324,10 +335,14 @@ contains
     call init_wcoder(context,wcd,proc_cache,poly_cache)
     call wcode_prog(wcd,prog_code)
     call wcode_procs(wcd)
-    if(out_debug_files) then
+    if(pm_opts%out_debug_files) then
        open(unit=pm_comp_file_unit,file='wcode.out')
        context%funcs=wcd%code_cache
-       call dump_wc(context,pm_comp_file_unit)
+       if(pm_is_compiling.and..not.pm_opts%old_files) then
+          call print_comp_procs(context,pm_comp_file_unit,context%funcs)
+       else
+          call dump_wc(context,pm_comp_file_unit)
+       endif
        close(pm_comp_file_unit)
     endif
     code_cache=wcd%code_cache
