@@ -644,6 +644,27 @@ contains
     tv=pm_typ_vect(context,tno)
     name=pm_tv_name(tv)
   end function pm_typ_name
+
+  !=====================================================
+  ! Return name of element #n associated with type tno
+  !==============================---===================
+  function pm_typ_elem_name(context,tno,n) result(name)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno,n
+    integer:: name,kind
+    type(pm_ptr):: tv,namev
+    tv=pm_typ_vect(context,tno)
+    if(pm_debug_checks) then
+       kind=pm_tv_kind(tv)
+       if(kind/=pm_typ_is_struct.and.kind/=pm_typ_is_rec) then
+          write(*,*) 'tno=',tno,'kind=',kind
+          call pm_panic('typ_elem_name not struct/rec')
+       endif
+    endif
+    name=pm_tv_name(tv)
+    namev=pm_name_val(context,name)
+    name=namev%data%i(namev%offset+n)
+  end function pm_typ_elem_name
   
   !==========================================
   ! Look up type and return number

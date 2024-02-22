@@ -58,18 +58,18 @@ opts.o : ../src/opts.f90 hash.o memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 
-symbol.o : ../src/symbol.f90 hash.o memory.o kinds.o scomp.o sysdep.o
+symbol.o : ../src/symbol.f90 opts.o hash.o memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-lib.o : ../src/lib.f90 symbol.o hash.o memory.o kinds.o scomp.o sysdep.o
-	$(FC) $(FFLAGS) -c $<
-
-
-vmdefs.o : ../src/vmdefs.f90 lib.o symbol.o hash.o memory.o kinds.o scomp.o sysdep.o
+lib.o : ../src/lib.f90 symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 
-parser.o : ../src/parser.f90 vmdefs.o lib.o symbol.o hash.o memory.o kinds.o scomp.o sysdep.o
+vmdefs.o : ../src/vmdefs.f90 lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
+	$(FC) $(FFLAGS) -c $<
+
+
+parser.o : ../src/parser.f90 vmdefs.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 types.o : ../src/types.f90 lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o

@@ -29,6 +29,9 @@ PFLAGS=  -g -I../src    -fbounds-check   -fcheck=mem
 
 PMCODE= sysdep.o kinds.o pcomp.o memory.o hash.o opts.o lib.o symbol.o types.o parser.o linker.o vmdefs.o sysdefs.o codegen.o infer.o wcoder.o array.o parlib.o vm.o main.o
 
+PMCODE2= ../config/sysdep.f90 ../src/kinds.f90 ../src/pcomp.f90 ../src/memory.f90 ../src/hash.f90 ../src/opts.f90 ../src/lib.f90 ../src/symbol.f90 ../src/types.f90 ../src/parser.f90 ../src/linker.f90 ../src/vmdefs.f90 ../src/sysdefs.f90 ../src/codegen.f90 ../src/infer.f90 ../src/wcoder.f90 ../src/array.f90 ../src/parlib.f90 ../src/vm.f90 ../src/main.f90
+
+
 
 all : pm
 
@@ -98,3 +101,6 @@ vm.o : ../src/vm.f90 parlib.o array.o sysdefs.o types.o symbol.o lib.o opts.o ha
 main.o : ../src/main.f90 vm.o parlib.o array.o wcoder.o infer.o codegen.o linker.o parser.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(PFLAGS) -c $<
 
+
+src:
+	cat $(PMCODE) > pm_interp.f90

@@ -132,7 +132,7 @@ contains
     enddo
     
     ! Create resolved code object
-    call code_int_vec(coder,coder%stack,3,coder%top)
+    call code_int_vec(coder,coder%stack,3,coder%top)   
     call code_num(coder,coder%stack(1))
     call make_code(coder,pm_null_obj,cnode_is_resolved_proc,3)
 
