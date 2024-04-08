@@ -32,6 +32,7 @@ program pm
   use pm_options
   use pm_lib
   use pm_symbol
+  use pm_types
   use pm_parser
   use pm_linker
   use pm_codegen
@@ -59,7 +60,7 @@ program pm
   call pm_init_compilation
   call pm_init_names(context)
   call set_op_names
-  call init_typ(context)
+  call pm_init_types(context)
   call cpu_time(time)
   time0=time
   reg=>pm_register(context,'main',root_module,module_dict,visibility,&
@@ -285,9 +286,9 @@ contains
        !pm_opts%show_elems=.true.
        !pm_opts%show_variants=.true.
        do i=1,pm_dict_size(context,context%tcache)
-          write(4,*) 'TYPE',i,pm_typ_kind(context,i)
-          write(4,*) i,trim(pm_typ_as_string(context,i))
-          call pm_dump_tree(context,4,pm_typ_val(context,i),2)
+          write(4,*) 'TYPE',i,pm_type_kind(context,i)
+          write(4,*) i,trim(pm_type_as_string(context,i))
+          call pm_dump_tree(context,4,pm_type_val(context,i),2)
           call dump_type(context,4,i)
           write(4,*) 'DONE',i
        enddo

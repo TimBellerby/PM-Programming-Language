@@ -54,13 +54,14 @@ module pm_sysdefs
   integer,parameter:: proc_is_not_pure_each = 2**23
   integer,parameter:: proc_has_vkeys =        2**24
   integer,parameter:: proc_is_dcomm =         2**25
-  integer,parameter:: proc_is_variant =       2**26
+  integer,parameter:: proc_is_file =          2**26
   integer,parameter:: proc_needs_par =        2**27
+  integer,parameter:: proc_prints_out =       2**28
 
   integer,parameter:: proc_taints = proc_is_impure &
        + proc_is_not_inlinable + proc_has_for      &
-       + proc_is_not_pure_each + proc_is_variant   &
-       + proc_needs_par
+       + proc_is_not_pure_each + proc_is_dcomm + proc_is_file   &
+       + proc_needs_par + proc_prints_out
 
 contains
 
@@ -5227,23 +5228,23 @@ contains
 
     ! Built-in operators
     call dcl_proc(parser,'_open_file(string,bool,bool,bool,bool,bool,bool,bool)->sint,sint',&
-         op_open_file,0,line,proc_is_impure+proc_is_variant)
+         op_open_file,0,line,proc_is_impure+proc_is_file)
     call dcl_proc(parser,'_close_file(sint)->sint',&
-         op_close_file,0,line,proc_is_impure+proc_is_variant)
+         op_close_file,0,line,proc_is_impure+proc_is_file)
     call dcl_proc(parser,'_seek_file(sint,lint)->sint',&
-         op_seek_file,0,line,proc_is_impure+proc_is_variant)
+         op_seek_file,0,line,proc_is_impure+proc_is_file)
     call dcl_proc(parser,'_read_file(sint,&any)->sint',&
-         op_read_file,0,line,proc_is_impure+proc_is_variant)
+         op_read_file,0,line,proc_is_impure+proc_is_file)
     call dcl_proc(parser,'_write_file(sint,any)->sint',&
-         op_write_file,0,line,proc_is_impure+proc_is_variant)
+         op_write_file,0,line,proc_is_impure+proc_is_file)
     call dcl_proc(parser,'_read_file_array(sint,&any,int)->sint',&
-         op_read_file_array,0,line,proc_is_impure+proc_is_variant)
+         op_read_file_array,0,line,proc_is_impure+proc_is_file)
     call dcl_proc(parser,'_write_file_array(sint,any,int)->sint',&
-         op_write_file_array,0,line,proc_is_impure+proc_is_variant) 
+         op_write_file_array,0,line,proc_is_impure+proc_is_file) 
     call dcl_proc(parser,'_read_file_tile%(any,any,any,sint,&any,int,int)->sint',&
-         op_read_file_tile,0,line,proc_is_impure+proc_is_dcomm+proc_is_variant)
+         op_read_file_tile,0,line,proc_is_impure+proc_is_file)
     call dcl_proc(parser,'_write_file_tile%(any,any,any,sint,any,int,int)->sint',&
-         op_write_file_tile,0,line,proc_is_impure+proc_is_dcomm+proc_is_variant)
+         op_write_file_tile,0,line,proc_is_impure+proc_is_file)
     call dcl_proc(parser,'_io_error_string(sint)->string',&
          op_io_error_string,0,line,proc_is_impure)
 

@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -75,7 +75,6 @@ module pm_parser
   integer,parameter:: typ_ins=node_args+6
   integer,parameter:: typ_includes=node_args+7
   integer,parameter:: typ_num_args=8
-  integer,parameter:: typ_interface=node_args+8
 
   ! Proc parse nodes
   integer,parameter:: proc_name=node_args
@@ -5091,12 +5090,6 @@ contains
        elseif(parser%sym==sym_unique) then
           if(unique(parser,name)) goto 999
           m=1
-       elseif(parser%sym==sym_interface) then
-          call push_null_val(parser)
-          if(interface(parser,name,params)) goto 999
-          m=0
-          nextra=1
-          sym=sym_interface
        else
           ! "type_list | ...type_list | type_list ..."
           sym=sym_includes
@@ -5332,7 +5325,7 @@ contains
     flags=0
     if(parser%sym==sym_caret) then
        call scan(parser)
-       flags=pm_typ_is_soa
+       flags=pm_type_is_soa
     endif
     if(parser%sym==sym_open_brace) then
        call scan(parser)
@@ -5396,7 +5389,7 @@ contains
     call push_num_val(parser,nargs)
     call push_val(parser,params)
     call push_null_val(parser)
-    if(hasuse) flags=ior(flags,pm_typ_has_embedded)
+    if(hasuse) flags=ior(flags,pm_type_has_embedded)
     call push_num_val(parser,flags)
     call make_node(parser,sym,7)
     if(expect(parser,sym_close_brace)) return
@@ -5407,7 +5400,7 @@ contains
 
   !======================================================
   ! Method definition proc name(...) { ... }
-  ! in struct, rec or interface
+  ! in struct, rec
   !======================================================
   recursive function method(parser,typname,params,base) result(iserr)
     type(parse_state),intent(inout):: parser
@@ -5447,58 +5440,6 @@ contains
     endif
     iserr=.false.
   end function method
-
-  !======================================================
-  ! interface { ... }
-  !======================================================
-  recursive function interface(parser,tname,params) result(iserr)
-    type(parse_state),intent(inout):: parser
-    integer,intent(in):: tname
-    type(pm_ptr),intent(in):: params
-    logical:: iserr
-    logical isvar
-    integer:: i,m,base,vbase,name,line,pos
-    type(pm_ptr):: tag
-    call get_sym_pos(parser,line,pos)
-    iserr=.true.
-    call scan(parser)
-    if(expect(parser,sym_open_brace)) return
-    base=parser%top
-    vbase=parser%vtop
-    call make_qualified_name(parser,tname)
-    tag=pop_val(parser)
-    call push_sym(parser,int(tag%offset))
-    do
-       if(parser%sym==sym_proc) then
-          call scan(parser)
-          if(check_name_no_repeat(parser,name,base+1)) then
-             call push_sym(parser,name)
-          else
-             call parse_error(parser,'Expected method name')
-             return
-          endif
-          if(proctyp(parser,tname,params)) return
-       else
-          isvar=parser%sym==sym_var
-          if(isvar.or.parser%sym==sym_const) call scan(parser)
-          if(check_name_no_repeat(parser,name,base+1)) then
-             call push_sym(parser,merge(-name,name,isvar))
-           else
-             call parse_error(parser,'Expected element name')
-             return
-          endif
-          if(expect(parser,sym_colon)) return
-          if(typ(parser)) return
-       endif
-       if(parser%sym==sym_close_brace) exit
-       if(expect(parser,sym_comma)) return
-    enddo
-    call make_node(parser,sym_list,parser%vtop-vbase)
-    call name_vector(parser,base)
-    if(expect(parser,sym_close_brace)) return
-    call make_node_at(parser,sym_interface,2,line,pos)
-    iserr=.false.
-  end function interface
 
 
   !======================================================

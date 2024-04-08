@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -38,6 +38,7 @@ module pm_backend
   implicit none
 
   logical,parameter:: debug_g=.false.
+  logical,parameter:: debug_opt=.false.
 
   ! Various limits
   integer,parameter:: ftn_max_line=130
@@ -46,21 +47,21 @@ module pm_backend
   integer,parameter:: max_levels=256
   integer,parameter:: max_loop_stack=10*1024
 
+
   ! Variable descriptor
   type gvar
      integer:: tno          ! Type
-     integer:: flags        ! Flags from previous stage
-     integer:: gflags       ! Flags applied in this stage
+     integer:: flags        ! Flags
      integer:: state        ! State engine (determines if needs to be stored as vector)
      integer:: start        ! First instruction point var is used
      integer:: finish       ! Last instruction point var is used
-     integer:: lthis        ! Parallel context
+     integer:: depth        ! Parallel context
      integer:: link         ! Linked list of variables in creation order
      integer:: elink        ! Linked list of variables in destruction order
      integer:: index        ! Vector to store this variable (may be shared)
      integer:: free         ! List of variables free for reuse (*not unused records*)
      integer:: oindex       ! Index of variable in output from wordcode generator
-     integer:: outer_lthis  ! Outermost parallel context in which variable is referenced
+     integer:: outer_depth  ! Outermost parallel context in which variable is referenced
      logical:: finish_on_assign
                             ! Last statement using this variable is assignment to another variable
      integer:: name         ! PM name of variable
@@ -78,13 +79,14 @@ module pm_backend
   integer,parameter:: var_state_closed=5
 
   ! Local flags for variables
-  integer,parameter:: var_is_recycled=1
-  integer,parameter:: var_is_async=2
-  integer,parameter:: var_is_else_disabled=4
-  integer,parameter:: var_is_comm_op_par=8
-  integer,parameter:: var_is_used=16
-  integer,parameter:: var_is_reused=32
-  integer,parameter:: var_is_stacked_ve=64
+  integer,parameter:: var_is_recycled=     1*v_extra_flags
+  integer,parameter:: var_is_async=        2*v_extra_flags
+  integer,parameter:: var_is_else_disabled=4*v_extra_flags
+  integer,parameter:: var_is_comm_op_par=  8*v_extra_flags
+  integer,parameter:: var_is_used=        16*v_extra_flags
+  integer,parameter:: var_is_reused=      32*v_extra_flags
+  integer,parameter:: var_is_stacked_ve=  64*v_extra_flags
+  integer,parameter:: var_is_modified=   128*v_extra_flags
 
   ! Loop modes
   integer,parameter:: loop_is_none=0
@@ -123,12 +125,12 @@ module pm_backend
      
      ! Current proc
      type(pm_ptr):: fn
-     integer:: taints
+     integer:: taints,name,rvar,pvar,vevar
      
      ! Wordcodes for current proc
      integer,dimension(:),pointer:: codes
      integer,dimension(:),pointer:: vars
-
+     
      ! Variables
      integer:: nvars,index
      integer,dimension(:),allocatable:: varindex
@@ -137,7 +139,11 @@ module pm_backend
 
      ! Parallel loop frames
      type(gloop),dimension(0:max_loop_stack):: lstack
-     integer:: lthis,ltop
+     integer:: depth,ltop
+
+     ! Standard scopes
+     integer,dimension(0:max_loop_stack):: cstack
+     integer:: ctop
 
      ! VE used by last instruction previously coded
      integer:: last_ve
@@ -156,6 +162,13 @@ module pm_backend
      character(len=ftn_max_line):: linebuffer
      integer:: n,outunit
      integer:: line_breaks
+
+     ! Stack used for various purposes
+     integer,dimension(:),allocatable:: wstack
+     integer:: wtop,wbot,wfree,nwfree,wmax
+
+     ! Book-keeping for various optimisations
+     integer:: local_taints
      
   end type gen_state
 
@@ -208,6 +221,7 @@ contains
     g%line_breaks=0
     g%n=0
 
+
     ! Program code
     call out_line_noindent(g,'PROGRAM PM')
     i=iunit
@@ -239,6 +253,7 @@ contains
 
       ! Generate procedure to create required MPI types
       call gen_mpi_types(g)
+      
     end subroutine gen_procs
 
     ! Output type definitions (called from rtime.inc)
@@ -252,6 +267,24 @@ contains
 
   end subroutine gen_prog
 
+  function g_proc_taints(g,n) result(taints)
+    type(gen_state):: g
+    integer,intent(in):: n
+    integer:: taints
+    type(pm_ptr):: p
+    p=pm_dict_val(g%context,g%procs,int(n+1,pm_p))
+    p=p%data%ptr(p%offset+2)
+    taints=p%offset
+  end function g_proc_taints
+
+  subroutine g_print_out(g,iunit,index,tsets)
+    type(gen_state):: g
+    integer,intent(in):: iunit,index
+    logical,intent(in),optional:: tsets
+    call print_comp_proc(g%context,iunit,g%name,index,g%rvar,g%vevar,g%pvar,&
+         g%codes,1,g%vars,g%procs,g%fn%data%ptr(g%fn%offset:),2,.true.,g%wstack,tsets,&
+         oindex=g%vardata%oindex)
+  end subroutine g_print_out
 
   !===========================================
   ! Generate code for a single procedure
@@ -260,7 +293,7 @@ contains
     type(gen_state):: g
     type(pm_ptr),intent(in)::p
     integer,intent(in):: no
-    integer:: i,n,rvar,pvar,vevar,name
+    integer:: i,n,rvar,pvar,vevar,name,start
     type(pm_ptr)::q,taint,keys
     logical:: iscomm
 
@@ -277,16 +310,12 @@ contains
     keys=p%data%ptr(p%offset+3)
     g%taints=taint%offset
     iscomm=iand(int(taint%offset),proc_is_comm)/=0
-    
-    ! Output spacing / comment
-    call out_new_line(g)
-    call out_line_noindent(g,' !'//&
-         trim(pm_name_as_string(g%context,name)))
-    if(debug_g) then
-       write(*,*) 'OUT START> ',&
-            trim(pm_name_as_string(g%context,q%data%i(q%offset+2)))
-    endif
 
+    g%rvar=rvar
+    g%pvar=pvar
+    g%vevar=vevar
+    g%name=name
+    
     ! Set up variable data tables
     q=p%data%ptr(p%offset+1)
     g%vars=>q%data%i(q%offset:q%offset+pm_fast_esize(q))
@@ -296,25 +325,39 @@ contains
     g%nvars=0
     g%varindex(1:n)=0
 
-    ! Output procedure header
-    if(iand(int(taint%offset),proc_is_recursive)/=0) &
-         call out_str(g,'RECURSIVE ')
-    if(iand(int(taint%offset),proc_is_impure)==0) &
-         call out_str(g,'PURE ')
-    call out_str(g,'SUBROUTINE PM__P')
-    call out_idx(g,no)
-    if(pm_opts%ftn_name_procs.and.no>0) then
-       call out_ftn_name(g,name)
-    endif
+    call g_print_out(g,67,no+1)
+
+    call init_g
     
+    ! Create variables
+    if(vevar/=-1) then
+       call create_var(g,vevar,.false.)
+    endif
+    if(.not.pm_fast_isnull(keys)) then
+       do i=0,pm_fast_esize(keys)
+          call create_var(g,keys%data%i(keys%offset+i),.false.)
+       enddo
+    endif
+    if(pvar/=-1) call create_var(g,pvar,.false.)
+    if(size(g%codes)>0) call create_vars_for_block(g,comp_op_start)
+    if(rvar/=-1) call create_var(g,rvar,.false.)
+
+    start=comp_op_start
+    g%depth=1
+    g%cstack(g%depth)=bset_new(g,0)
+    if(size(g%codes)>0)call record_vars_for_block(g,start)
+
+    call g_print_out(g,69,no+1,.true.)
+        
     ! Phase I - analyse variable use to determine variable lifetimes
     ! and which variables need to be
     ! stored as vectors
     ! Also output necessary variable definition lines here
-    call init_g
+
     g%ltop=-1
+    g%depth=0
     call g_new_frame(g)
-    g%lstack(g%lthis)%loop_mode=loop_is_none
+    g%lstack(g%depth)%loop_mode=loop_is_none
     if(vevar/=-1) then
        call use_var(g,vevar)
        call cross_var(g,vevar)
@@ -330,12 +373,30 @@ contains
 
     ! Phase II - analyse variable lifetimes to merge variables
     do i=0,g%ltop
-       g%lthis=i
+       g%depth=i
        call sort_var_list(g)
        call alloc_var_list(g)
     enddo
     
     ! Phase III - output necessary definition lines
+    ! Output procedure header
+    ! Output spacing / comment
+    call out_new_line(g)
+    call out_line_noindent(g,' !'//&
+         trim(pm_name_as_string(g%context,name)))
+    if(debug_g) then
+       write(*,*) 'OUT START> ',&
+            trim(pm_name_as_string(g%context,q%data%i(q%offset+2)))
+    endif
+    if(iand(int(taint%offset),proc_is_recursive)/=0) &
+         call out_str(g,'RECURSIVE ')
+    if(iand(int(taint%offset),proc_is_impure)==0) &
+         call out_str(g,'PURE ')
+    call out_str(g,'SUBROUTINE PM__P')
+    call out_idx(g,no)
+    if(pm_opts%ftn_name_procs.and.no>0) then
+       call out_ftn_name(g,name)
+    endif
     call out_char(g,'(')
     if(iscomm) then
        call out_str(g,'N1,')
@@ -391,10 +452,17 @@ contains
     include 'fesize.inc'
     include 'fisnull.inc'
     subroutine init_g
-      g%lthis=0
+      g%depth=0
       g%ltop=0
       g%lalt=-1
       g%loop_contains_shared=.false.
+      if(allocated(g%wstack)) deallocate(g%wstack)
+      allocate(g%wstack(max_code_size))
+      g%wtop=0
+      g%wbot=max_code_size+1
+      g%wmax=max_code_size
+      g%wfree=0
+      g%nwfree=0
     end subroutine init_g
   end subroutine gen_proc
 
@@ -412,11 +480,1160 @@ contains
   end function g_procname
 
   !************************************************
+  ! PHASE I - VARIABLE CREATION
+  !************************************************
+
+  !===========================================
+  ! Create a variable entry for variables
+  ! referenced by any operation in the block
+  !===========================================
+  recursive subroutine create_vars_for_block(g,loc)
+    type(gen_state):: g
+    integer,intent(in):: loc
+    integer:: l
+    if(debug_g) write(*,*) 'CREATE VARS FOR BLOCK>'
+    l=loc
+    g%depth=g%depth+1
+    do while(l>0)
+       call create_vars_for_op(g,l)
+       l=g%codes(l)
+    enddo
+    g%depth=g%depth-1
+    if(debug_g) write(*,*) 'END CREATE VARS FOR BLOCK>'
+  end subroutine create_vars_for_block
+
+  !================================================
+  ! Create a variable entry for variables
+  ! referenced by any operation in the comm block
+  !===============================================
+  recursive subroutine create_vars_for_comm_block(g,loc)
+    type(gen_state):: g
+    integer,intent(in):: loc
+    integer:: l,save_depth
+    if(debug_g) write(*,*) 'CREATE VARS FOR COMM BLOCK>'
+    l=loc
+    g%depth=g%depth+1
+    do while(l>0)
+       call create_vars_for_op(g,l)
+       l=g%codes(l)
+    enddo
+    g%depth=g%depth-1
+    if(debug_g) write(*,*) 'END CREATE VARS FOR COMM BLOCK>'
+  end subroutine create_vars_for_comm_block
+
+  !===========================================
+  ! Create a variable entry for any variable
+  ! referenced by an operation
+  !===========================================
+  recursive subroutine create_vars_for_op(g,l)
+    type(gen_state):: g
+    integer,intent(in):: l
+    integer:: opcode,n,a,is,i,flags
+    opcode=g%codes(l+comp_op_opcode)
+    n=iand(g%codes(l+comp_op_nargs),comp_op_nargs_mask)
+    a=l+comp_op_arg0
+    call create_var(g,g%codes(a),.false.)
+    flags=op_flags(opcode)
+    if(iand(flags,op_1_block+op_2_blocks)/=0) then
+       if(iand(flags,op_has_comm_block)/=0) then
+          call create_vars_for_comm_block(g,g%codes(a+1))
+          is=2
+       elseif(iand(flags,op_1_block)/=0) then
+          call create_vars_for_block(g,g%codes(a+1))
+          is=2
+       else ! op_2_blocks
+          call create_vars_for_block(g,g%codes(a+1))
+          call create_vars_for_block(g,g%codes(a+2))
+          is=3
+       endif
+    else
+       is=1
+    endif
+    do i=is,n-1
+       call create_var(g,g%codes(a+i),g%codes(a+i)<0)
+    enddo
+    !g%codes(l+comp_op_line)=-999
+  end subroutine create_vars_for_op
+
+  !=====================================================
+  ! Create a variable entry/entries for given argument 
+  !=====================================================
+  recursive subroutine create_var(g,avar,modify)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: avar
+    logical,intent(in):: modify
+    integer:: kind,state,i,j,var,flags,tno
+    if(avar==0.or.avar==shared_op_flag) return
+    var=abs(avar)
+    if(debug_g) write(*,*) 'CREATE VAR> ',var,g_index(g,var),&
+         g%depth
+    kind=g_kind(g,var)
+    select case(kind)
+    case(v_is_group)
+       do i=1,g_v1(g,var)
+          call create_var(g,g_ptr(g,var,i),modify)
+       enddo
+    case(v_is_sub,v_is_vsub)
+       call create_var(g,g_v1(g,var),modify)
+       call create_var(g,g_v2(g,var),modify)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
+       call create_var(g,g_v1(g,var),modify)
+    case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
+       continue
+    case(v_is_cove)
+       call create_var(g,g_v2(g,var),modify)
+       g%varindex(var)=g%varindex(g_v2(g,var))
+    case(v_is_alias)
+       call create_var(g,g_v1(g,var),modify)
+       g%varindex(var)=g%varindex(g_v1(g,var))
+    case(v_is_chan_vect)
+       call create_var(g,g_v1(g,var),modify)
+       g%varindex(var)=g%varindex(g_v1(g,var))
+    case default
+       i=g%varindex(var)
+       if(i==0) then
+          g%nvars=g%nvars+1
+          if(debug_g) write(*,*) 'CREATE>',var,g%nvars
+          i=g%nvars
+          if(kind==v_is_parve) then
+             g%vardata(i)%tno=pm_logical
+             flags=v_is_param
+             g%vardata(i)%name=0
+          elseif(kind==v_is_ve) then
+             call create_var(g,g_v1(g,var),modify)
+             g%vardata(i)%tno=pm_logical
+             flags=0
+             g%vardata(i)%name=0
+          else
+             flags=g_v2(g,var)
+             tno=g_type(g,var)
+             g%vardata(i)%tno=tno
+             if(iand(flags,v_is_array_par_vect)==0) then
+                g%vardata(i)%name=g_v1(g,var)
+             else
+                g%vardata(i)%name=0
+             endif
+          endif
+          g%vardata(i)%depth=g%depth
+          g%vardata(i)%flags=flags
+          g%vardata(i)%state=var_state_unused
+          g%vardata(i)%index=0
+          g%vardata(i)%oindex=var
+          g%varindex(var)=i
+          if(debug_g) write(*,*) 'NEW VAR>',var,i, g%vardata(i)%link 
+       else
+          g%vardata(i)%depth=min(g%depth,g%vardata(i)%depth)
+          if(modify) g%vardata(i)%flags=ior(g%vardata(i)%flags,var_is_modified)
+       endif
+    end select
+  end subroutine create_var
+
+
+  !===========================================
+  ! Create access sets for each operation
+  ! - including accesses from operations in
+  !   nested blocks
+  !===========================================
+  recursive subroutine record_vars_for_block(g,loc)
+    type(gen_state):: g
+    integer,intent(inout):: loc
+    integer:: l,p
+    if(debug_g) write(*,*) 'RECORD VARS FOR BLOCK>'
+    l=loc
+    p=0
+    do while(l>0)
+       call record_vars_for_op(g,l,p,loc)
+       p=l
+       l=g%codes(l)
+    enddo
+    if(debug_g) write(*,*) 'END RECORD VARS FOR BLOCK>'
+  end subroutine record_vars_for_block
+  
+  recursive subroutine record_vars_for_op(g,l,pre,blk)
+    type(gen_state):: g
+    integer,intent(in):: l,pre
+    integer,intent(inout):: blk
+    integer:: opcode,n,nret,a,is,i,flags,bset,acc
+    integer:: save_local_taints,vset,invar_vset,proc_taints
+    save_local_taints=g%local_taints
+    g%local_taints=0
+    opcode=g%codes(l+comp_op_opcode)
+    n=iand(g%codes(l+comp_op_nargs),comp_op_nargs_mask)
+    nret=iand(g%codes(l+comp_op_nargs),comp_op_nret_mask)/comp_op_nret_div
+    a=l+comp_op_arg0
+    flags=op_flags(opcode)
+ 
+    if(iand(flags,op_1_block+op_2_blocks)/=0) then 
+       if(iand(flags,op_has_comm_block)/=0) then
+          call push_block
+          call record_vars_for_block(g,g%codes(a+1))
+          call pop_block
+          call schedule_comm_block(g,g%codes(a+1))
+          is=2
+       elseif(iand(flags,op_has_loop_block)/=0) then
+          call push_block
+          call record_vars_for_block(g,g%codes(a+1))
+          call pop_block
+          invar_vset=vset_extract_from_bset(g,bset,&
+               acc_read+acc_write,acc_read)
+          call loop_invar_motion_block(g,g%codes(a+1),&
+               pre,blk,invar_vset,g%depth)
+          call vset_drop(g,invar_vset)
+          is=2
+       elseif(iand(flags,op_1_block)/=0) then
+          call push_block
+          call record_vars_for_block(g,g%codes(a+1))
+          call pop_block
+          is=2
+       else ! op_2_blocks
+          call push_block
+          call record_vars_for_block(g,g%codes(a+1))
+          call record_vars_for_block(g,g%codes(a+2))
+          call pop_block
+          is=3
+       endif
+    else
+       is=1
+    endif
+    g%local_taints=ior(g%local_taints,flags)
+    if(opcode==op_call.or.opcode==op_comm_call) then
+       proc_taints=g_proc_taints(g,g%codes(l+comp_op_opcode2))
+       if(iand(proc_taints,proc_is_dcomm)/=0) then
+          g%local_taints=ior(g%local_taints,op_is_comm)
+       endif
+       if(iand(proc_taints,proc_is_file)/=0) then
+          g%local_taints=ior(g%local_taints,op_is_file)
+       endif
+       if(iand(proc_taints,proc_prints_out)/=0) then
+          g%local_taints=ior(g%local_taints,op_prints_out)
+       endif
+    endif
+    vset=vset_new(g,g%codes(l+comp_op_line),g%local_taints)
+    g%codes(l+comp_op_line)=vset
+    call record_var_access(g,g%codes(a),acc_read)       
+    if(opcode==op_assign) then
+       acc=acc_read+acc_write
+       if(g_kind(g,g%codes(a+1))==v_is_basic) then
+          acc=acc_write
+       endif
+       if(iand(pm_type_flags(g%context,g_type(g,g%codes(a+1))),&
+            pm_type_has_array+pm_type_has_poly)/=0) then
+          acc=ior(acc,acc_alloc)
+       endif
+       call record_var_access(g,g%codes(a+1),acc)
+       call record_var_access(g,g%codes(a+2),acc_read)
+    else
+!!$       if(iand(flags,op_allocates)/=0.and..false.) then
+!!$          call record_var_access(g,g%codes(a+1),acc_write+acc_alloc)
+!!$       else
+ 
+       do i=is,is+nret-1
+          call record_var_access(g,g%codes(a+i),acc_write)
+       enddo
+!!$       endif
+
+       do i=is+nret,n-1
+          call record_var_access(g,g%codes(a+i),&
+               merge(acc_read+acc_write,acc_read,g%codes(a+i)<0))
+       enddo
+       if(iand(flags,op_1_block+op_2_blocks)/=0) then
+          call bset_push_to_stack(g,bset)
+       endif
+
+    endif
+    call vset_augment(g,vset)
+
+    g%local_taints=ior(save_local_taints,g%local_taints)
+  contains
+    
+    subroutine push_block
+      bset=bset_new(g,0)
+      g%depth=g%depth+1
+      g%cstack(g%depth)=bset
+      !write(*,*) 'push to ',g%depth
+    end subroutine push_block
+
+    subroutine pop_block
+      g%depth=g%depth-1
+      g%codes(l+comp_op_line)=bset
+      !write(*,*) 'pop to',g%depth
+    end subroutine pop_block
+    
+  end subroutine record_vars_for_op
+
+  
+  !=====================================================
+  ! Create a variable entry/entries for given argument 
+  !=====================================================
+  recursive subroutine record_var_access(g,avar,mode)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: avar,mode
+    integer:: kind,i,j,var
+    if(avar==0.or.avar==shared_op_flag) return
+    var=abs(avar)
+    if(debug_g) write(*,*) 'RECORD VAR ACCESS> ',var,g_index(g,var),&
+         g%depth,g%lstack(g%depth)%idx !,g_kind(g,var),g_v1(g,var)
+    kind=g_kind(g,var)
+    select case(kind)
+    case(v_is_group)
+       do i=1,g_v1(g,var)
+          call record_var_access(g,g_ptr(g,var,i),mode)
+       enddo
+    case(v_is_sub,v_is_vsub)
+       call record_var_access(g,g_v1(g,var),mode)
+       call record_var_access(g,g_v2(g,var),mode)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
+       call record_var_access(g,g_v1(g,var),mode)
+    case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
+       continue
+    case(v_is_cove)
+       call record_var_access(g,g_v2(g,var),mode)
+    case(v_is_alias)
+       call record_var_access(g,g_v1(g,var),mode)
+    case(v_is_chan_vect)
+       call record_var_access(g,g_v1(g,var),mode)
+    case default
+       i=g%varindex(var)
+       call add_var_access(g,i,mode)
+       do j=g%vardata(i)%depth+1,g%depth
+          call bset_add(g,g%cstack(j),i,mode)
+       enddo
+    end select
+  end subroutine record_var_access
+  
+  !===============================================
+  ! Add a variable access to the vset
+  ! which must be on top of the lower wstack
+  !===============================================
+  subroutine add_var_access(g,var,mode)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: var,mode
+    if(g%wtop+1>=g%wbot) call grow_wstack(g)
+    g%wtop=g%wtop+1
+    g%wstack(g%wtop)=mode+var*acc_mult
+  end subroutine add_var_access
+
+  !***********************************************
+  ! Loop invariant motion
+  ! look for operations that only use read-only
+  ! entries to the loop block (which must
+  ! be updated as operations are moved)
+  !***********************************************
+
+  !===============================================
+  ! Apply invariant motion to a block
+  ! (which may be nested)
+  !===============================================
+  recursive subroutine loop_invar_motion_block(g,blk,&
+       loop_preop,loop_blk,invar_vset,loop_depth)
+    type(gen_state),intent(inout):: g
+    integer,intent(inout):: blk,loop_blk
+    integer,intent(in):: loop_preop,invar_vset,loop_depth
+    integer:: p,l
+    p=0
+    l=blk
+    do while(l>0)
+       call loop_invar_motion_op(g,l,p,blk,loop_preop,&
+            loop_blk,invar_vset,loop_depth)
+       p=l
+       l=g%codes(l)
+    enddo
+  end subroutine loop_invar_motion_block
+
+  !===============================================
+  ! Apply invariant motion to an operation
+  ! moving it if required
+  !===============================================
+  recursive subroutine loop_invar_motion_op(g,&
+       op,preop,blk,&
+       loop_preop,loop_blk,invar_vset,loop_depth)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: op,preop,loop_preop,invar_vset,loop_depth
+    integer,intent(inout):: blk,loop_blk
+    integer:: i,j,v,a,old_top,old_depth,depth,op_vset,opcode,flags,taints
+    integer,parameter:: cannot_move=op_is_comm+op_prints_out+op_is_file
+    opcode=g%codes(op+comp_op_opcode)
+    flags=op_flags(opcode)
+    op_vset=g%codes(op+comp_op_line)
+    taints=vset_taints(g,op_vset)
+    if(iand(taints,cannot_move)==0) then
+       if(vset_invar(g,invar_vset,op_vset)) then
+          do i=1,vset_size(g,op_vset)
+             call vset_get(g,op_vset,i,v,a)
+             if(iand(a,acc_write)==0) then
+                if(iand(a,acc_read)/=0) then
+                   ! Abandon - RW access
+                   return
+                elseif(iand(g%vardata(v)%flags,var_is_modified)/=0) then
+                   ! Abandon - modified in loop
+                   return
+                endif
+             endif
+          enddo
+          do i=1,vset_size(g,op_vset)
+             call vset_get(g,op_vset,i,v,a)
+             if(iand(a,acc_write)==0) then
+                call add_var_access(g,v,acc_read)
+                old_depth=g%vardata(v)%depth
+                g%vardata(v)%depth=loop_depth
+                do j=loop_depth,old_depth-1
+                   call bset_add(g,g%cstack(i),v,acc_read)
+                enddo
+             endif
+          enddo
+          call vset_augment(g,invar_vset)
+          call move_op(g,blk,preop,loop_blk,loop_preop)
+          return
+       endif
+    endif
+    if(iand(flags,op_1_block+op_2_blocks)/=0) then
+       if(iand(flags,op_has_comm_block+op_has_loop_block)==0) then
+          if(vset_includes_a_bset_read(g,invar_vset,vset_loc(g,op_vset))) then
+             call loop_invar_motion_block(g,g%codes(op+comp_op_arg0+1),&
+                  loop_preop,loop_blk,invar_vset,loop_depth)
+             if(iand(flags,op_2_blocks)/=0) then
+                call loop_invar_motion_block(g,g%codes(op+comp_op_arg0+2),&
+                     loop_preop,loop_blk,invar_vset,loop_depth)
+             endif
+          endif
+       endif
+    endif
+  end subroutine loop_invar_motion_op
+
+  ! *************************************************************
+  ! This performs a list scheduling of a block of instructions
+  ! in a communicating block
+  ! *************************************************************
+  recursive subroutine schedule_comm_block(g,ptr_to_start)
+    type(gen_state):: g
+
+    ! Relative priorities of each kind of instruction
+    integer,parameter:: instr_precedes_loop=0
+    integer,parameter:: instr_is_comm=1
+    integer,parameter:: instr_is_std=2
+    integer,parameter:: instr_is_sync_recv=3
+    integer,parameter:: instr_is_sync=4
+    integer,parameter:: instr_follows_loop=5
+    
+    integer,parameter:: instr_is_shared=16
+    integer,parameter:: instr_is_loop_break=32
+    integer,parameter:: instr_priority_mask=15
+
+    type instruction
+       integer(pm_ln):: bloom,wbloom
+       integer:: index
+       integer:: ve,cove
+       integer:: kind
+       integer:: taints
+       integer:: vset
+    end type instruction
+    
+    integer,intent(inout):: ptr_to_start
+    integer:: ninstr,ll,i,j,k,num_scheduled
+    integer:: instr_ptr,instr_scheduled
+    integer:: curr_priority,new_priority
+    logical:: have_shared,have_non_shared
+    type(instruction),allocatable,dimension(:):: instr
+    integer(pm_ln),dimension(:,:,:),allocatable:: mask
+    integer,allocatable,dimension(:):: nafter
+ 
+    if(debug_opt) write(*,*) 'SCHEDULE BLOCK>',ptr_to_start
+    
+    ninstr=0
+    ll=ptr_to_start
+    do while(ll/=0)
+       ninstr=ninstr+1
+       ll=g%codes(ll)
+    enddo
+
+    if(ninstr<3) return
+
+    write(72,*) 'Schedule',ninstr
+    
+    allocate(instr(ninstr))
+    allocate(nafter(ninstr),source=0)
+
+    ! Process each instruction to get information
+    have_shared=.false.
+    have_non_shared=.false.
+    i=0
+    ll=ptr_to_start
+    do while(ll/=0)
+       i=i+1
+       call process_instr(instr(i),ll)
+       if(iand(instr(i)%kind,instr_is_shared)/=0) have_shared=.true.
+       if(iand(instr(i)%kind,instr_is_shared)==0) have_non_shared=.true.
+       ll=g%codes(ll)
+    enddo
+
+    if(.not.(have_shared.and.have_non_shared)) then
+       ! No need to schedule
+       write(72,*) 'No sched',have_shared,have_non_shared
+       goto 10
+    endif
+    
+    ! Compute nafter(instr) - number of instructions that must follow instr
+    ! due to a direct clash (RaW, WaW or WaW conflict)
+    do i=1,ninstr
+       do j=1,i-1
+          if(conflict(j,i)) nafter(j)=nafter(j)+1
+       enddo
+    enddo
+    
+    ! Find last instruction
+    instr_ptr=0
+    j=-1
+    curr_priority=-1
+    do i=1,ninstr
+       if(nafter(i)==0) then
+          new_priority=solo_priority(instr(i))
+          if(new_priority>=curr_priority) then
+             j=i
+             curr_priority=new_priority
+          endif
+       endif
+    enddo
+    instr_scheduled=j
+    call schedule(instr_scheduled)
+    
+    ! Schedule remaining instructions
+    do num_scheduled=2,ninstr
+       write(72,*) 'Scheduling',num_scheduled
+       curr_priority=-1
+       j=-1
+       do i=1,ninstr
+          if(instr(i)%kind<0) cycle
+          if(i<instr_scheduled) then
+             if(conflict(i,instr_scheduled)) then
+                nafter(i)=nafter(i)-1
+             endif
+          endif
+          if(nafter(i)==0) then
+             new_priority=co_priority(instr(i))
+             if(new_priority>=curr_priority) then
+                j=i
+                curr_priority=new_priority
+             endif
+          endif
+       enddo
+       instr_scheduled=j
+       call schedule(instr_scheduled)
+       write(72,*) 'scheduled',instr_scheduled
+       if(debug_opt) write(*,*) 'scheduled',num_scheduled,' of ',ninstr
+    enddo
+    ptr_to_start=instr_ptr
+
+10  continue
+    
+    deallocate(instr)
+    deallocate(nafter)
+
+  contains
+
+    subroutine process_instr(instr,l)
+      type(instruction),intent(inout):: instr
+      integer,intent(in):: l
+      integer:: j,opcode,n,a,m,kind,taints,v,acc
+      opcode=g%codes(l+comp_op_opcode)
+      if(debug_opt) write(*,*) 'Process instr>',l,op_names(opcode)
+      n=g%codes(l+comp_op_nargs)
+      a=l+comp_op_arg0
+      instr%index=l
+      instr%bloom=0
+      instr%wbloom=0
+      instr%ve=g%codes(a)
+      if(g%codes(a)>0) then
+         instr%cove=g_v2(g,g%codes(a))
+      else
+         instr%cove=0
+      endif
+      instr%vset=g%codes(l+comp_op_line)
+      do j=1,vset_size(g,instr%vset)
+         call vset_get(g,instr%vset,j,v,acc)
+         if(acc/=0) then
+            instr%bloom=bloom(instr%bloom,v)
+         endif
+         if(iand(acc,acc_write)/=0) then
+            instr%wbloom=bloom(instr%wbloom,v)
+         endif
+      enddo
+      taints=vset_taints(g,instr%vset)
+      instr%taints=taints
+      kind=instr_is_std
+      if(iand(taints,op_precedes_loop)/=0) then
+         kind=instr_precedes_loop
+      elseif(iand(taints,op_is_sync+op_is_sync_recv+op_is_send+op_is_recv)==op_is_sync) then
+         kind=instr_is_sync
+      elseif(iand(taints,op_is_sync_recv+op_is_sync)/=0) then
+         kind=instr_is_sync_recv
+      elseif(iand(taints,op_is_send+op_is_recv)/=0) then
+         kind=instr_is_comm
+      endif
+      
+      instr%kind=kind
+    end subroutine process_instr
+
+    function bloom(bloom_in,v) result(bloom_out)
+      integer(pm_ln),intent(in):: bloom_in
+      integer,intent(in):: v
+      integer(pm_ln):: bloom_out
+      bloom_out=ibset(bloom_in,mod(v,bit_size(bloom_in)))
+    end function bloom
+
+    function conflict(i,j) result(conflicting)
+      integer,intent(in):: i,j
+      logical:: conflicting
+      if(iand(instr(i)%kind,instr_is_loop_break)/=0.and.&
+           iand(instr(j)%kind,instr_is_shared)==0) then
+         conflicting=.true.
+         return
+      endif
+      if(iand(iand(instr(i)%taints,instr(j)%taints),&
+           op_is_comm+op_is_file+op_prints_out)/=0) then
+         conflicting=.true.
+         return
+      endif
+      if(ior(iand(instr(i)%wbloom,instr(j)%bloom),&
+          iand(instr(i)%bloom,instr(j)%wbloom))==0) then
+         conflicting=.false.
+         return
+      endif
+      conflicting=vset_clash(g,instr(i)%vset,instr(j)%vset)
+    end function conflict
+    
+    subroutine schedule(i)
+      integer,intent(in):: i
+      integer:: index
+      if(debug_opt) then
+         write(*,*) 'Scheduled:',i
+         write(*,*) op_names(g%codes(instr(i)%index+2))
+      endif
+      index=instr(i)%index
+      g%codes(index)=instr_ptr
+      instr_ptr=index
+      instr(i)%kind=-999
+    end subroutine schedule
+
+    ! Priority of instruction considered alone
+    function solo_priority(i) result(priority)
+      type(instruction),intent(in):: i
+      integer:: priority
+      priority=iand(i%kind,instr_priority_mask+instr_is_shared)
+    end function solo_priority
+
+    ! Priority of instruction in light of last
+    ! scheduled instruction
+    function co_priority(i) result(priority)
+      type(instruction),intent(in):: i
+      integer:: priority
+      priority=0
+      if(iand(i%kind,instr_is_shared)==&
+           iand(instr(instr_scheduled)%kind,instr_is_shared)) then
+         priority=priority+4
+      endif
+      if(i%ve==instr(instr_scheduled)%ve) then
+         priority=priority+2
+      elseif(i%cove==instr(instr_scheduled)%ve) then
+         priority=priority+1
+      endif
+      priority=iand(i%kind,instr_priority_mask)+priority*(instr_priority_mask+1)
+    end function co_priority
+
+  end subroutine schedule_comm_block
+
+  subroutine move_op(g,blk,preop,blk2,preop2)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: preop,preop2
+    integer,intent(inout):: blk,blk2
+    integer:: op,op2,link
+    if(preop==0) then
+       op=blk
+    elseif(preop>0) then
+       op=g%codes(preop)
+    else
+       op=g%wstack(-preop)
+    endif
+    if(preop2==0) then
+       op2=blk2
+       blk2=op
+    elseif(preop2>0) then
+       op2=g%codes(preop2)
+       g%codes(preop2)=op
+    else
+       op2=g%wstack(-preop2)
+       g%wstack(-preop2)=op
+    endif
+    if(op>0) then
+       link=g%codes(op)
+       g%codes(op)=op2
+    else
+       link=g%wstack(-op)
+       g%wstack(-op)=op2
+    endif
+    if(preop==0) then
+       blk=op2
+    elseif(preop>0) then
+       g%codes(preop)=op2
+    else
+       g%wstack(-preop)=op2
+    endif
+  end subroutine move_op
+
+  
+  !===============================================
+  ! Create a new  block import/export set
+  !===============================================
+  function bset_new(g,blk) result(bset)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: blk
+    integer:: bset
+    integer:: i
+    if(g%wtop>=g%wbot) call grow_wstack(g)
+    g%wbot=g%wbot-3
+    i=g%wbot
+    g%wstack(i)=blk
+    g%wstack(i+1)=0
+    g%wstack(i+2)=0
+    bset=i-g%wmax
+  end function bset_new
+
+  !===============================================
+  ! Add a variable to a given block import/export
+  ! set
+  !===============================================
+  subroutine bset_add(g,bset,var,mode)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: bset,var,mode
+    integer:: head,tail,i
+    if(debug_g) then
+       write(*,*) 'Add ',var,' to ',bset
+    endif
+    if(g%wtop>=g%wbot) call grow_wstack(g)
+    head=bset
+    tail=g%wstack(g%wmax+head+1)
+    do while(tail/=0.and.g%wstack(g%wmax+tail)/acc_mult<var)
+       head=tail
+       tail=g%wstack(g%wmax+tail+1)
+    enddo
+    if(tail/=0.and.g%wstack(g%wmax+tail)/acc_mult==var) then
+       g%wstack(g%wmax+tail)=ior(g%wstack(g%wmax+tail),mode)
+    else
+       g%wbot=g%wbot-2
+       i=g%wbot
+       g%wstack(i)=var*acc_mult+mode
+       g%wstack(i+1)=tail
+       g%wstack(g%wmax+head+1)=i-g%wmax
+       g%wstack(g%wmax+bset+2)=g%wstack(g%wmax+bset+2)+1
+    endif
+  end subroutine bset_add
+
+  subroutine bset_push_to_stack(g,bset)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: bset
+    integer:: i,j,n
+    write(*,*) 'bset=',bset
+    n=g%wstack(g%wmax+bset+2)
+    if(g%wtop+n>=g%wbot) call grow_wstack(g)
+    j=g%wstack(g%wmax+bset+1)
+    do i=1,n
+       g%wstack(g%wtop+i)=g%wstack(g%wmax+j)
+       j=g%wstack(g%wmax+j+1)
+    enddo
+    g%wtop=g%wtop+n
+  end subroutine bset_push_to_stack
+
+  
+  !===============================================
+  ! Create an operation variable access set (vset)
+  ! - also records the operations taints
+  !===============================================
+  function vset_new(g,loc,taints) result(vset)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: loc,taints
+    integer:: vset
+    integer:: i
+    if(g%wtop>=g%wbot) call grow_wstack(g)
+    i=g%wtop+1
+    g%wstack(i)=loc
+    g%wstack(i+1)=taints
+    g%wstack(i+2)=0
+    g%wtop=i+2
+    vset=i
+  end function vset_new
+
+  !===============================================
+  ! Return size of vset (number of entries)
+  !===============================================
+  function vset_size(g,vset) result(n)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset
+    integer:: n
+    n=g%wstack(vset+2)
+  end function vset_size
+
+  !===============================================
+  ! Return taints of vset
+  !===============================================
+  function vset_taints(g,vset) result(taints)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset
+    integer:: taints
+    taints=g%wstack(vset+1)
+  end function vset_taints
+
+  !===============================================
+  ! Return loc of vset
+  !===============================================
+  function vset_loc(g,vset) result(loc)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset
+    integer:: loc
+    loc=g%wstack(vset)
+  end function vset_loc
+  
+  
+  !===============================================
+  ! Obtain variable and access mode for i-th
+  ! member of vset (starting at 1)
+  !===============================================
+  subroutine vset_get(g,vset,i,var,acc)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset,i
+    integer,intent(out):: var,acc
+    integer:: p
+    p=g%wstack(vset+2+i)
+    var=p/acc_mult
+    acc=iand(p,acc_mult-1)
+  end subroutine vset_get
+
+  !===============================================
+  ! Add elements on the top of the stack to a
+  ! vset which must also be last created/copied
+  ! (i.e. on top of stack just before elements to
+  !  be added)
+  !===============================================
+  subroutine vset_augment(g,vset)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset
+    call g_sort_uniq(g,vset+3,vset+3+g%wstack(vset+2))
+    g%wstack(vset+2)=g%wtop-vset-2
+  end subroutine vset_augment
+
+  !===============================================
+  ! Add elements of vset2 to vset
+  ! vset must be last created/copied
+  ! (i.e. on top of stack just before elements to
+  !  be added)
+  !===============================================
+  subroutine vset_merge(g,vset,vset2)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset,vset2
+    integer:: i,j,n
+    n=g%wstack(vset2+2)
+    if(g%wtop+3+n>=g%wbot) call grow_wstack(g)
+    j=g%wtop
+    do i=vset2+3,vset2+2+n
+       j=j+1
+       g%wstack(j)=g%wstack(i)
+    enddo
+    g%wtop=j
+    call vset_augment(g,vset)
+  end subroutine vset_merge
+
+  !===============================================
+  ! Create a copy of vset on top of the stack
+  !===============================================
+  function vset_copy(g,vset) result(vset2)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset
+    integer:: vset2
+    integer:: i,j,n
+    n=g%wstack(vset+2)
+    if(g%wtop+3+n>=g%wbot) call grow_wstack(g)
+    j=g%wtop
+    do i=vset,vset+2+n
+       j=j+1
+       g%wstack(j)=g%wstack(i)
+    enddo
+    g%wtop=j
+  end function vset_copy
+
+  !====================================================
+  ! Drop off vset on top of stack
+  !====================================================
+  subroutine vset_drop(g,vset)
+    type(gen_state),intent(inout):: g
+    integer:: vset
+    g%wtop=vset
+  end subroutine vset_drop
+  
+  !====================================================
+  ! Create a copy of vset on top of the stack
+  ! containing only elements with mode&mask==expected
+  !====================================================
+  function vset_extract(g,vset,mask,expected) result(vset2)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset,mask,expected
+    integer:: vset2
+    integer:: i,j,n,p
+    n=g%wstack(vset+2)
+    if(g%wtop+3+n>=g%wbot) call grow_wstack(g)
+    j=g%wtop
+    vset2=j+1
+    g%wstack(j+1)=g%wstack(vset)
+    g%wstack(j+2)=g%wstack(vset+1)
+    j=j+3
+    do i=vset+3,vset+2+n
+       p=g%wstack(i)
+       if(iand(p,mask)==expected) then
+          j=j+1
+          g%wstack(j)=p
+       endif
+    enddo
+    g%wstack(vset2+2)=j-vset2-3
+    g%wtop=j
+  end function vset_extract
+
+  !====================================================
+  ! Create a copy of vset on top of the stack
+  ! containing only elements with mode&mask==expected
+  !====================================================
+  function vset_extract_from_bset(g,bset,mask,expected) result(vset2)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: bset,mask,expected
+    integer:: vset2
+    integer:: i,j,n,p
+    n=g%wstack(g%wmax+bset+2)
+    if(g%wtop+3+n>=g%wbot) call grow_wstack(g)
+    j=g%wtop
+    vset2=j+1
+    g%wstack(j+1)=0
+    g%wstack(j+2)=0
+    j=j+3
+    i=g%wstack(g%wmax+bset+1)
+    do while(i/=0)
+       p=g%wstack(g%wmax+i)
+       if(iand(p,mask)==expected) then
+          j=j+1
+          g%wstack(j)=p
+       endif
+       i=g%wstack(g%wmax+i)
+    enddo
+    g%wstack(vset2+2)=j-vset2-3
+    g%wtop=j
+  end function vset_extract_from_bset
+
+  !===============================================
+  ! Add the contents of a block import/export set
+  ! to an operation variable access set
+  !===============================================
+  function vset_add_bset(g,vset,bset) result(vset2)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset,bset
+    integer:: vset2
+    integer:: nv,nb,i,j,k,var1,var2
+    nv=g%wstack(vset+i+2)
+    nb=g%wstack(g%wmax+bset+2)
+    if(g%wtop+nv+nb>g%wbot) call grow_wstack(g)
+    j=g%wstack(g%wmax+bset+1)
+    i=vset+3
+    vset2=g%wtop
+    g%wstack(vset2)=g%wstack(vset)
+    g%wstack(vset2+1)=g%wstack(vset2+1)
+    k=g%wtop+2
+    do while(i/=0.and.j<=vset+2+nv)
+       var1=g%wstack(g%wmax+i)/acc_mult
+       var2=g%wstack(j)/acc_mult
+       if(var1==var2) then
+          k=k+1
+          g%wstack(k)=ior(g%wstack(g%wmax+i),g%wstack(j))
+          i=g%wstack(g%wmax+i+1)
+          j=j+1
+       elseif(var1>var2) then
+          k=k+1
+          g%wstack(k)=g%wstack(j)
+          j=j+1
+       else
+          k=k+1
+          g%wstack(k)=g%wstack(g%wmax+i)
+          i=g%wstack(g%wmax+i+1)
+       endif
+    enddo
+    do while(i/=0)
+       k=k+1
+       g%wstack(k)=g%wstack(g%wmax+i)
+       i=g%wstack(g%wmax+i+1)
+    enddo
+    do while(i/=0.and.j<=vset+2+nv)
+       k=k+1
+       g%wstack(k)=g%wstack(j)
+       j=j+1
+    enddo
+    g%wstack(vset2+2)=k-vset2-2
+    g%wtop=k
+  end function vset_add_bset
+
+  !===============================================
+  ! Check if there are RaW, WaR, WaW clashes
+  ! between two vsets
+  !===============================================
+  function vset_clash(g,vset1,vset2) result(clash)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset1,vset2
+    logical:: clash
+    integer j1,j2,n1,n2,v1,v2
+    clash=.false.
+    n1=g%wstack(vset1+2)
+    n2=g%wstack(vset2+2)
+    j1=vset1+3
+    j2=vset2+3
+    if(g%wstack(j1)/acc_mult>g%wstack(vset2+n2+2)/acc_mult.or.&
+         g%wstack(j2)/acc_mult>g%wstack(vset1+n1+2)/acc_mult) return
+    do while(j1<=vset1+n1.and.j2<=vset2+n2)
+       v1=g%wstack(j1)/acc_mult
+       v2=g%wstack(j2)/acc_mult
+       if(v1<v2) then
+          j1=j1+1
+       elseif(v1>v2) then
+          j2=j2+1
+       else
+          if(iand(g%wstack(j1),acc_alloc)/=0.or.&
+               iand(g%wstack(j1),acc_write)/=0.and.&
+               iand(g%wstack(j2),acc_read+acc_write)/=0.or.&
+               iand(g%wstack(j2),acc_write)/=0.and.&
+               iand(g%wstack(j1),acc_read+acc_write)/=0) then
+             clash=.true.
+             return
+          endif
+          j1=j1+1
+          j2=j2+1
+       endif
+    enddo
+  end function vset_clash
+
+  !===============================================
+  ! Check if vset1 contains all read entries in
+  ! vset2 (access modes in vset1 are not checked)
+  !===============================================
+  function vset_invar(g,vset1,vset2) result(ok)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset1,vset2
+    logical:: ok
+    integer j1,j2,n1,n2,v1,v2
+    ok=.true.
+    n1=g%wstack(vset1+2)
+    n2=g%wstack(vset2+2)
+    j1=vset1+3
+    do j2=vset2+3,vset2+n2+2
+       if(iand(g%wstack(j2),acc_read)/=0) then
+          v2=g%wstack(j2)/acc_mult
+          do while(g%wstack(j1)/acc_mult<v2)
+             j1=j1+1
+             if(j1>vset1+n1+2) then
+                ok=.false.
+                return
+             endif
+          enddo
+          v1=g%wstack(j1)/acc_mult
+          if(v1/=v2) then
+             ok=.false.
+             return
+          endif
+       endif
+    enddo
+  end function vset_invar
+
+ !================================================
+  ! Check if vset contains at least one read entry
+  ! in bset (access modes in vset are not checked)
+  !===============================================
+  function vset_includes_a_bset_read(g,vset,bset) result(ok)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: vset,bset
+    logical:: ok
+    integer:: nv,nb,i,j,var1,var2
+    nv=g%wstack(vset+i+2)
+    nb=g%wstack(g%wmax+bset+2)
+    j=g%wstack(g%wmax+bset+1)
+    i=vset+3
+    do while(i/=0.and.j<=vset+2+nv)
+       var1=g%wstack(g%wmax+i)/acc_mult
+       var2=g%wstack(j)/acc_mult
+       if(var1==var2) then
+          if(iand(g%wstack(g%wmax+i),acc_read)/=0) then
+             ok=.true.
+             return
+          endif
+          i=g%wstack(g%wmax+i+1)
+          j=j+1
+       elseif(var1>var2) then
+          j=j+1
+       else
+          i=g%wstack(g%wmax+i+1)
+       endif
+    enddo
+    ok=.false.
+  end function vset_includes_a_bset_read
+  
+  !=======================================
+  ! Sort acc entries on wstack between
+  ! ifirst..g%wtop assuming ifirst..istart-1
+  ! are already sorted
+  ! Also combine duplicate entries
+  !========================================
+  subroutine g_sort_uniq(g,ifirst,istart)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: ifirst,istart
+    integer:: i,j,temp
+    if(ifirst>istart.or.istart>g%wtop) return
+    do i=istart,g%wtop
+       temp=g%wstack(i)
+       j=i
+       do while(g%wstack(j-1)>temp)
+          g%wstack(j)=g%wstack(j-1)
+          j=j-1
+          if(j==ifirst) exit
+       enddo
+       g%wstack(j)=temp
+    enddo
+    j=ifirst
+    do i=ifirst+1,g%wtop
+       if(g%wstack(i)/acc_mult==g%wstack(j)/acc_mult) then
+          g%wstack(j)=ior(g%wstack(j),g%wstack(i))
+       else
+          j=j+1
+          g%wstack(j)=g%wstack(i)
+       endif
+    enddo
+    g%wtop=j
+  end subroutine g_sort_uniq
+
+  !===============================================
+  ! Grow wstack (both lower and upper)
+  !===============================================
+  subroutine grow_wstack(g)
+    type(gen_state),intent(inout):: g
+    integer,allocatable,dimension(:):: temp
+    integer:: new_size,new_bot
+    write(*,*) 'grow-wstack',g%wtop,g%wbot,g%wmax
+    temp=g%wstack
+    new_size=g%wmax*2
+    deallocate(g%wstack)
+    allocate(g%wstack(new_size))
+    g%wstack(1:g%wtop)=temp(1:g%wtop)
+    new_bot=new_size-g%wmax+g%wbot
+    g%wstack(new_bot:new_size)=temp(g%wbot:g%wmax)
+    g%wbot=new_bot
+    g%wmax=new_size
+    deallocate(temp)
+  end subroutine grow_wstack
+  
+  !************************************************
   ! PHASE I - VARIABLE ASSIGNMENT
   !************************************************
 
   !===========================================
-  ! Variable assignment phase for a code block
+  ! Assign variables for a code block
   !===========================================
   recursive subroutine gen_var_block(g,loc)
     type(gen_state):: g
@@ -426,7 +1643,7 @@ contains
     l=loc
     do while(l>0)
        if(debug_g) write(*,*) 'DO VAR>',l
-       g%lstack(g%lthis)%idx=g%lstack(g%lthis)%idx+1
+       g%lstack(g%depth)%idx=g%lstack(g%depth)%idx+1
        call gen_var_op(g,l)
        l=g%codes(l)
        if(debug_g) write(*,*) 'NEXT VAR',l
@@ -434,14 +1651,57 @@ contains
     if(debug_g) write(*,*) 'END VAR BLOCK>'
   end subroutine gen_var_block
 
+  !=============================================================
+  ! Assign variables for a block with comm operations
+  !=============================================================
+ subroutine gen_var_comm_block(g,blk)
+    type(gen_state):: g
+    integer,intent(in):: blk
+    integer:: save_depth,ll
+    save_depth=g%depth
+    if(debug_g) write(*,*) 'VAR COMM BLK>',blk
+    call g_new_frame(g)
+    ll=blk
+    do while(ll>0)
+       g%lstack(g%depth)%idx=g%lstack(g%depth)%idx+1
+       call gen_var_op(g,ll)
+       ll=g%codes(ll)
+    enddo
+    g%depth=save_depth
+    if(debug_g) write(*,*) 'VAR COMM BLK>',blk
+  end subroutine gen_var_comm_block
+
+  !=============================================================
+  ! Assign variables for inline shared proc body
+  !=============================================================
+  subroutine gen_var_shared_block(g,blk)
+    type(gen_state):: g
+    integer,intent(in):: blk
+    integer:: save_depth,ll
+    if(debug_g) write(*,*) 'VAR SHARED BLK>',blk
+    save_depth=g%depth
+    call g_new_frame(g)
+    g%lstack(g%depth)%loop_mode=loop_is_none
+    ll=blk
+    do while(ll>0)
+       g%lstack(g%depth)%idx=g%lstack(g%depth)%idx+1
+       call gen_var_op(g,ll)
+       ll=g%codes(ll)
+    enddo
+    call sort_var_list(g)
+    g%depth=save_depth
+    if(debug_g) write(*,*) 'END VAR SHARED BLK>',blk
+  end subroutine gen_var_shared_block
+
+
   !==================================================
-  ! Variable assignment phase for a single operation
+  ! Assign variables for a single operation
   !==================================================
   recursive subroutine gen_var_op(g,l)
     type(gen_state):: g
     integer,intent(in):: l
     integer:: opcode,opcode2,n,arg
-    integer:: i,j,a,save_lthis,ll,var1,idx1
+    integer:: i,j,a,save_depth,ll,var1,idx1
     logical:: save_loop_contains_shared
     if(pm_debug_level>0) then
        if(l>size(g%codes)) then
@@ -453,10 +1713,10 @@ contains
     opcode2=g%codes(l+comp_op_opcode2)
     n=iand(g%codes(l+comp_op_nargs),comp_op_nargs_mask)
     a=l+comp_op_arg0
-    
+   
     if(debug_g) then
        write(*,*) 'l=',l,n,op_names(opcode)
-       write(*,*) 'VAR OP> ',g%lstack(g%lthis)%idx,l,op_names(opcode),n,&
+       write(*,*) 'VAR OP> ',g%lstack(g%depth)%idx,l,op_names(opcode),n,&
             '>>',g%codes(l:l+comp_op_arg0+n-1)
     endif
     
@@ -481,11 +1741,11 @@ contains
     case(op_loop)
        save_loop_contains_shared=g%loop_contains_shared
        g%loop_contains_shared=.false.
-       var1=g%lstack(g%lthis)%varlist
-       idx1=g%lstack(g%lthis)%idx
+       var1=g%lstack(g%depth)%varlist
+       idx1=g%lstack(g%depth)%idx
        call use_var(g,g%codes(a))
        call gen_var_block(g,g%codes(a+1))
-       call extend_finish_to_loop(g,idx1,g%lstack(g%lthis)%idx,var1)
+       call extend_finish_to_loop(g,idx1,g%lstack(g%depth)%idx,var1)
        call use_var(g,g%codes(a+2))
        if(g%loop_contains_shared) then
           g%codes(l+comp_op_opcode2)=ior(g%codes(l+comp_op_opcode2),2)
@@ -493,12 +1753,12 @@ contains
        g%loop_contains_shared=save_loop_contains_shared
     case(op_comm_loop,op_comm_loop_par)
        save_loop_contains_shared=g%loop_contains_shared
-       var1=g%lstack(g%lthis)%varlist
-       idx1=g%lstack(g%lthis)%idx
+       var1=g%lstack(g%depth)%varlist
+       idx1=g%lstack(g%depth)%idx
        call cross_all_vars(g)
        call use_var(g,g%codes(a))
        call gen_var_block(g,g%codes(a+1))
-       call extend_finish_to_loop(g,idx1,g%lstack(g%lthis)%idx,var1)
+       call extend_finish_to_loop(g,idx1,g%lstack(g%depth)%idx,var1)
        call use_var(g,g%codes(a+2))
        call cross_all_vars(g)
        g%loop_contains_shared=save_loop_contains_shared
@@ -551,14 +1811,14 @@ contains
           call use_var(g,g%codes(a+i))
           call cross_var(g,g%codes(a+i))
        enddo
-       save_lthis=g%lthis
+       save_depth=g%depth
        call g_new_frame(g)
        call use_var(g,g%codes(a+4))
        call cross_var(g,g%codes(a+4))
        call use_var(g,g%codes(a+5))
        call cross_var(g,g%codes(a+5))
        call gen_var_block(g,g%codes(a+1))
-       g%lthis=save_lthis
+       g%depth=save_depth
        call gen_var_block(g,g%codes(a+2))
        call cross_all_vars(g)
        call use_var(g,g%codes(a))
@@ -573,14 +1833,14 @@ contains
           call use_var(g,g%codes(a+i))
           call cross_var(g,g%codes(a+i))
        enddo
-       save_lthis=g%lthis
+       save_depth=g%depth
        call g_new_frame(g)
        call use_var(g,g%codes(a+4))
        call cross_var(g,g%codes(a+4))
        call use_var(g,g%codes(a+8))
        call cross_var(g,g%codes(a+8))
        call gen_var_block(g,g%codes(a+1))
-       g%lthis=save_lthis
+       g%depth=save_depth
        call gen_var_block(g,g%codes(a+2))
        call cross_all_vars(g)
        call use_var(g,g%codes(a))
@@ -595,14 +1855,14 @@ contains
           call use_var(g,g%codes(a+i))
           call cross_var(g,g%codes(a+i))
        enddo
-       save_lthis=g%lthis
+       save_depth=g%depth
        call g_new_frame(g)
        call use_var(g,g%codes(a+2))
        call cross_var(g,g%codes(a+2))
        call use_var(g,g%codes(a+3))
        call cross_var(g,g%codes(a+3))
        call gen_var_block(g,g%codes(a+1))
-       g%lthis=save_lthis
+       g%depth=save_depth
        call cross_all_vars(g)
        call use_var(g,g%codes(a))
        do i=5,n-1
@@ -615,7 +1875,7 @@ contains
        call use_var(g,g%codes(a+4))
        call cross_var(g,g%codes(a+4))
        call cross_all_vars(g)
-       save_lthis=g%lthis
+       save_depth=g%depth
        call g_new_frame(g)
        call cross_all_vars(g)
        call use_var(g,g%codes(a+2))
@@ -628,7 +1888,7 @@ contains
        endif
        call gen_var_block(g,g%codes(a+1))
        call cross_all_vars(g)
-       g%lthis=save_lthis
+       g%depth=save_depth
     case(op_do_at)
        call use_var(g,g%codes(a))
        if(opcode2==0) then
@@ -651,47 +1911,179 @@ contains
 
   end subroutine gen_var_op
 
-  !=============================================================
-  ! Variable assignment phase for a block with comm operations
-  !=============================================================
-  subroutine gen_var_comm_block(g,blk)
-    type(gen_state):: g
-    integer,intent(in):: blk
-    integer:: save_lthis,ll
-    save_lthis=g%lthis
-    if(debug_g) write(*,*) 'VAR COMM BLK>',blk
-    call g_new_frame(g)
-    ll=blk
-    do while(ll>0)
-       g%lstack(g%lthis)%idx=g%lstack(g%lthis)%idx+1
-       call gen_var_op(g,ll)
-       ll=g%codes(ll)
-    enddo
-    g%lthis=save_lthis
-    if(debug_g) write(*,*) 'VAR COMM BLK>',blk
-  end subroutine gen_var_comm_block
+  !=================================================================
+  ! Use a variable - called in variable allocation phase
+  ! Employs simple state engine to determine how a variable needs
+  ! to be stored
+  !=================================================================
+  recursive subroutine use_var(g,avar,isassign)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: avar
+    logical,intent(in),optional:: isassign
+    integer:: kind,state,i,j,var,flags,tno,oldstate
+    integer,parameter,dimension(var_state_unused:var_state_closed):: new_state=(/&
+         var_state_used,     &  ! var_state_unused
+         var_state_used,     &  ! var_state_open
+         var_state_used,     &  ! var_state_used
+         var_state_crossing, &  ! var_state_used_before
+         var_state_crossing, &  ! var_state_crossing
+         var_state_used      &  ! var_state_closed
+         /)
+    if(avar==0.or.avar==shared_op_flag) return
+    var=abs(avar)
+    if(debug_g) write(*,*) 'USE VAR> ',var,g_index(g,var),g%depth,g%lstack(g%depth)%idx !,g_kind(g,var),g_v1(g,var)
+    kind=g_kind(g,var)
+    select case(kind)
+    case(v_is_group)
+       do i=1,g_v1(g,var)
+          call use_var(g,g_ptr(g,var,i),isassign)
+       enddo
+    case(v_is_sub,v_is_vsub)
+       call use_var(g,g_v1(g,var),isassign)
+       call use_var(g,g_v2(g,var),isassign)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
+       call use_var(g,g_v1(g,var),isassign)
+    case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
+       continue
+    case(v_is_cove)
+       call use_var(g,g_v2(g,var),isassign)
+       g%varindex(var)=g%varindex(g_v2(g,var))
+    case(v_is_alias)
+       call use_var(g,g_v1(g,var),isassign)
+       g%varindex(var)=g%varindex(g_v1(g,var))
+    case(v_is_chan_vect)
+       call use_var(g,g_v1(g,var),isassign)
+       g%varindex(var)=g%varindex(g_v1(g,var))
+    case default
+       i=g%varindex(var)
+       if(g%vardata(i)%state==var_state_unused) then
+          if(kind==v_is_ve) then
+             call use_var(g,g_v1(g,var))
+          endif
+          flags=g%vardata(i)%flags
+          if(iand(g%taints,proc_is_comm)/=0.and.&
+               iand(flags,v_is_param+v_is_result)/=0) then
+             if(iand(flags,v_is_shared)/=0) then
+                g%vardata(i)%state=var_state_used
+                g%vardata(i)%depth=g%depth
+             else
+                g%vardata(i)%state=var_state_crossing
+                if(iand(flags,v_is_result)/=0) then
+                   g%vardata(i)%depth=g%depth
+                else
+                   g%vardata(i)%depth=g%depth+1
+                endif
+             endif
+          else
+             g%vardata(i)%depth=g%depth
+             g%vardata(i)%state=var_state_used
+          endif
+          g%vardata(i)%outer_depth=g%vardata(i)%depth
+          g%vardata(i)%start=g%lstack(g%depth)%idx
+          g%vardata(i)%finish=g%vardata(i)%start
+          if(debug_g) write(*,*) 'START/FINISH=',g%vardata(i)%start
+          g%vardata(i)%link=g%lstack(g%depth)%varlist
+          g%lstack(g%depth)%varlist=i
+          !g%vardata(i)%oindex=var
+          g%vardata(i)%finish_on_assign=.false.
+          g%vardata(i)%free=0
+          if(debug_g) write(*,*) 'NEW VAR>',var,i, g%vardata(i)%link
+       else
+          oldstate=g%vardata(i)%state
+          g%vardata(i)%state=new_state(g%vardata(i)%state)
+          g%vardata(i)%finish=g%lstack(g%vardata(i)%depth)%idx
+          if(debug_g) then
+             write(*,*) 'FINISH=',g%vardata(i)%start,g%vardata(i)%finish,g%vardata(i)%depth
+          endif
+          g%vardata(i)%outer_depth=g_common_frame(g,g%vardata(i)%outer_depth,g%depth)
+          g%vardata(i)%flags=ior(g%vardata(i)%flags,&
+               merge(var_is_reused,var_is_used,iand(g%vardata(i)%flags,var_is_used)/=0))
+          if(debug_g) then
+             write(*,*) 'CONSIDER>',i,present(isassign)
+          endif
+          g%vardata(i)%finish_on_assign=present(isassign)
+       endif
+    end select
+  end subroutine use_var
 
-  !=============================================================
-  ! Variable assignment phase for inline shared proc body
-  !=============================================================
-  subroutine gen_var_shared_block(g,blk)
-    type(gen_state):: g
-    integer,intent(in):: blk
-    integer:: save_lthis,ll
-    if(debug_g) write(*,*) 'VAR SHARED BLK>',blk
-    save_lthis=g%lthis
-    call g_new_frame(g)
-    g%lstack(g%lthis)%loop_mode=loop_is_none
-    ll=blk
-    do while(ll>0)
-       g%lstack(g%lthis)%idx=g%lstack(g%lthis)%idx+1
-       call gen_var_op(g,ll)
-       ll=g%codes(ll)
-    enddo
-    call sort_var_list(g)
-    g%lthis=save_lthis
-    if(debug_g) write(*,*) 'END VAR SHARED BLK>',blk
-  end subroutine gen_var_shared_block
+  !===========================================================
+  ! In variable allocation phase - flag all active variables
+  ! when a comm op is encountered
+  !============================================================
+  subroutine cross_all_vars(g)
+    type(gen_state),intent(inout):: g
+    integer:: var
+    if(g%lstack(g%depth)%loop_mode==loop_is_none) return
+    g%loop_contains_shared=.true.
+    if(debug_g) write(*,*) 'CROSS ALL'
+    var=g%lstack(g%depth)%varlist
+    do while(var>0)
+       if(debug_g) write(*,*) 'CROSS',var,'IN CROSS ALL'
+       call cross_var_at_index(g,var)
+       var=g%vardata(var)%link
+    end do
+    if(debug_g) write(*,*) 'CROSSED ALL'
+  end subroutine cross_all_vars
+
+  !============================================================
+  ! Flag a single variable crossed by comm op
+  !============================================================
+  subroutine cross_var_at_index(g,i)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: i
+    integer:: state
+    integer,parameter,dimension(var_state_unused:var_state_closed):: new_state=(/&
+         var_state_unused,         &  ! var_state_unused
+         var_state_open,           &  ! var_state_open
+         var_state_used_before,    &  ! var_state_used
+         var_state_used_before,    &  ! var_state_used_before
+         var_state_crossing,       &  ! var_state_crossing
+         var_state_closed          &  ! var_state_closed
+         /)
+    if(g%lstack(g%depth)%loop_mode==loop_is_none) return
+    if(i==0) return
+    if(g%vardata(i)%depth/=g%depth) return
+    if(iand(g%vardata(i)%flags,v_is_shared)/=0) return
+    state=g%vardata(i)%state
+    if(debug_g) write(*,*) 'Crossing',i,state,new_state(state)
+    g%vardata(i)%state=new_state(state)
+  end subroutine cross_var_at_index
+
+  !==================================================================
+  ! Mark a variable as crossed (forced -not dependent on prior state)
+  !==================================================================
+  recursive subroutine cross_var(g,avar)
+    type(gen_state),intent(inout):: g
+    integer,intent(in):: avar
+    integer:: i,var
+    if(g%lstack(g%depth)%loop_mode==loop_is_none) return
+    if(avar==0.or.avar==shared_op_flag) return
+    var=abs(avar)
+    select case(g_kind(g,var))
+    case(v_is_group)
+       do i=1,g_v1(g,var)
+          call cross_var(g,g_ptr(g,var,i))
+       enddo
+    case(v_is_sub,v_is_vsub)
+       call cross_var(g,g_v1(g,var))
+       call cross_var(g,g_v2(g,var))
+    case(v_is_elem,v_is_unit_elem)
+       call cross_var(g,g_v1(g,var))
+    case(v_is_alias)
+       call cross_var(g,g_v1(g,var))
+    case(v_is_const,v_is_ctime_const,v_is_ve,v_is_cove)
+       continue
+    case default
+       i=g%varindex(var)
+       if(i/=0) then
+          if(g%vardata(i)%depth==g%depth.and.&
+               iand(g%vardata(i)%flags,v_is_shared)==0) then
+             !g%vardata(i)%state=var_state_crossing#
+             g%vardata(i)%flags=ior(g%vardata(i)%flags,var_is_comm_op_par)
+          endif
+       endif
+    end select
+  end subroutine cross_var
 
   !=======================================================================
   ! Reverse list of vars (varlist/link) for current loop context
@@ -702,21 +2094,21 @@ contains
     type(gen_state):: g
     integer:: v,v2
     integer:: finish,next,nextv
-    v=g%lstack(g%lthis)%varlist
-    g%lstack(g%lthis)%varlist=0
-    g%lstack(g%lthis)%evarlist=0
+    v=g%lstack(g%depth)%varlist
+    g%lstack(g%depth)%varlist=0
+    g%lstack(g%depth)%evarlist=0
     do while(v>0)
        nextv=g%vardata(v)%link
-       g%vardata(v)%link=g%lstack(g%lthis)%varlist
-       g%lstack(g%lthis)%varlist=v
-       v2=g%lstack(g%lthis)%evarlist
+       g%vardata(v)%link=g%lstack(g%depth)%varlist
+       g%lstack(g%depth)%varlist=v
+       v2=g%lstack(g%depth)%evarlist
        finish=g%vardata(v)%finish
        if(v2==0) then
-          g%lstack(g%lthis)%evarlist=v
+          g%lstack(g%depth)%evarlist=v
           g%vardata(v)%elink=0
        elseif(g%vardata(v2)%finish>=finish) then
           g%vardata(v)%elink=v2
-          g%lstack(g%lthis)%evarlist=v
+          g%lstack(g%depth)%evarlist=v
        else
           do while(g%vardata(v2)%elink>0)
              next=g%vardata(v2)%elink
@@ -731,13 +2123,13 @@ contains
 
     if(debug_g) then
        write(*,*) 'REVERSE OUT VARLIST>'
-       v=g%lstack(g%lthis)%varlist
+       v=g%lstack(g%depth)%varlist
        do while(v>0)
           write(*,*) v,g%vardata(v)%start
           v=g%vardata(v)%link
        enddo
        write(*,*) 'SORT OUT EVARLIST>'
-       v=g%lstack(g%lthis)%evarlist
+       v=g%lstack(g%depth)%evarlist
        do while(v>0)
           write(*,*) v,g%vardata(v)%finish
           v=g%vardata(v)%elink
@@ -754,9 +2146,9 @@ contains
   subroutine alloc_var_list(g)
     type(gen_state):: g
     integer:: v,e,i
-    if(debug_g) write(*,*) 'ALLOCATING>',g%lthis
-    v=g%lstack(g%lthis)%varlist
-    e=g%lstack(g%lthis)%evarlist
+    if(debug_g) write(*,*) 'ALLOCATING>',g%depth
+    v=g%lstack(g%depth)%varlist
+    e=g%lstack(g%depth)%evarlist
     do while(v/=0.and.e/=0)
        i=min(g%vardata(v)%start,g%vardata(e)%finish+1)
        do while(g%vardata(e)%finish+1==i)
@@ -783,7 +2175,7 @@ contains
        call deallocate_var(g,e)
        e=g%vardata(e)%elink
     enddo
-!!$    v=g%lstack(g%lthis)%varlist
+!!$    v=g%lstack(g%depth)%varlist
 !!$    do while(v/=0)
 !!$       write(34,*) g%vardata(v)%index,g_var_at_index_is_a_vect(g,v)
 !!$       v=g%vardata(v)%link
@@ -809,7 +2201,7 @@ contains
           if(debug_g) write(*,*) 'no storage',tno
        elseif(tno>pm_string) then
           if(debug_g) write(*,*) 'Free hash',tno
-          key(1)=g%lthis
+          key(1)=g%depth
           key(2)=isvect
           key(3)=tno
           j=pm_ivect_lookup(g%context,g%freehash,key,3)
@@ -819,7 +2211,7 @@ contains
              if(idx/=0) then
                 p%offset=g%vardata(idx)%free
                 call pm_dict_set_val(g%context,g%freehash,j,p)
-                g%vardata(idx)%gflags=ior(g%vardata(idx)%gflags,var_is_recycled)
+                g%vardata(idx)%flags=ior(g%vardata(idx)%flags,var_is_recycled)
                 idx=abs(g%vardata(idx)%index)
              else
                 g%index=g%index+1
@@ -829,11 +2221,11 @@ contains
              idx=-v
           endif
        else
-          if(debug_g) write(*,*) 'Freelist',tno,g%lstack(g%lthis)%free(isvect,tno)
-          if(g%lstack(g%lthis)%free(isvect,tno)/=0) then
-             idx=g%lstack(g%lthis)%free(isvect,tno)
-             g%lstack(g%lthis)%free(isvect,tno)=g%vardata(idx)%free
-             g%vardata(idx)%gflags=ior(g%vardata(idx)%gflags,var_is_recycled)
+          if(debug_g) write(*,*) 'Freelist',tno,g%lstack(g%depth)%free(isvect,tno)
+          if(g%lstack(g%depth)%free(isvect,tno)/=0) then
+             idx=g%lstack(g%depth)%free(isvect,tno)
+             g%lstack(g%depth)%free(isvect,tno)=g%vardata(idx)%free
+             g%vardata(idx)%flags=ior(g%vardata(idx)%flags,var_is_recycled)
              idx=abs(g%vardata(idx)%index)
              if(debug_g) write(*,*) 'get free',idx
           else
@@ -843,7 +2235,7 @@ contains
     else
        idx=0
     endif
-    if(debug_g) write(*,*) 'ALLOCATED>',v,idx,g%lthis
+    if(debug_g) write(*,*) 'ALLOCATED>',v,idx,g%depth
     g%vardata(v)%index=idx
   end subroutine allocate_var
 
@@ -862,10 +2254,10 @@ contains
        isvect=merge(2,1,g_var_at_index_is_a_vect(g,v))
        if(debug_g) write(*,*) 'Deallocate',v,tno,isvect
        if(tno<=pm_string) then
-          g%vardata(v)%free=g%lstack(g%lthis)%free(isvect,tno)
-          g%lstack(g%lthis)%free(isvect,tno)=v
+          g%vardata(v)%free=g%lstack(g%depth)%free(isvect,tno)
+          g%lstack(g%depth)%free(isvect,tno)=v
        else
-          key(1)=g%lthis
+          key(1)=g%depth
           key(2)=isvect
           key(3)=tno
           j=pm_ivect_lookup(g%context,g%freehash,key,3)
@@ -904,7 +2296,7 @@ contains
           merged=.false.
        else
           g%vardata(v)%index=abs(g%vardata(e)%index)
-          g%vardata(e)%gflags=ior(g%vardata(e)%gflags,var_is_recycled)
+          g%vardata(e)%flags=ior(g%vardata(e)%flags,var_is_recycled)
           if(debug_g) then
              write(*,*) 'MERGED>',g%vardata(v)%index
           endif
@@ -914,202 +2306,6 @@ contains
        merged=.false.
     endif
   end function merge_vars
-
-  !=================================================================
-  ! Use a variable - called in variable allocation phase
-  ! Employs simple state engine to determine how a variable needs
-  ! to be stored
-  !=================================================================
-  recursive subroutine use_var(g,avar,isassign)
-    type(gen_state),intent(inout):: g
-    integer,intent(in):: avar
-    logical,intent(in),optional:: isassign
-    integer:: kind,state,i,j,var,flags,tno
-    integer,parameter,dimension(var_state_unused:var_state_closed):: new_state=(/&
-         var_state_used,     &  ! var_state_unused
-         var_state_used,     &  ! var_state_open
-         var_state_used,     &  ! var_state_used
-         var_state_crossing, &  ! var_state_used_before
-         var_state_crossing, &  ! var_state_crossing
-         var_state_used      &  ! var_state_closed
-         /)
-    if(avar==0.or.avar==shared_op_flag) return
-    var=abs(avar)
-    if(debug_g) write(*,*) 'USE VAR> ',var,g_index(g,var),g%lthis,g%lstack(g%lthis)%idx !,g_kind(g,var),g_v1(g,var)
-    kind=g_kind(g,var)
-    select case(kind)
-    case(v_is_group)
-       do i=1,g_v1(g,var)
-          call use_var(g,g_ptr(g,var,i),isassign)
-       enddo
-    case(v_is_sub,v_is_vsub)
-       call use_var(g,g_v1(g,var),isassign)
-       call use_var(g,g_v2(g,var),isassign)
-    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
-       call use_var(g,g_v1(g,var),isassign)
-       !g%varindex(var)=g%varindex(g_v1(g,var))
-    case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
-       continue
-    case(v_is_cove)
-       call use_var(g,g_v2(g,var),isassign)
-       g%varindex(var)=g%varindex(g_v2(g,var))
-    case(v_is_alias)
-       call use_var(g,g_v1(g,var),isassign)
-       g%varindex(var)=g%varindex(g_v1(g,var))
-    case(v_is_chan_vect)
-       call use_var(g,g_v1(g,var),isassign)
-       g%varindex(var)=g%varindex(g_v1(g,var))
-    case default
-       i=g%varindex(var)
-       if(i==0) then
-          g%nvars=g%nvars+1
-          if(debug_g) write(*,*) 'CREATE>',var,g%nvars
-          i=g%nvars
-          if(kind==v_is_parve) then
-             g%vardata(i)%tno=pm_logical
-             flags=v_is_param
-             g%vardata(i)%name=0
-          elseif(kind==v_is_ve) then
-             call use_var(g,g_v1(g,var))
-             g%vardata(i)%tno=pm_logical
-             flags=0
-             g%vardata(i)%name=0
-          else
-             flags=g_v2(g,var)
-             tno=g_type(g,var)
-             g%vardata(i)%tno=tno
-             if(iand(flags,v_is_array_par_vect)==0) then
-                g%vardata(i)%name=g_v1(g,var)
-             else
-                g%vardata(i)%name=0
-             endif
-          endif
-          g%vardata(i)%flags=flags
-          if(iand(g%taints,proc_is_comm)/=0.and.&
-               iand(flags,v_is_param+v_is_result)/=0) then
-             if(iand(flags,v_is_shared)/=0) then
-                g%vardata(i)%state=var_state_used
-                g%vardata(i)%lthis=g%lthis
-             else
-                g%vardata(i)%state=var_state_crossing
-                if(iand(flags,v_is_result)/=0) then
-                   g%vardata(i)%lthis=g%lthis
-                else
-                   g%vardata(i)%lthis=g%lthis+1
-                endif
-             endif
-          else
-             g%vardata(i)%lthis=g%lthis
-             g%vardata(i)%state=var_state_used
-          endif
-          g%vardata(i)%outer_lthis=g%vardata(i)%lthis
-          g%vardata(i)%start=g%lstack(g%lthis)%idx
-          g%vardata(i)%finish=g%vardata(i)%start
-          if(debug_g) write(*,*) 'START/FINISH=',g%vardata(i)%start
-          g%vardata(i)%index=0
-          g%vardata(i)%link=g%lstack(g%lthis)%varlist
-          g%vardata(i)%gflags=0
-          g%lstack(g%lthis)%varlist=i
-          g%vardata(i)%oindex=var
-          g%vardata(i)%finish_on_assign=.false.
-          g%vardata(i)%free=0
-          g%varindex(var)=i
-          if(debug_g) write(*,*) 'NEW VAR>',var,i, g%vardata(i)%link
-       else
-          g%vardata(i)%state=new_state(g%vardata(i)%state)
-          g%vardata(i)%finish=g%lstack(g%vardata(i)%lthis)%idx
-          if(debug_g) then
-             write(*,*) 'FINISH=',g%vardata(i)%start,g%vardata(i)%finish,g%vardata(i)%lthis
-          endif
-          g%vardata(i)%outer_lthis=g_common_frame(g,g%vardata(i)%outer_lthis,g%lthis)
-          g%vardata(i)%gflags=ior(g%vardata(i)%gflags,&
-               merge(var_is_reused,var_is_used,iand(g%vardata(i)%gflags,var_is_used)/=0))
-          if(debug_g) then
-             write(*,*) 'CONSIDER>',i,present(isassign)
-          endif
-          g%vardata(i)%finish_on_assign=present(isassign)
-       endif
-    end select
-  end subroutine use_var
-
-  !===========================================================
-  ! In variable allocation phase - flag all active variables
-  ! when a comm op is encountered
-  !============================================================
-  subroutine cross_all_vars(g)
-    type(gen_state),intent(inout):: g
-    integer:: var
-    if(g%lstack(g%lthis)%loop_mode==loop_is_none) return
-    g%loop_contains_shared=.true.
-    if(debug_g) write(*,*) 'CROSS ALL'
-    var=g%lstack(g%lthis)%varlist
-    do while(var>0)
-       if(debug_g) write(*,*) 'CROSS',var,'IN CROSS ALL'
-       call cross_var_at_index(g,var)
-       var=g%vardata(var)%link
-    end do
-    if(debug_g) write(*,*) 'CROSSED ALL'
-  end subroutine cross_all_vars
-
-  !============================================================
-  ! Flag a single variable crossed by comm op
-  !============================================================
-  subroutine cross_var_at_index(g,i)
-    type(gen_state),intent(inout):: g
-    integer,intent(in):: i
-    integer:: state
-    integer,parameter,dimension(var_state_unused:var_state_closed):: new_state=(/&
-         var_state_unused,         &  ! var_state_unused
-         var_state_open,           &  ! var_state_open
-         var_state_used_before,    &  ! var_state_used
-         var_state_used_before,    &  ! var_state_used_before
-         var_state_crossing,       &  ! var_state_crossing
-         var_state_closed          &  ! var_state_closed
-         /)
-    if(g%lstack(g%lthis)%loop_mode==loop_is_none) return
-    if(i==0) return
-    if(g%vardata(i)%lthis/=g%lthis) return
-    if(iand(g%vardata(i)%flags,v_is_shared)/=0) return
-    state=g%vardata(i)%state
-    if(debug_g) write(*,*) 'Crossing',i,state,new_state(state)
-    g%vardata(i)%state=new_state(state)
-  end subroutine cross_var_at_index
-
-  !==================================================================
-  ! Mark a variable as crossed (forced -not dependent on prior state)
-  !==================================================================
-  recursive subroutine cross_var(g,avar)
-    type(gen_state),intent(inout):: g
-    integer,intent(in):: avar
-    integer:: i,var
-    if(g%lstack(g%lthis)%loop_mode==loop_is_none) return
-    if(avar==0.or.avar==shared_op_flag) return
-    var=abs(avar)
-    select case(g_kind(g,var))
-    case(v_is_group)
-       do i=1,g_v1(g,var)
-          call cross_var(g,g_ptr(g,var,i))
-       enddo
-    case(v_is_sub,v_is_vsub)
-       call cross_var(g,g_v1(g,var))
-       call cross_var(g,g_v2(g,var))
-    case(v_is_elem,v_is_unit_elem)
-       call cross_var(g,g_v1(g,var))
-    case(v_is_alias)
-       call cross_var(g,g_v1(g,var))
-    case(v_is_const,v_is_ctime_const,v_is_ve,v_is_cove)
-       continue
-    case default
-       i=g%varindex(var)
-       if(i/=0) then
-          if(g%vardata(i)%lthis==g%lthis.and.&
-               iand(g%vardata(i)%flags,v_is_shared)==0) then
-             !g%vardata(i)%state=var_state_crossing#
-             g%vardata(i)%gflags=ior(g%vardata(i)%gflags,var_is_comm_op_par)
-          endif
-       endif
-    end select
-  end subroutine cross_var
 
   !============================================================
   ! If a variable was created outside of an iterative loop
@@ -1123,7 +2319,7 @@ contains
     ! Loop over vars created before loop
     var=last_var_before_loop
     do while(var>0)
-       if(g%vardata(var)%lthis==g%lthis) then
+       if(g%vardata(var)%depth==g%depth) then
           if(g%vardata(var)%finish>=loop_start_idx) then
              g%vardata(var)%finish=loop_finish_idx
           endif
@@ -1162,7 +2358,7 @@ contains
   recursive subroutine gen_op(g,loc)
     type(gen_state):: g
     integer,intent(in):: loc
-    integer:: opcode,opcode2,n,a,arg,save_lthis,l,ll,i,j,k,m,tno
+    integer:: opcode,opcode2,n,a,arg,save_depth,l,ll,i,j,k,m,tno
     logical:: ok,need_endif
 
     if(pm_debug_level>0) then
@@ -1197,7 +2393,7 @@ contains
     endif
 
     if(pm_opts%ftn_annotate) then
-       call out_char_idx(g,'!',merge(1000,0,g%lstack(g%lthis)%loop_active)+g%lthis)
+       call out_char_idx(g,'!',merge(1000,0,g%lstack(g%depth)%loop_active)+g%depth)
        call out_new_line(g)
     endif
     
@@ -1256,7 +2452,7 @@ contains
        do i=n/2,1,-1
           call out_str(g,'DO I')
           call out_idx(g,i-1)
-          call out_char_idx(g,'_',g%lthis)
+          call out_char_idx(g,'_',g%depth)
           call out_str(g,'=0,-1+')
           call out_arg(g,g%codes(a+i+n/2),arg_no_index)
           call out_new_line(g)
@@ -1265,41 +2461,41 @@ contains
           call out_arg(g,g%codes(a+i),0)
           call out_str(g,'=I')
           call out_idx(g,i-1)
-          call out_char_idx(g,'_',g%lthis)
+          call out_char_idx(g,'_',g%depth)
           call out_new_line(g)
        enddo
-       call out_char_idx(g,'I',g%lthis)
+       call out_char_idx(g,'I',g%depth)
        call out_str(g,'=1+')
        call out_char_idx(g,'I',0)
-       call out_char_idx(g,'_',g%lthis)
+       call out_char_idx(g,'_',g%depth)
        do i=2,n/2
           call out_char(g,'+')
           call out_arg(g,g%codes(a+i+n/2-1),0)
           call out_str(g,'*(I')
           call out_idx(g,i-1)
-          call out_char_idx(g,'_',g%lthis)
+          call out_char_idx(g,'_',g%depth)
        enddo
        do i=2,n/2
           call out_char(g,')')
        enddo
        call out_new_line(g)
-       g%lstack(g%lthis)%nloops=n/2
-       g%lstack(g%lthis)%loop_mode=loop_is_contig
-       g%lstack(g%lthis)%loop_active=.true.
+       g%lstack(g%depth)%nloops=n/2
+       g%lstack(g%depth)%loop_mode=loop_is_contig
+       g%lstack(g%depth)%loop_active=.true.
     case(op_nested_loop)
        call gen_loop(g,l,.true.)
-       g%lstack(g%lthis)%loop_par=g%codes(a+1)
-       g%lstack(g%lthis)%loop_mode=loop_is_nested
+       g%lstack(g%depth)%loop_par=g%codes(a+1)
+       g%lstack(g%depth)%loop_mode=loop_is_nested
     case(op_blocked_loop)
        call gen_loop(g,l,.true.)
-       g%lstack(g%lthis)%loop_par=g%codes(a+n-1)
-       g%lstack(g%lthis)%loop_mode=loop_is_nested
+       g%lstack(g%depth)%loop_par=g%codes(a+n-1)
+       g%lstack(g%depth)%loop_mode=loop_is_nested
        call gen_loop(g,l,.false.)
        do i=1,n-2
           call out_arg(g,g%codes(a+i),0)
           call out_str(g,'=I')
           call out_idx(g,i)
-          call out_char_idx(g,'_',g%lthis)
+          call out_char_idx(g,'_',g%depth)
           call out_new_line(g)
        enddo
     case(op_skip_empty)
@@ -1346,7 +2542,7 @@ contains
           call out_ftn_name(g,g_procname(g,opcode2))
        endif
        call out_str(g,'(N')
-       call out_idx(g,g%lthis)
+       call out_idx(g,g%depth)
        call out_char(g,',')
        if(g%codes(a)>0) then
           call out_call_arg(g,g%codes(a),arg_no_index+arg_comm_arg)
@@ -1403,13 +2599,13 @@ contains
     case(op_do_at)
        call gen_loop(g,l,.false.)
        if(opcode2==1) then
-          call out_simple(g,'IDO=I$N',n=g%lthis)
+          call out_simple(g,'IDO=I$N',n=g%depth)
        else
           call out_simple(g,'IDO=$2+1',l)
        endif
-       i=g_lthis(g,g%codes(a+merge(2,3,opcode2==1)))
+       i=g_depth(g,g%codes(a+merge(2,3,opcode2==1)))
        if(i/=0.and.g%lstack(i)%loop_active) then
-          write(*,*) 'lthis=',g%lthis,'from',g%codes(a+3)
+          write(*,*) 'depth=',g%depth,'from',g%codes(a+3)
           call pm_panic('Loop active in op_do_at')
        endif
        g%lalt=i
@@ -1430,8 +2626,8 @@ contains
        continue
     case(op_wrap)
        ! Save the current loop context for variable
-       !write(*,*) 'WRAP',g%lthis,'to',g%codes(a+1)
-       call g_set_v2(g,g%codes(a+1),g%lthis)
+       !write(*,*) 'WRAP',g%depth,'to',g%codes(a+1)
+       call g_set_v2(g,g%codes(a+1),g%depth)
 
     case(op_sync)
        call gen_loop(g,l,.true.)
@@ -1522,8 +2718,8 @@ contains
        !call out_line(g,'write(*,*) "ISEND_ASSN"')
        call out_simple(g,'JNODE=$2',l)
        if(n>6) then
-          call out_simple(g,'ALLOCATE RBUFFER%P(N$N)',n=g%lthis)
-          call out_simple(g,'CALL PM__MASK_OFFSETS(N$N,$1,RBUFFER%P,$6,NREQ)',l,n=g%lthis)
+          call out_simple(g,'ALLOCATE RBUFFER%P(N$N)',n=g%depth)
+          call out_simple(g,'CALL PM__MASK_OFFSETS(N$N,$1,RBUFFER%P,$6,NREQ)',l,n=g%depth)
           call out_line(g,'JCOMM=PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM')
           call out_line(g,'CALL MPI_ISEND(NREQ,1,MPI_AINT,JNODE,PM__REQ_TAG,JCOMM,JMESS,JERRNO)')
           call out_line(g,'PM__PUSH_MESSAGE(JMESS)')
@@ -1554,8 +2750,8 @@ contains
        call gen_active_check_start(g,l)
        call out_simple(g,'JNODE=$2',l)
        if(n>4) then
-          call out_simple(g,'ALLOCATE RBUFFER%P(N$N)',n=g%lthis)
-          call out_simple(g,'CALL PM__MASK_OFFSETS(N$N,$1,RBUFFER%P,$5,NREQ)',l,n=g%lthis)
+          call out_simple(g,'ALLOCATE RBUFFER%P(N$N)',n=g%depth)
+          call out_simple(g,'CALL PM__MASK_OFFSETS(N$N,$1,RBUFFER%P,$5,NREQ)',l,n=g%depth)
           call out_line(g,'JCOMM=PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM')
           call gen_mpi_recv_part(g,g%codes(a+3),'PM__DATA_TAG','RECV',.true.,'RBUFFER%P','1','NREQ',mode_vect)
        else
@@ -1735,7 +2931,7 @@ contains
        call out_char(g,'(')
        if(g_is_vect(g,g%codes(a+1))) then
           call out_str(g,'IJ,I')
-          call out_idx(g,g%lthis)
+          call out_idx(g,g%depth)
           call out_str(g,')=')
        else
           call out_str(g,'IJ)=')
@@ -1783,10 +2979,10 @@ contains
        call gen_loop(g,l,.true.)
        call out_get_mpi_base_type(g,g_type(g,g%codes(a+3)))
        call out_simple(g,'CALL PM__FILE_SET_VIEW($2,JBASE,$#4,N$N,$5,$1,OFFSET)',l,&
-            n=g%lthis)
+            n=g%depth)
        call out_simple(g,'IF($1==0) THEN',l)
        call out_get_mpi_base_type(g,g_type(g,g%codes(a+5)))
-       call out_simple(g,'CALL PM__GET_MPI_TYPE(JBASE,N$N,JTYPE,JN,LNEW)',l,n=g%lthis)
+       call out_simple(g,'CALL PM__GET_MPI_TYPE(JBASE,N$N,JTYPE,JN,LNEW)',l,n=g%depth)
        if(opcode==op_read_file_tile) then
           call out_simple(g,'CALL MPI_FILE_READ_ALL($2,$#3,JN,JTYPE,MPI_STATUS_IGNORE,$1)',l)
        else 
@@ -1995,12 +3191,12 @@ contains
     type(gen_state):: g
     integer,intent(in):: l,blk
     type(gloop):: save_loop
-    save_loop=g%lstack(g%lthis)
-    g%lstack(g%lthis)%nloops=0
-    g%lstack(g%lthis)%loop_mode=loop_is_none
+    save_loop=g%lstack(g%depth)
+    g%lstack(g%depth)%nloops=0
+    g%lstack(g%depth)%loop_mode=loop_is_none
     call gen_block(g,blk)
     call gen_loop(g,l,.true.)
-    g%lstack(g%lthis)=save_loop
+    g%lstack(g%depth)=save_loop
   end subroutine gen_over_block
 
   !============================================================
@@ -2010,20 +3206,20 @@ contains
     type(gen_state):: g
     integer,intent(in):: l,lnew
     character(len=*),intent(in):: nc
-    integer:: save_lthis,ll,save_last_ve
+    integer:: save_depth,ll,save_last_ve
     call gen_loop(g,l,.false.)
     save_last_ve=g%last_ve
     g%last_ve=0
     g%ltop=g%ltop+1
-    save_lthis=g%lthis
-    g%lthis=g%ltop
-    g%lstack(g%lthis)%nloops=0
-    g%lstack(g%lthis)%loop_mode=loop_is_contig
+    save_depth=g%depth
+    g%depth=g%ltop
+    g%lstack(g%depth)%nloops=0
+    g%lstack(g%depth)%loop_mode=loop_is_contig
  
-    if(pm_opts%ftn_annotate) call out_simple(g,'! BLOCK -> $N',n=g%lthis)
-    if(nc/=' ') call out_simple(g,'N$N='//nc,l,n=g%lthis)
+    if(pm_opts%ftn_annotate) call out_simple(g,'! BLOCK -> $N',n=g%depth)
+    if(nc/=' ') call out_simple(g,'N$N='//nc,l,n=g%depth)
     call gen_vect_alloc(g)
-    g%lstack(g%lthis)%loop_active=.false.
+    g%lstack(g%depth)%loop_active=.false.
     ll=lnew
     do while(ll>0)
        call gen_op(g,ll)
@@ -2031,8 +3227,8 @@ contains
     enddo
     call gen_loop(g,l,.true.)
     call gen_vect_dealloc(g)
-    if(pm_opts%ftn_annotate) call out_simple(g,'!ENDBLOCK -> $N',n=g%lthis)
-    g%lthis=save_lthis
+    if(pm_opts%ftn_annotate) call out_simple(g,'!ENDBLOCK -> $N',n=g%depth)
+    g%depth=save_depth
     g%last_ve=save_last_ve
   end subroutine gen_comm_block
 
@@ -2040,7 +3236,7 @@ contains
     type(gen_state):: g
     integer,intent(in):: l,lnew
     logical,intent(in):: assn
-    integer:: a,save_lthis,ll,save_last_ve
+    integer:: a,save_depth,ll,save_last_ve
     a=l+comp_op_arg0
     !call out_line(g,'write(*,*) "RECV CALL"')
     call out_line(g,'JCOMM=PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM')
@@ -2052,11 +3248,11 @@ contains
     save_last_ve=g%last_ve
     g%last_ve=0
     g%ltop=g%ltop+1
-    save_lthis=g%lthis
-    g%lthis=g%ltop
-    g%lstack(g%lthis)%nloops=0
-    g%lstack(g%lthis)%loop_mode=loop_is_contig
-    call out_simple(g,'CALL MPI_RECV(N$N,1,MPI_AINT,JNODE,PM__REQ_TAG,JCOMM,MPI_STATUS_IGNORE,JERRNO)',n=g%lthis)
+    save_depth=g%depth
+    g%depth=g%ltop
+    g%lstack(g%depth)%nloops=0
+    g%lstack(g%depth)%loop_mode=loop_is_contig
+    call out_simple(g,'CALL MPI_RECV(N$N,1,MPI_AINT,JNODE,PM__REQ_TAG,JCOMM,MPI_STATUS_IGNORE,JERRNO)',n=g%depth)
     call gen_vect_alloc(g)
     call gen_mpi_recv(g,g%codes(a+3),'PM__EXTRA_REQ_TAG','RECV',mode_vect,.false.)
     if(assn) then
@@ -2076,7 +3272,7 @@ contains
     enddo
     call gen_loop(g,l,.true.)
     call gen_vect_dealloc(g)
-    g%lthis=save_lthis
+    g%depth=save_depth
     g%last_ve=save_last_ve
   end subroutine gen_mpi_recv_call
 
@@ -2087,23 +3283,23 @@ contains
   subroutine gen_shared_block(g,l,lnew)
     type(gen_state):: g
     integer,intent(in):: l,lnew
-    integer:: save_lthis,ll,save_last_ve
+    integer:: save_depth,ll,save_last_ve
     call gen_loop(g,l,.true.)
     save_last_ve=g%last_ve
     g%last_ve=0
     g%ltop=g%ltop+1
-    save_lthis=g%lthis
-    g%lthis=g%ltop
-    g%lstack(g%lthis)%nloops=0
-    g%lstack(g%lthis)%loop_mode=loop_is_none
-    if(pm_opts%ftn_annotate) call out_simple(g,'! SHARED BLOCK -> $N',n=g%lthis)
+    save_depth=g%depth
+    g%depth=g%ltop
+    g%lstack(g%depth)%nloops=0
+    g%lstack(g%depth)%loop_mode=loop_is_none
+    if(pm_opts%ftn_annotate) call out_simple(g,'! SHARED BLOCK -> $N',n=g%depth)
     ll=lnew
     do while(ll>0)
        call gen_op(g,ll)
        ll=g%codes(ll)
     enddo
-    if(pm_opts%ftn_annotate) call out_simple(g,'!END SHARED BLOCK -> $N',n=g%lthis)
-    g%lthis=save_lthis
+    if(pm_opts%ftn_annotate) call out_simple(g,'!END SHARED BLOCK -> $N',n=g%depth)
+    g%depth=save_depth
     g%last_ve=save_last_ve
   end subroutine gen_shared_block
 
@@ -2114,23 +3310,23 @@ contains
   !================================================================
   subroutine g_new_frame(g)
     type(gen_state),intent(inout):: g
-    integer:: old_lthis
-    old_lthis=g%lthis
+    integer:: old_depth
+    old_depth=g%depth
     g%ltop=g%ltop+1
-    g%lthis=g%ltop
-    g%lstack(g%lthis)%varlist=0
-    g%lstack(g%lthis)%evarlist=0
-    g%lstack(g%lthis)%defer_free=0
-    g%lstack(g%lthis)%idx=0
-    g%lstack(g%lthis)%free=0
-    g%lstack(g%lthis)%loop_mode=loop_is_contig
-    g%lstack(g%lthis)%loop_active=.false.
-    if(g%lthis==0) then
-       g%lstack(g%lthis)%parent=0
-       g%lstack(g%lthis)%depth=0
+    g%depth=g%ltop
+    g%lstack(g%depth)%varlist=0
+    g%lstack(g%depth)%evarlist=0
+    g%lstack(g%depth)%defer_free=0
+    g%lstack(g%depth)%idx=0
+    g%lstack(g%depth)%free=0
+    g%lstack(g%depth)%loop_mode=loop_is_contig
+    g%lstack(g%depth)%loop_active=.false.
+    if(g%depth==0) then
+       g%lstack(g%depth)%parent=0
+       g%lstack(g%depth)%depth=0
     else
-       g%lstack(g%lthis)%parent=old_lthis
-       g%lstack(g%lthis)%depth=g%lstack(old_lthis)%depth+1
+       g%lstack(g%depth)%parent=old_depth
+       g%lstack(g%depth)%depth=g%lstack(old_depth)%depth+1
     endif
   end subroutine g_new_frame
 
@@ -2138,33 +3334,33 @@ contains
   ! Given the indices of two loop stack frames, determine the
   ! index of a third frame that is common parent to both
   !================================================================
-  function g_common_frame(g,lthis_1,lthis_2) result(lthis)
+  function g_common_frame(g,depth_1,depth_2) result(depth)
     type(gen_state):: g
-    integer,intent(in):: lthis_1,lthis_2
-    integer:: lthis1,lthis2,lthis
-    lthis1=lthis_1
-    lthis2=lthis_2
-    if(lthis1==lthis2) then
-       lthis=lthis1
+    integer,intent(in):: depth_1,depth_2
+    integer:: depth1,depth2,depth
+    depth1=depth_1
+    depth2=depth_2
+    if(depth1==depth2) then
+       depth=depth1
        return
     endif
-    do while(g%lstack(lthis1)%depth>g%lstack(lthis2)%depth)
-       !write(73,*) '1>',lthis1,g%lstack(lthis1)%depth
-       lthis1=g%lstack(lthis1)%parent
+    do while(g%lstack(depth1)%depth>g%lstack(depth2)%depth)
+       !write(73,*) '1>',depth1,g%lstack(depth1)%depth
+       depth1=g%lstack(depth1)%parent
     enddo
-    do while(g%lstack(lthis2)%depth>g%lstack(lthis1)%depth)
-       !write(73,*) '2>',lthis2,g%lstack(lthis2)%depth
-       lthis2=g%lstack(lthis2)%parent
+    do while(g%lstack(depth2)%depth>g%lstack(depth1)%depth)
+       !write(73,*) '2>',depth2,g%lstack(depth2)%depth
+       depth2=g%lstack(depth2)%parent
     enddo
-    do while(lthis1/=lthis2.and.lthis1/=0.and.lthis2/=0)
-       !write(73,*) '12>',lthis1,lthis2,g%lstack(lthis1)%depth
-       lthis1=g%lstack(lthis1)%parent
-       lthis2=g%lstack(lthis2)%parent
+    do while(depth1/=depth2.and.depth1/=0.and.depth2/=0)
+       !write(73,*) '12>',depth1,depth2,g%lstack(depth1)%depth
+       depth1=g%lstack(depth1)%parent
+       depth2=g%lstack(depth2)%parent
     enddo
-    !write(73,*) 'F>',lthis1,lthis2
-    lthis=lthis1
-    !write(73,*) lthis,min(lthis_1,lthis_2)
-    !if(lthis/=min(lthis_1,lthis_2)) write(73,*)'********'
+    !write(73,*) 'F>',depth1,depth2
+    depth=depth1
+    !write(73,*) depth,min(depth_1,depth_2)
+    !if(depth/=min(depth_1,depth_2)) write(73,*)'********'
     return
   end function g_common_frame
 
@@ -2186,7 +3382,7 @@ contains
     ! Start up loops
     if((.not.shared).and.(.not.g_loop_active(g))) then
        call gen_loop_nest(g)
-       g%lstack(g%lthis)%loop_active=.true.
+       g%lstack(g%depth)%loop_active=.true.
        g%last_ve=0
     endif
     
@@ -2210,7 +3406,7 @@ contains
   function g_loop_active(g) result(ok)
     type(gen_state):: g
     logical:: ok
-    ok=g%lstack(g%lthis)%loop_active
+    ok=g%lstack(g%depth)%loop_active
   end function g_loop_active
 
   !============================================================
@@ -2224,23 +3420,23 @@ contains
 
     if(g_loop_active(g)) return
     
-    select case(g%lstack(g%lthis)%loop_mode)
+    select case(g%lstack(g%depth)%loop_mode)
     case(loop_is_none)
        return
     case(loop_is_contig)
        call out_str(g,'DO I')
-       call out_idx(g,g%lthis)
+       call out_idx(g,g%depth)
        call out_str(g,'=1,N')
-       call out_idx(g,g%lthis)
+       call out_idx(g,g%depth)
        call out_new_line(g)
        nloops=1
     case(loop_is_nested)
-       call gen_nested_loop(g,g%lstack(g%lthis)%loop_par,nloops)
+       call gen_nested_loop(g,g%lstack(g%depth)%loop_par,nloops)
     case default
        call pm_panic('gen_loop_nest')
     end select
-    g%lstack(g%lthis)%loop_active=.true.
-    g%lstack(g%lthis)%nloops=nloops
+    g%lstack(g%depth)%loop_active=.true.
+    g%lstack(g%depth)%nloops=nloops
     g%last_ve=0
   end subroutine gen_loop_nest
 
@@ -2273,19 +3469,19 @@ contains
                 case(1)
                    ! single point
                    call out_simple(g,'I$N_$M=$I+1 !!! moo',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    !nloops=nloops+1
                 case(2)
                    ! range
                    call out_simple_part(g,'DO I$N_$M=$I,',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    call out_arg(g,g_ptr(g,vdim,2),0)
                    call out_new_line(g)
                    nloops=nloops+1
                 case(3)
                    ! strided range
                    call out_simple_part(g,'DO I$N_$M=$I,',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    call out_arg(g,g_ptr(g,vdim,2),0)
                    call out_char(g,',')
                    call out_arg(g,g_ptr(g,vdim,3),0)
@@ -2294,20 +3490,20 @@ contains
                 case(4)
                    ! map seq
                    call out_simple(g,'DO I$N__$M=1,$I',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,2))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,2))
                    array=g_ptr(g,vdim,1)
                    if(g_kind(g,array)==v_is_group) then
                       call out_simple(g,'I$N_$M=$I(I$N__$M)',&
-                           n=i,m=g%lthis,x=g_ptr(g,array,1))
+                           n=i,m=g%depth,x=g_ptr(g,array,1))
                    else
                       call out_simple(g,'I$N_$M=$I%E1%P(I$N__$M)',&
-                           n=i,m=g%lthis,x=array)
+                           n=i,m=g%depth,x=array)
                    endif
                    nloops=nloops+1
                 case(5)
                    ! blocked seq
                    call out_simple_part(g,'DO I$N__$M=($I)-',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    call out_arg(g,g_ptr(g,vdim,5),0)
                    call out_str(g,',(')
                    call out_arg(g,g_ptr(g,vdim,2),0)
@@ -2315,9 +3511,9 @@ contains
                    call out_arg(g,g_ptr(g,vdim,3),0)
                    call out_new_line(g)
                    call out_simple_part(g,'DO I$N_$M=MAX($I,I$N__$M),',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    call out_simple_part(g,'MIN(I$N__$M+($I)-1,',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,4))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,4))
                    call out_arg(g,g_ptr(g,vdim,2),0)
                    call out_char(g,')')
                    call out_new_line(g)
@@ -2326,16 +3522,16 @@ contains
              else
                 ! Array
                 call out_simple(g,'DO I$N__$M=1,SIZE($I%P)',&
-                     n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                     n=i,m=g%depth,x=g_ptr(g,vdim,1))
                 call out_simple(g,'I$N_$M=$I(I$N__$M)',&
-                     n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                     n=i,m=g%depth,x=g_ptr(g,vdim,1))
                 nloops=nloops+1
              endif
           else
              call out_simple(g,'DO I$N__$M=1,SIZE($I%E1%P)',&
-                  n=i,m=g%lthis,x=vdim)
+                  n=i,m=g%depth,x=vdim)
              call out_simple(g,'I$N_$M=$I%E1%P(I$N__$M)',&
-                  n=i,m=g%lthis,x=vdim)
+                  n=i,m=g%depth,x=vdim)
              nloops=nloops+1
           endif
        enddo
@@ -2352,11 +3548,11 @@ contains
                 case(1)
                    ! single point
                    call out_simple(g,'I$N_$M=$I+1',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                 case(2)
                    ! range
                    call out_simple_part(g,'DO I$N__$M=$I,',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    call out_arg(g,g_ptr(g,vdim,2),0)
                    call out_simple_part(g,',$I%E$N',x=vblock,n=i)
                    call out_new_line(g)
@@ -2364,7 +3560,7 @@ contains
                 case(3)
                    ! strided range
                    call out_simple_part(g,'DO I$N__$M=$I,',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    call out_arg(g,g_ptr(g,vdim,2),0)
                    call out_char(g,',')
                    call out_arg(g,g_ptr(g,vdim,3),0)
@@ -2374,7 +3570,7 @@ contains
                 case(5)
                    ! blocked seq
                    call out_simple_part(g,'DO I$N__$M=$I-',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    call out_arg(g,g_ptr(g,vdim,5),0)
                    call out_char(g,',')
                    call out_arg(g,g_ptr(g,vdim,2),0)
@@ -2382,25 +3578,25 @@ contains
                    call out_arg(g,g_ptr(g,vdim,3),0)
                    call out_new_line(g)
                    call out_simple_part(g,'IMAX$N__$M=MIN(I$N__$M+$I-1,',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,4))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,4))
                    call out_arg(g,g_ptr(g,vdim,2),0)
                    call out_line(g,')')
                    call out_simple_part(g,'DO I$N_$M=MAX($I,I$N__$M),IMAX$N__$M',&
-                        n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                        n=i,m=g%depth,x=g_ptr(g,vdim,1))
                    call out_simple(g,',$I%E$N',x=vblock,n=i)
                    nloops=nloops+2
                 end select
              else
                 ! Arrays (split)
                 call out_simple_part(g,'DO I$N___$M=1,SIZE($I%P),',&
-                     n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                     n=i,m=g%depth,x=g_ptr(g,vdim,1))
                 call out_simple(g,',$I%E$N',x=vblock,n=i)
                 nloops=nloops+1
              endif
           else
              ! Array
              call out_simple_part(g,'DO I$N___$M=1,SIZE($I%E1%P),',&
-                  n=i,m=g%lthis,x=vdim)
+                  n=i,m=g%depth,x=vdim)
              call out_simple(g,',$I%E$N',x=vblock,n=i)
              nloops=nloops+1
           endif
@@ -2418,7 +3614,7 @@ contains
                 case(2)
                    ! range
                    call out_simple_part(g,'DO I$N_$M=I$N__$M,MIN(I$N__$M-1+$I%E$N,',&
-                        n=i,m=g%lthis,x=vblock)
+                        n=i,m=g%depth,x=vblock)
                    call out_arg(g,g_ptr(g,vdim,2),0)
                    call out_char(g,')')
                    call out_new_line(g)
@@ -2426,7 +3622,7 @@ contains
                 case(3)
                    ! strided range
                    call out_simple_part(g,'DO I$N_$M=I$N__$M,MIN(I$N__$M-1+$I%E$N*',&
-                        n=i,m=g%lthis,x=vblock)
+                        n=i,m=g%depth,x=vblock)
                    call out_arg(g,g_ptr(g,vdim,3),0)
                    call out_char(g,',')
                    call out_arg(g,g_ptr(g,vdim,2),0)
@@ -2437,26 +3633,26 @@ contains
                 case(5)
                    ! blocked seq
                    call out_simple(g,'DO I$N_$M=I$N__$M,MIN(IMAX$N__$M,I$N__$M+$I%E$N)',&
-                        n=i,m=g%lthis,x=vblock)
+                        n=i,m=g%depth,x=vblock)
                    nloops=nloops+1
                 end select
              else
                 ! Array (split)
                 call out_simple_part(g,'DO I$N__$M=I$N__$M,MIN(I$N__$M-1+$I%E$N,SIZE(',&
-                     n=i,m=g%lthis,x=vblock)
+                     n=i,m=g%depth,x=vblock)
                 call out_arg(g,g_ptr(g,vdim,1),0)
                 call out_line(g,'))')
                 call out_simple(g,'I$N_$M=$I(I$N__$M)',&
-                     n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                     n=i,m=g%depth,x=g_ptr(g,vdim,1))
              endif
           else
              ! Array
              call out_simple_part(g,'DO I$N__$M=I$N__$M,MIN(I$N__$M-1+$I%E$N,SIZE(',&
-                  n=i,m=g%lthis,x=vblock)
+                  n=i,m=g%depth,x=vblock)
              call out_arg(g,g_ptr(g,vdim,1),0)
              call out_line(g,'%E1))')
              call out_simple(g,'I$N_$M=$I%E1(I$N__$M)',&
-                  n=i,m=g%lthis,x=g_ptr(g,vdim,1))
+                  n=i,m=g%depth,x=g_ptr(g,vdim,1))
           endif
        enddo
     else
@@ -2469,16 +3665,16 @@ contains
 
     ! Calculate combined index
     vsize=g_ptr(g,v,2)
-    call out_char_idx(g,'I',g%lthis)
+    call out_char_idx(g,'I',g%depth)
     call out_str(g,'=1+')
     call out_char_idx(g,'I',1)
-    call out_char_idx(g,'_',g%lthis)
+    call out_char_idx(g,'_',g%depth)
     do i=2,ndim
        call out_char(g,'+')
        call out_arg(g,g_ptr(g,vsize,i-1),0)
        call out_str(g,'*(I')
        call out_idx(g,i)
-       call out_char_idx(g,'_',g%lthis)
+       call out_char_idx(g,'_',g%depth)
     enddo
     do i=2,ndim
        call out_char(g,')')
@@ -2495,11 +3691,11 @@ contains
     type(gen_state):: g
     integer:: i
     if(g_loop_active(g)) then
-       do i=1,g%lstack(g%lthis)%nloops
+       do i=1,g%lstack(g%depth)%nloops
           call out_line(g,'ENDDO')
        enddo
-       g%lstack(g%lthis)%loop_active=.false.
-       g%lstack(g%lthis)%nloops=0
+       g%lstack(g%depth)%loop_active=.false.
+       g%lstack(g%depth)%nloops=0
     endif
   end subroutine gen_close_loops
 
@@ -2716,11 +3912,11 @@ contains
   subroutine gen_vect_alloc(g)
     type(gen_state):: g
     integer:: v
-    v=g%lstack(g%lthis)%varlist
+    v=g%lstack(g%depth)%varlist
     do while(v>0)
        if(g_var_at_index_is_a_vect(g,v).and.&
             iand(g%vardata(v)%flags,v_is_result)==0.and.&
-            iand(g%vardata(v)%gflags,var_is_recycled)==0) then
+            iand(g%vardata(v)%flags,var_is_recycled)==0) then
           call out_str(g,'IF(ALLOCATED(')
           call out_var_at_index(g,v)
           if(iand(g%vardata(v)%flags,v_is_chan)/=0) then
@@ -2738,7 +3934,7 @@ contains
              call out_str(g,'%P')
           endif
           call out_str(g,'(N')
-          call out_idx(g,g%lthis)
+          call out_idx(g,g%depth)
           if(iand(g%vardata(v)%flags,v_is_ve+v_is_cove)/=0) then
              call out_str(g,'),SOURCE=.FALSE.)')
           else
@@ -2755,12 +3951,12 @@ contains
   subroutine gen_vect_dealloc(g)
     type(gen_state):: g
     integer:: v,outer
-    v=g%lstack(g%lthis)%varlist
+    v=g%lstack(g%depth)%varlist
     do while(v>0)
        if(g_var_at_index_is_a_vect(g,v).and.&
-            iand(g%vardata(v)%gflags,var_is_recycled)==0) then
-          outer=g%vardata(v)%outer_lthis
-          if(outer/=g%vardata(v)%lthis) then
+            iand(g%vardata(v)%flags,var_is_recycled)==0) then
+          outer=g%vardata(v)%outer_depth
+          if(outer/=g%vardata(v)%depth) then
              g%vardata(v)%elink=g%lstack(outer)%defer_free
              g%lstack(outer)%defer_free=v
           else
@@ -2774,7 +3970,7 @@ contains
        endif
        v=g%vardata(v)%link
     enddo
-    v=g%lstack(g%lthis)%defer_free
+    v=g%lstack(g%depth)%defer_free
     do while(v>0)
        call out_str(g,'DEALLOCATE(')
        call out_var_at_index(g,v)
@@ -2800,11 +3996,11 @@ contains
     type(gen_state):: g
     integer,intent(in):: l
     logical,intent(in):: issend
-    integer:: a,ve,v,lthis
+    integer:: a,ve,v,depth
     a=l+comp_op_arg0
     ve=g%codes(a)
     call out_line(g,'PM__REQUEST=3-PM__REQUEST')
-    call out_simple(g,'I$N=1',n=g%lthis)
+    call out_simple(g,'I$N=1',n=g%depth)
     if(.not.issend) then
        v=g%codes(a+6)
     endif
@@ -2861,8 +4057,8 @@ contains
     call out_line(g,'DO WHILE(JCOMPLETE.LT.PM__MESSAGE_TOP-1)')
     call out_line(g,'CALL MPI_WAITANY(PM__MESSAGE_TOP,PM__MESSAGE_STACK,JRQ,PM__STAT,JERRNO)')
     call out_line(g,'IF(JRQ.EQ.1)THEN')
-    lthis=-1
-    call gen_server_block(g,l,issend,1,lthis)
+    depth=-1
+    call gen_server_block(g,l,issend,1,depth)
     call out_line(g,'ELSE')
     call out_line(g,'JCOMPLETE=JCOMPLETE+1')
     call out_line(g,'IF(JCOMPLETE.LT.PM__MESSAGE_TOP)THEN')
@@ -2898,7 +4094,7 @@ contains
     call out_line(g,'DO')
     call out_line(g,'CALL MPI_WAITANY(PM__MESSAGE_TOP,PM__MESSAGE_STACK,JRQ,PM__STAT,JERRNO)')
     call out_line(g,'IF(JRQ==1)THEN')
-    call gen_server_block(g,l,issend,1,lthis)
+    call gen_server_block(g,l,issend,1,depth)
     call out_line(g,'ELSE')
     call out_line(g,'IF(JRQ.EQ.2)THEN')
     call out_line(g,'CALL MPI_CANCEL(PM__MESSAGE_STACK(1),JERRNO)')
@@ -2922,14 +4118,14 @@ contains
     type(gen_state):: g
     integer,intent(in):: l
     logical,intent(in):: issend
-    integer:: a,ve,v,lthis
+    integer:: a,ve,v,depth
     a=l+comp_op_arg0
     ve=g%codes(a)
     if(.not.issend) then
        v=g%codes(a+6)
     endif
     if(ve==0) then
-       call out_simple(g,'NTOT=N$N',l,n=g%lthis)
+       call out_simple(g,'NTOT=N$N',l,n=g%depth)
     else
        call out_simple(g,'NTOT=COUNT($#0)',l)
     endif
@@ -3004,8 +4200,8 @@ contains
     call out_line(g,'NSIZE=-NSIZE')
     call out_line(g,'JCOMPLETE=JCOMPLETE+1')
     call out_line(g,'ENDIF')
-    lthis=-1
-    call gen_server_block(g,l,issend,1,lthis)
+    depth=-1
+    call gen_server_block(g,l,issend,1,depth)
 
     call out_line(g,'IF(JCOMPLETE.EQ.NNODE-1)EXIT')
     call out_line(g,&
@@ -3025,31 +4221,31 @@ contains
   ! Arg list: ve block [ internal-block ] new-v new-w v w p i
   ! [ internal-block ] present if extra_arg=1 (instead of 0)
   !============================================================
-  subroutine gen_server_block(g,l,issend,extra_arg,lthis)
+  subroutine gen_server_block(g,l,issend,extra_arg,depth)
     type(gen_state):: g
     integer,intent(in):: l,extra_arg
     logical,intent(in):: issend
-    integer,intent(inout):: lthis
-    integer:: a,save_lthis,save_last_ve,ll
+    integer,intent(inout):: depth
+    integer:: a,save_depth,save_last_ve,ll
     
     a=l+comp_op_arg0+extra_arg
-    save_lthis=g%lthis
-    if(lthis<0) then
+    save_depth=g%depth
+    if(depth<0) then
        g%ltop=g%ltop+1
-       g%lthis=g%ltop
-       lthis=g%lthis
+       g%depth=g%ltop
+       depth=g%depth
     else
-       g%lthis=lthis
+       g%depth=depth
     endif
-    g%lstack(g%lthis)%nloops=1
+    g%lstack(g%depth)%nloops=1
     save_last_ve=g%last_ve
     g%last_ve=0
 
     if(pm_opts%ftn_annotate) then
-       call out_simple(g,'! BLOCK $N (server)',n=g%lthis)
+       call out_simple(g,'! BLOCK $N (server)',n=g%depth)
     endif
     
-    call out_simple(g,'N$N=ABS(QRBUFFER%P(1))',n=g%lthis)
+    call out_simple(g,'N$N=ABS(QRBUFFER%P(1))',n=g%depth)
     call out_line(g,'NA0=1')
 
     call gen_vect_alloc(g)
@@ -3071,8 +4267,8 @@ contains
        call out_line(g,'ENDIF')
     endif
     
-    call out_simple(g,'DO I$N=1,N$N  ! Start of server block',n=g%lthis)
-    g%lstack(g%lthis)%loop_active=.true.
+    call out_simple(g,'DO I$N=1,N$N  ! Start of server block',n=g%depth)
+    g%lstack(g%depth)%loop_active=.true.
     ll=g%codes(a+1-extra_arg)
     do while(ll>0)
        call gen_op(g,ll)
@@ -3081,7 +4277,7 @@ contains
     call gen_if_nest(g,g%last_ve,0)
 
     call out_line(g,'ENDDO  !End of server block')
-    g%lstack(g%lthis)%loop_active=.false.
+    g%lstack(g%depth)%loop_active=.false.
     g%last_ve=0
     
     if(.not.issend) then
@@ -3091,14 +4287,14 @@ contains
     call gen_vect_dealloc(g)
     
     g%last_ve=save_last_ve
-    g%lthis=save_lthis
+    g%depth=save_depth
     
     call out_line(g,'CALL MPI_IRECV(QRBUFFER%P,1,MPI_AINT,MPI_ANY_SOURCE,PM__REQUEST,'//&
          'JCOMM,JMESS,JERRNO)')
     call out_line(g,'PM__MESSAGE_STACK(1)=JMESS')
 
     if(pm_opts%ftn_annotate) then
-       call out_simple(g,'! END BLOCK $N (server)',n=g%lthis)
+       call out_simple(g,'! END BLOCK $N (server)',n=g%depth)
     endif
   end subroutine gen_server_block
 
@@ -3116,19 +4312,19 @@ contains
     integer:: ll,a
     a=l+comp_op_arg0
     call out_line(g,'DO IX='//vs//','//ve)
-    call out_char_idx(g,'I',g%lthis)
+    call out_char_idx(g,'I',g%depth)
     call out_char(g,'=')
     call out_line(g,vd)
-    g%lstack(g%lthis)%nloops=1
-    g%lstack(g%lthis)%loop_active=.true.
+    g%lstack(g%depth)%nloops=1
+    g%lstack(g%depth)%loop_active=.true.
     ll=g%codes(a+2)
     do while(ll>0)
        call gen_op(g,ll)
        ll=g%codes(ll)
     enddo
     call out_line(g,'ENDDO')
-    g%lstack(g%lthis)%nloops=0
-    g%lstack(g%lthis)%loop_active=.false.
+    g%lstack(g%depth)%nloops=0
+    g%lstack(g%depth)%loop_active=.false.
     g%last_ve=0
   end subroutine gen_internal_server_block
 
@@ -3139,21 +4335,21 @@ contains
   subroutine gen_mpi_bcast_call(g,l)
     type(gen_state),intent(inout):: g
     integer,intent(in):: l
-    integer:: a,ll,save_lthis,save_last_ve
+    integer:: a,ll,save_depth,save_last_ve
     a=l+comp_op_arg0
-    call out_simple(g,'I$N=1',n=g%lthis)
+    call out_simple(g,'I$N=1',n=g%depth)
     call out_simple(g,'JNODE=$6',l)
-    call out_simple(g,'IF(JNODE.EQ.PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_NODE) NA=N$N',n=g%lthis)
+    call out_simple(g,'IF(JNODE.EQ.PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_NODE) NA=N$N',n=g%depth)
     call out_line(g,'CALL MPI_BCAST(NA,1,MPI_AINT,JNODE,PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM,JERRNO)')
     
     g%ltop=g%ltop+1
-    save_lthis=g%lthis
-    g%lthis=g%ltop
-    g%lstack(g%lthis)%nloops=0
+    save_depth=g%depth
+    g%depth=g%ltop
+    g%lstack(g%depth)%nloops=0
     save_last_ve=g%last_ve
     g%last_ve=0
     
-    call out_simple(g,'N$N=NA',n=g%lthis)
+    call out_simple(g,'N$N=NA',n=g%depth)
     call out_line(g,'NA0=1')
 
     call gen_vect_alloc(g)
@@ -3176,7 +4372,7 @@ contains
     call gen_vect_dealloc(g)
     
     g%last_ve=save_last_ve
-    g%lthis=save_lthis
+    g%depth=save_depth
     
   end subroutine gen_mpi_bcast_call
 
@@ -3187,21 +4383,21 @@ contains
   subroutine gen_mpi_masked_bcast_call(g,l)
     type(gen_state),intent(inout):: g
     integer,intent(in):: l
-    integer:: a,ll,save_lthis,save_last_ve
+    integer:: a,ll,save_depth,save_last_ve
     a=l+comp_op_arg0
-    call out_simple(g,'I$N=1',n=g%lthis)
+    call out_simple(g,'I$N=1',n=g%depth)
     call out_simple(g,'JNODE=$6',l)
     call out_simple(g,'IF(JNODE.EQ.PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_NODE) NA=COUNT($#0)',l)
     call out_line(g,'CALL MPI_BCAST(NA,1,MPI_AINT,JNODE,PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM,JERRNO)')
     
     g%ltop=g%ltop+1
-    save_lthis=g%lthis
-    g%lthis=g%ltop
-    g%lstack(g%lthis)%nloops=0
+    save_depth=g%depth
+    g%depth=g%ltop
+    g%lstack(g%depth)%nloops=0
     save_last_ve=g%last_ve
     g%last_ve=0
     
-    call out_simple(g,'N$N=NA',n=g%lthis)
+    call out_simple(g,'N$N=NA',n=g%depth)
 
     call gen_vect_alloc(g)
 
@@ -3228,7 +4424,7 @@ contains
     call gen_vect_dealloc(g)
     
     g%last_ve=save_last_ve
-    g%lthis=save_lthis
+    g%depth=save_depth
     
   end subroutine gen_mpi_masked_bcast_call
 
@@ -3287,7 +4483,7 @@ contains
        call out_comm_var(g,v,mode)
        call out_line(g,')')
        tno=g_type(g,v)
-       if(mode==mode_array) tno=pm_typ_arg(g%context,tno,1)
+       if(mode==mode_array) tno=pm_type_arg(g%context,tno,1)
        if(g_is_complex_type(g,tno)) then
           call g_add_packable(g,pack_vect,tno)
           call out_simple_part(g,'CALL PM__PACKVEC$N(NA,',n=tno)
@@ -3353,7 +4549,7 @@ contains
     integer,intent(in):: v
     integer,intent(in):: mode
     !write(*,*) 'v is ',v,g_kind(g,v)
-    !write(*,*) 'SENDING OUT COMM',mode,g%lthis,g_lthis(g,v)
+    !write(*,*) 'SENDING OUT COMM',mode,g%depth,g_depth(g,v)
     call out_arg(g,v,merge(0,arg_no_index,mode==mode_array))
     if(mode==mode_array) then
        call out_str(g,'%E1%P')
@@ -3416,7 +4612,7 @@ contains
        endif
     case(v_is_basic)
        tno=g_type(g,v)
-       if(mode==mode_array) tno=pm_typ_arg(g%context,tno,1)
+       if(mode==mode_array) tno=pm_type_arg(g%context,tno,1)
        if(g_is_complex_type(g,tno)) then
           call out_str(g,'NA=SIZE(')
           call out_comm_var(g,v,mode)
@@ -3560,7 +4756,7 @@ contains
              endif
              call out_get_mpi_base_type(g,tno)
              call out_simple(g,&
-                  'CALL PM__GET_MPI_TYPE(JBASE,NA,JTYPE,JN,LNEW)',n=g%lthis)
+                  'CALL PM__GET_MPI_TYPE(JBASE,NA,JTYPE,JN,LNEW)',n=g%depth)
           endif
           call out_str(g,'CALL MPI_BCAST(')
           call out_arg(g,v,merge(arg_no_index,0,isvec))
@@ -3675,7 +4871,7 @@ contains
     case(v_is_basic,v_is_sub,v_is_vsub,v_is_elem,&
          v_is_unit_elem,v_is_const,v_is_ctime_const)
        tno=g_type(g,v)
-       if(mode==mode_array) tno=pm_typ_arg(g%context,tno,1)
+       if(mode==mode_array) tno=pm_type_arg(g%context,tno,1)
        if(g_is_complex_type(g,tno)) then
           call out_simple(g,'NA='//dv2//'-'//dv1//'+1',x=dvv)
           if(nonblocking) then
@@ -3757,8 +4953,8 @@ contains
     case(v_is_basic,v_is_sub,v_is_vsub,v_is_elem,v_is_unit_elem)
        tno=g_type(g,v)
        if(mode==mode_array) then
-          !write(*,*) 'tno=',pm_typ_as_string(g%context,tno)
-          tno=pm_typ_arg(g%context,tno,1)
+          !write(*,*) 'tno=',pm_type_as_string(g%context,tno)
+          tno=pm_type_arg(g%context,tno,1)
        endif
        if(g_is_complex_type(g,tno)) then
           if(nonblocking) then
@@ -3841,7 +5037,7 @@ contains
        endif
     case(v_is_basic)
        tno=g_type(g,v)
-       if(mode==mode_array) tno=pm_typ_arg(g%context,tno,1)
+       if(mode==mode_array) tno=pm_type_arg(g%context,tno,1)
        if(g_is_complex_type(g,tno)) then
           call out_simple(g,'NA='//dv2//'-'//dv1//'+1',x=dvv)
           call g_add_packable(g,pack_vect_disp,tno)
@@ -3952,7 +5148,7 @@ contains
                    endif
                    call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A,1_PM__LN,JTYPE_N)',&
                         x=g_ptr(g,offsets,1))
-                elseif(pm_typ_kind(g%context,g_type(g,offsets))==pm_typ_is_array) then
+                elseif(pm_type_kind(g%context,g_type(g,offsets))==pm_type_is_array) then
                    call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A%E1%P,1_PM__LN,JTYPE_N)',&
                         x=offsets)
                 else
@@ -3964,13 +5160,13 @@ contains
                    call pm_panic('grid_dim incorrect number of entries')
                 endif
                 call out_str(g,'CALL PM__GET_MPI_SUBRANGE_TYPE(JTYPE,')
-                tv=pm_typ_vect(g%context,g_type(g,grid_dim))
+                tv=pm_type_vect(g%context,g_type(g,grid_dim))
                 do j=2,6
-                   if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,j)),pm_typ_has_storage)/=0) then
+                   if(iand(pm_type_flags(g%context,pm_tv_arg(tv,j)),pm_type_has_storage)/=0) then
                       call out_arg(g,g_ptr(g,grid_dim,j),0)
                       call out_char(g,',')
                    else
-                      call out_const(g,pm_typ_val(g%context,pm_tv_arg(tv,j)))
+                      call out_const(g,pm_type_val(g%context,pm_tv_arg(tv,j)))
                       call out_char(g,',')
                    endif
                 enddo
@@ -4028,7 +5224,7 @@ contains
        endif
     elseif(iand(k2,v_is_poly)/=0) then
        call out_line(g,'IX=0')
-       call out_simple(g,'DO I$N=1,N$N',n=g%lthis)
+       call out_simple(g,'DO I$N=1,N$N',n=g%depth)
        if(m/=0) call out_simple(g,'IF($I) THEN',x=m)
        call out_line(g,'IX=IX+1')
        call out_arg(g,v1,arg_ix_index)
@@ -4204,7 +5400,7 @@ contains
     logical:: has_depth
     type(pm_ptr):: tv
     integer:: tno1,tno2
-    tv=pm_typ_vect(g%context,tno)
+    tv=pm_type_vect(g%context,tno)
     tno1=pm_tv_arg(tv,1)
     tno2=pm_tv_arg(tv,2)
     call out_new_line(g)
@@ -4278,7 +5474,7 @@ contains
     integer,dimension(pm_int:pm_string):: counts
     logical:: hasdepth
     logical:: recur
-    recur=iand(pm_typ_flags(g%context,tno),pm_typ_has_poly)/=0
+    recur=iand(pm_type_flags(g%context,tno),pm_type_has_poly)/=0
     counts=0
     call out_new_line(g)
     if(recur) call out_str(g,'RECURSIVE ')
@@ -4302,9 +5498,9 @@ contains
       type(pm_ptr):: tv,tlist,telem
       character(len=5):: ibuffer
       integer:: i,n,tno2
-      tv=pm_typ_vect(g%context,tno)
+      tv=pm_type_vect(g%context,tno)
       select case(pm_tv_kind(tv))
-      case(pm_typ_is_basic)
+      case(pm_type_is_basic)
          if(tno>=pm_int.and.tno<=pm_string) then
             call out_str(g,'PM__BUFFER%SIZEOF(')
             call out_kind(g,tno)
@@ -4319,7 +5515,7 @@ contains
             call out_char(g,'=')
             call out_line(g,varname)
          endif
-      case(pm_typ_is_array)
+      case(pm_type_is_array)
          write(ibuffer,'(i5)') depth+1
          ibuffer=adjustl(ibuffer)
          call out_line(g,'NP'//trim(ibuffer)//'=SIZE('//varname//'%E1%P)')
@@ -4328,12 +5524,12 @@ contains
          call outpack(pm_tv_arg(tv,1),varname//'%E1%P(IP'//trim(ibuffer)//')',depth+1)
          call out_line(g,'ENDDO')
          call outpack(pm_tv_arg(tv,2),varname//'%E2',depth)
-      case(pm_typ_is_struct,pm_typ_is_rec,pm_typ_is_dref)
+      case(pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
          do i=1,pm_tv_numargs(tv)
             write(ibuffer,'(i5)') i
             call outpack(pm_tv_arg(tv,i),varname//'%E'//trim(adjustl(ibuffer)),depth)
          enddo
-      case(pm_typ_is_poly)
+      case(pm_type_is_poly)
          call out_line(g,'PM__BUFFER%SIZEOF(PM__INT)=PM__BUFFER%SIZEOF(PM__INT)+1')
          call out_line(g,'PM__BUFFER%I(PM__BUFFER%SIZEOF(PM__INT))=0')
          call out_str(g,'SELECT TYPE(POLYVAR=>')
@@ -4360,10 +5556,10 @@ contains
             enddo
          endif
          call out_line(g,'END SELECT')
-      case(pm_typ_is_single_name,pm_typ_is_proc,pm_typ_is_value)
+      case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
          continue
-      case(pm_typ_is_all,pm_typ_is_par_kind,pm_typ_is_enveloped,&
-         pm_typ_is_vect)
+      case(pm_type_is_all,pm_type_is_par_kind,pm_type_is_enveloped,&
+         pm_type_is_vect)
        call outpack(pm_tv_arg(tv,1),varname,depth)
       end select
     end subroutine outpack
@@ -4376,7 +5572,7 @@ contains
     type(gen_state):: g
     integer,intent(in):: tno
     logical:: recur
-    recur=iand(pm_typ_flags(g%context,tno),pm_typ_has_poly)/=0
+    recur=iand(pm_type_flags(g%context,tno),pm_type_has_poly)/=0
     if(recur) call out_str(g,'RECURSIVE ')
     call out_str(g,'SUBROUTINE PM__UNPACK')
     call out_idx(g,tno) 
@@ -4395,9 +5591,9 @@ contains
       integer,intent(in):: tno
       type(pm_ptr):: tv,tlist,telem
       integer:: tno2,i,n
-      tv=pm_typ_vect(g%context,tno)
+      tv=pm_type_vect(g%context,tno)
       select case(pm_tv_kind(tv))
-      case(pm_typ_is_poly)
+      case(pm_type_is_poly)
          tlist=g_check_poly(g,tno)
          if(.not.pm_fast_isnull(tlist)) then
             n=pm_set_size(g%context,tlist)
@@ -4414,8 +5610,8 @@ contains
                call out_new_line(g)
             enddo
          endif
-      case(pm_typ_is_array,&
-           pm_typ_is_struct,pm_typ_is_rec,pm_typ_is_dref)
+      case(pm_type_is_array,&
+           pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
          do i=1,pm_tv_numargs(tv)
             call declare_poly_vars(pm_tv_arg(tv,i))
          enddo
@@ -4429,9 +5625,9 @@ contains
       type(pm_ptr):: tv,tlist,telem
       character(len=5):: ibuffer
       integer:: i,n,tno2
-      tv=pm_typ_vect(g%context,tno)
+      tv=pm_type_vect(g%context,tno)
       select case(pm_tv_kind(tv))
-      case(pm_typ_is_basic)
+      case(pm_type_is_basic)
          if(tno>=pm_int.and.tno<=pm_string) then
             call out_str(g,'PM__BUFFER%SIZEOF(')
             call out_kind(g,tno)
@@ -4445,7 +5641,7 @@ contains
             call out_kind(g,tno)
             call out_line(g,'))')
          endif
-      case(pm_typ_is_array)
+      case(pm_type_is_array)
          write(ibuffer,'(i5)') depth+1
          ibuffer=adjustl(ibuffer)
          call outunpack(int(pm_long),'NP'//trim(ibuffer),depth)
@@ -4455,12 +5651,12 @@ contains
          call outunpack(pm_tv_arg(tv,1),varname//'%E1%P(IP'//trim(ibuffer)//')',depth+1)
          call out_line(g,'ENDDO')
          call outunpack(pm_tv_arg(tv,2),varname//'%E2',depth)
-      case(pm_typ_is_struct,pm_typ_is_rec,pm_typ_is_dref)
+      case(pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
          do i=1,pm_tv_numargs(tv)
             write(ibuffer,'(i5)') i
             call outunpack(pm_tv_arg(tv,i),varname//'%E'//trim(adjustl(ibuffer)),depth)
          enddo
-      case(pm_typ_is_poly)
+      case(pm_type_is_poly)
          call out_line(g,'PM__BUFFER%SIZEOF(PM__INT)=PM__BUFFER%SIZEOF(PM__INT)+1')
          call out_line(g,'SELECT CASE(PM__BUFFER%I(PM__BUFFER%SIZEOF(PM__INT)))')
          tlist=g_check_poly(g,tno)
@@ -4484,10 +5680,10 @@ contains
             enddo
          endif
          call out_line(g,'END SELECT')
-      case(pm_typ_is_single_name,pm_typ_is_proc,pm_typ_is_value)
+      case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
          continue
-      case(pm_typ_is_all,pm_typ_is_par_kind,pm_typ_is_enveloped,&
-           pm_typ_is_vect)
+      case(pm_type_is_all,pm_type_is_par_kind,pm_type_is_enveloped,&
+           pm_type_is_vect)
          call outunpack(pm_tv_arg(tv,1),varname,depth)
       end select
     end subroutine outunpack
@@ -4505,7 +5701,7 @@ contains
     integer(pm_ln),dimension(pm_int:pm_string):: counts
     logical:: has_depth
     logical:: recur
-    recur=iand(pm_typ_flags(g%context,tno),pm_typ_has_poly)/=0
+    recur=iand(pm_type_flags(g%context,tno),pm_type_has_poly)/=0
     if(recur) call out_str(g,'RECURSIVE ')
     call out_str(g,'SUBROUTINE PM__COUNT')
     call out_idx(g,tno)
@@ -4539,33 +5735,33 @@ contains
     type(pm_ptr):: tv,val
     integer:: i
     integer(pm_ln):: n    
-    tv=pm_typ_vect(g%context,tno)
+    tv=pm_type_vect(g%context,tno)
     select case(pm_tv_kind(tv))
-    case(pm_typ_is_basic)
+    case(pm_type_is_basic)
        if(tno>=pm_int.and.tno<=pm_string) then
           counts(tno)=counts(tno)+1
        endif
-    case(pm_typ_is_array)
+    case(pm_type_is_array)
        has_depth2=.false.
        call precount(g,pm_tv_arg(tv,2),counts,has_depth2)
        if(pm_tv_arg(tv,3)/=pm_long.and..not.has_depth2) then
           call precount(g,pm_tv_arg(tv,1),counts2,has_depth)
           if(.not.has_depth) then
-             val=pm_typ_val(g%context,pm_tv_arg(tv,3))
+             val=pm_type_val(g%context,pm_tv_arg(tv,3))
              counts=counts+counts2*val%data%ln(val%offset)
           endif
        else
           has_depth=.true.
        endif
        counts(pm_long)=counts(pm_long)+1
-    case(pm_typ_is_struct,pm_typ_is_rec,pm_typ_is_dref)
+    case(pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
        do i=1,pm_tv_numargs(tv)
           call precount(g,pm_tv_arg(tv,i),counts,has_depth)
        enddo
-    case(pm_typ_is_poly)
+    case(pm_type_is_poly)
        counts(pm_int)=counts(pm_int)+1
        has_depth=.true.
-    case(pm_typ_is_single_name,pm_typ_is_proc,pm_typ_is_value)
+    case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
        continue
     case default
        call pm_panic("precount")
@@ -4611,11 +5807,11 @@ contains
     character(len=5):: ibuffer
     integer(pm_ln),dimension(pm_int:pm_string):: counts
     logical:: has_depth
-    tv=pm_typ_vect(g%context,tno)
+    tv=pm_type_vect(g%context,tno)
     select case(pm_tv_kind(tv))
-    case(pm_typ_is_basic)
+    case(pm_type_is_basic)
        continue
-    case(pm_typ_is_array)
+    case(pm_type_is_array)
        call outcount(g,pm_tv_arg(tv,2),varname//'%E2',depth)
        has_depth=.false.
        counts=0
@@ -4631,7 +5827,7 @@ contains
           call get_vect_size(varname)
        endif
        call outaddcount(g,counts,depth+1)
-    case(pm_typ_is_poly)
+    case(pm_type_is_poly)
        call out_line(g,'SELECT TYPE(POLYVAR=>'//varname//'%P)')
        tlist=g_check_poly(g,tno)
        if(.not.pm_fast_isnull(tlist)) then
@@ -4654,15 +5850,15 @@ contains
           enddo
        endif
        call out_line(g,'END SELECT')
-    case(pm_typ_is_struct,pm_typ_is_rec,pm_typ_is_dref)
+    case(pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
        do i=1,pm_tv_numargs(tv)
           write(ibuffer,'(i5)') i
           call outcount(g,pm_tv_arg(tv,i),varname//'%E'//trim(adjustl(ibuffer)),depth)
        enddo
-    case(pm_typ_is_single_name,pm_typ_is_proc,pm_typ_is_value)
+    case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
        continue
-    case(pm_typ_is_all,pm_typ_is_par_kind,pm_typ_is_enveloped,&
-         pm_typ_is_vect)
+    case(pm_type_is_all,pm_type_is_par_kind,pm_type_is_enveloped,&
+         pm_type_is_vect)
        call outcount(g,pm_tv_arg(tv,1),varname,depth)
     end select
   contains
@@ -4698,12 +5894,12 @@ contains
     do i=0,size-1
        key=keys%data%ptr(keys%offset+i)
        typ=abs(key%data%i(key%offset))
-       !write(*,*) 'TYPE #',i,' ',trim(pm_typ_as_string(g%context,typ))
+       !write(*,*) 'TYPE #',i,' ',trim(pm_type_as_string(g%context,typ))
        call out_type(g,typ)
        call out_str(g,'::T')
        call out_idx(g,typ)
        call out_line(g,'(2)')
-       tv=pm_typ_vect(g%context,typ)
+       tv=pm_type_vect(g%context,typ)
        maxargs=max(maxargs,pm_tv_numargs(tv))
     enddo
     call out_simple(g,'INTEGER,DIMENSION($N):: DATATYPES,BLOCKLENGTHS',n=maxargs)
@@ -4715,16 +5911,16 @@ contains
     do i=0,size-1
        key=keys%data%ptr(keys%offset+i)
        typ=abs(key%data%i(key%offset))
-       call out_comment_line(g,pm_typ_as_string(g%context,typ))
+       call out_comment_line(g,pm_type_as_string(g%context,typ))
        if(debug_g) then
-          write(*,*) 'MPI TYP>',pm_typ_as_string(g%context,typ)
+          write(*,*) 'MPI TYP>',pm_type_as_string(g%context,typ)
        endif
-       tv=pm_typ_vect(g%context,typ)
+       tv=pm_type_vect(g%context,typ)
        n=pm_tv_numargs(tv)
        nn=0
        do j=1,n
-          if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,j)),&
-               pm_typ_has_storage)/=0) then
+          if(iand(pm_type_flags(g%context,pm_tv_arg(tv,j)),&
+               pm_type_has_storage)/=0) then
              call out_simple(g,'CALL MPI_GET_ADDRESS(T$N(1)%E$M,OFFSETS($M),JERROR)',&
                   n=typ,m=j)
              nn=nn+1
@@ -4737,7 +5933,7 @@ contains
        call out_line(g,'EXTENT=EXTENT-OFFSETS(1)')
        call out_line(g,'OFFSETS(1)=0')
        do j=1,nn
-          call out_comment_line(g,pm_typ_as_string(g%context,pm_tv_arg(tv,j)))
+          call out_comment_line(g,pm_type_as_string(g%context,pm_tv_arg(tv,j)))
           call out_get_mpi_base_type(g,pm_tv_arg(tv,j))
           call out_simple(g,'DATATYPES($N)=JBASE',n=j)
        enddo
@@ -4781,21 +5977,21 @@ contains
     flags=g%vardata(i)%flags
     ix=abs(g%vardata(i)%index)
     
-    if(iand(g%vardata(i)%gflags,var_is_recycled)/=0) then
+    if(iand(g%vardata(i)%flags,var_is_recycled)/=0) then
        return
     endif
 
     oindex=g%vardata(i)%oindex
     if(debug_g) then
-       write(*,*) 'VAR>>',i,oindex,' ',trim(pm_typ_as_string(g%context,g%vardata(i)%tno))
+       write(*,*) 'VAR>>',i,oindex,' ',trim(pm_type_as_string(g%context,g%vardata(i)%tno))
     endif
 
 !!$    if(g_kind(g,oindex)==v_is_basic) call out_simple(g,'!'//&
 !!$         trim(pm_name_as_string(g%context,g_v1(g,oindex))))
     
-!!$    call out_simple_part(g,'! idx=$N / lthis=$M '//&
-!!$         trim(pm_typ_as_string(g%context,g%vardata(i)%tno)),&
-!!$         n=g%vardata(i)%oindex,m=g%vardata(i)%lthis)
+!!$    call out_simple_part(g,'! idx=$N / depth=$M '//&
+!!$         trim(pm_type_as_string(g%context,g%vardata(i)%tno)),&
+!!$         n=g%vardata(i)%oindex,m=g%vardata(i)%depth)
 !!$    call out_simple_part(g,'/ flags=$N state=$M',n=g%vardata(i)%flags,m=g%vardata(i)%state)
 !!$    call out_simple_part(g,'/ start=$N finish=$M',n=g%vardata(i)%start,m=g%vardata(i)%finish)
 !!$    call out_simple(g,'/ end_assign=$N',n=merge(1,0,g%vardata(i)%finish_on_assign))
@@ -4846,7 +6042,7 @@ contains
     call out_str(g,'::')
     call out_var_name_at_index(g,i)
 
-    call out_str(g,'    ! '//trim(pm_typ_as_string(g%context,g%vardata(i)%tno)))
+    call out_str(g,'    ! '//trim(pm_type_as_string(g%context,g%vardata(i)%tno)))
 
     if(pm_opts%ftn_annotate) then
        call out_simple_part(g,'  idx=$N', n=oindex)
@@ -4886,10 +6082,10 @@ contains
     type(pm_ptr):: tv,val
     integer:: i,n,k 
     if(tno==0) return
-    if(iand(pm_typ_flags(g%context,tno),&
-         pm_typ_has_storage)==0) return
+    if(iand(pm_type_flags(g%context,tno),&
+         pm_type_has_storage)==0) return
     if(dim>0) then
-       call out_comment_line(g,trim(pm_typ_as_string(g%context,tno)))
+       call out_comment_line(g,trim(pm_type_as_string(g%context,tno)))
        call out_str(g,'TYPE PM__TV')
        call out_idx(g,tno)
        call out_char_idx(g,'_',dim)
@@ -4898,7 +6094,7 @@ contains
        if(dim==pm_long) then
           call out_line(g,',DIMENSION(:),ALLOCATABLE::P')
        else
-          val=pm_typ_val(g%context,dim)
+          val=pm_type_val(g%context,dim)
           call out_str(g,',DIMENSION(')
           call out_const(g,val)
           call out_line(g,')::P')
@@ -4910,34 +6106,34 @@ contains
        return
     endif
     call out_char(g,'!')
-    call out_comment_line(g,trim(pm_typ_as_string(g%context,tno)))
+    call out_comment_line(g,trim(pm_type_as_string(g%context,tno)))
     call out_str(g,'TYPE PM__T')
     call out_idx(g,tno)
     call out_new_line(g)
     !call out_line(g,',SEQUENTIAL')
-    tv=pm_typ_vect(g%context,tno)
+    tv=pm_type_vect(g%context,tno)
     n=pm_tv_numargs(tv)
     k=pm_tv_kind(tv)
-    if(k==pm_typ_is_array) then
+    if(k==pm_type_is_array) then
        call out_str(g,'TYPE(PM__TV')
-       if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,1)),&
-            pm_typ_has_storage)/=0) then
+       if(iand(pm_type_flags(g%context,pm_tv_arg(tv,1)),&
+            pm_type_has_storage)/=0) then
           call out_type_idx(g,pm_tv_arg(tv,1))
           call out_char(g,'_')
           call out_type_idx(g,pm_tv_arg(tv,3))
           call out_line(g,')::E1')
        endif
-       if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,2)),&
-            pm_typ_has_storage)/=0) then
+       if(iand(pm_type_flags(g%context,pm_tv_arg(tv,2)),&
+            pm_type_has_storage)/=0) then
           call out_type(g,pm_tv_arg(tv,2))
           call out_line(g,'::E2')
        endif
-    elseif(k==pm_typ_is_vect) then
+    elseif(k==pm_type_is_vect) then
        continue
     else
        do i=1,n
-          if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,i)),&
-               pm_typ_has_storage)/=0) then
+          if(iand(pm_type_flags(g%context,pm_tv_arg(tv,i)),&
+               pm_type_has_storage)/=0) then
              call out_type(g,pm_tv_arg(tv,i))
              call out_str(g,'::E')
              call out_idx(g,i)
@@ -4957,7 +6153,7 @@ contains
   subroutine out_type_idx(g,tno)
     type(gen_state):: g
     integer,intent(in):: tno
-    if(pm_typ_kind(g%context,tno)==pm_typ_is_poly) then
+    if(pm_type_kind(g%context,tno)==pm_type_is_poly) then
        call out_idx(g,int(pm_pointer))
     else
        call out_idx(g,tno)
@@ -5135,7 +6331,7 @@ contains
        case(v_is_dref,v_is_shared_dref)
           n=g_v1(g,var)
           if(iand(opts,arg_wrapped)/=0) then
-             tv=pm_typ_vect(g%context,g_type(g,var))
+             tv=pm_type_vect(g%context,g_type(g,var))
              call out_dref_vect_arg(g,g_ptr(g,var,1),pm_tv_arg(tv,1),opts)
              call out_comma(g)
              call out_call_arg(g,g_ptr(g,var,2),opts)
@@ -5171,13 +6367,13 @@ contains
        call out_call_arg(g,g_v1(g,var),opts)
     case default
        tno=g_type(g,var)
-       if(pm_typ_kind(g%context,tno)==pm_typ_is_array) then
-          tv=pm_typ_vect(g%context,tno)
-          if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,1)),pm_typ_has_storage)/=0) then
+       if(pm_type_kind(g%context,tno)==pm_type_is_array) then
+          tv=pm_type_vect(g%context,tno)
+          if(iand(pm_type_flags(g%context,pm_tv_arg(tv,1)),pm_type_has_storage)/=0) then
              call out_arg(g,var,opts)
              call out_str(g,'%E1,')
           endif
-          if(iand(pm_typ_flags(g%context,pm_tv_arg(tv,2)),pm_typ_has_storage)/=0) then
+          if(iand(pm_type_flags(g%context,pm_tv_arg(tv,2)),pm_type_has_storage)/=0) then
              call out_arg(g,var,opts)
              call out_str(g,'%E2')
           endif
@@ -5195,7 +6391,7 @@ contains
   recursive subroutine out_dref_vect_arg(g,var,tno,opts)
     type(gen_state):: g
     integer,intent(in):: var,tno,opts
-    if(pm_typ_get_mode(g%context,tno)>=sym_mirrored) then
+    if(pm_type_get_mode(g%context,tno)>=sym_mirrored) then
        call out_call_arg(g,var,opts)
     else
        call out_call_arg(g,var,ior(opts,arg_wrapped))
@@ -5308,20 +6504,20 @@ contains
   subroutine out_loop_index(g,v,opt)
     type(gen_state):: g
     integer,intent(in):: v,opt
-    integer:: i,lthis
+    integer:: i,depth
     
     if(g_is_a_vect(g,v)) then
-       lthis=g_lthis(g,v)
+       depth=g_depth(g,v)
        if(iand(opt,arg_ix_index)/=0.and.g_is_vect(g,v)) then
           call out_str(g,'(IX)')
-       elseif(iand(opt,arg_no_index+arg_wrapped)==0.or.lthis/=g%lthis.and.iand(opt,arg_wrapped)==0) then
-          if(lthis==g%lalt) then
+       elseif(iand(opt,arg_no_index+arg_wrapped)==0.or.depth/=g%depth.and.iand(opt,arg_wrapped)==0) then
+          if(depth==g%lalt) then
              call out_str(g,'(IDO)')
-          elseif(.not.g%lstack(lthis)%loop_active.or.lthis==0) then
+          elseif(.not.g%lstack(depth)%loop_active.or.depth==0) then
              call out_str(g,'(1)')
           else
              call out_char(g,'(')
-             call out_char_idx(g,'I',lthis)
+             call out_char_idx(g,'I',depth)
              call out_char(g,')')
           endif
        endif
@@ -5446,7 +6642,7 @@ contains
     integer,intent(in):: typ
     type(pm_ptr):: tv
     integer:: tno
-    tno=pm_typ_strip_to_basic(g%context,typ)
+    tno=pm_type_strip_to_basic(g%context,typ)
     select case(tno)
     case(pm_int)
        call out_str(g,'INTEGER')
@@ -5479,8 +6675,8 @@ contains
     case(pm_pointer,pm_poly_type)
        call out_str(g,'TYPE(PM__POLY)')
     case default
-       tv=pm_typ_vect(g%context,tno)
-       if(pm_tv_kind(tv)==pm_typ_is_poly) then
+       tv=pm_type_vect(g%context,tno)
+       if(pm_tv_kind(tv)==pm_type_is_poly) then
           call out_str(g,'TYPE(PM__POLY)')
        else
           call out_str(g,'TYPE(PM__T')
@@ -5609,23 +6805,23 @@ contains
     type(pm_ptr):: tv
     integer:: i,tno
     if(debug_g) then
-       write(*,*) 'ADD MPI TYPE',trim(pm_typ_as_string(g%context,typ))
+       write(*,*) 'ADD MPI TYPE',trim(pm_type_as_string(g%context,typ))
     endif
-    tno=pm_typ_strip_to_basic(g%context,typ)
+    tno=pm_type_strip_to_basic(g%context,typ)
     if(tno<=pm_string) return
     j=check_set(tno)
     if(j>0) return
     j=add_to_root_set(tno)
-    tv=pm_typ_vect(g%context,tno)
+    tv=pm_type_vect(g%context,tno)
     select case(pm_tv_kind(tv))
-    case(pm_typ_is_struct,pm_typ_is_rec)
+    case(pm_type_is_struct,pm_type_is_rec)
        do i=1,pm_tv_numargs(tv)
           j=add_mpi_type(g,pm_tv_arg(tv,i))
        enddo
        j=add_to_set(tno)
-    case(pm_typ_is_poly)
+    case(pm_type_is_poly)
        call pm_panic('add_mpi_type: poly type')
-    case(pm_typ_is_array)
+    case(pm_type_is_array)
        if(pm_tv_arg(tv,3)==pm_long) then
           call pm_panic('add_mpi_type: var length array')
        else
@@ -5634,7 +6830,7 @@ contains
           j=add_to_set(tno)
        endif
     case default
-       write(*,*) 'Type',pm_typ_as_string(g%context,tno),' kind ',pm_tv_kind(tv)
+       write(*,*) 'Type',pm_type_as_string(g%context,tno),' kind ',pm_tv_kind(tv)
        call pm_panic('add_mpi_type')
        j=0
     end select
@@ -6011,7 +7207,7 @@ contains
     logical:: ok
     integer:: flags,gflags
     flags=g%vardata(i)%flags
-    gflags=g%vardata(i)%gflags
+    gflags=g%vardata(i)%flags
     ok=(g%vardata(i)%state==var_state_crossing.and.&
          iand(flags,v_is_par)==0.or.&
          iand(gflags,var_is_comm_op_par)/=0).and.&
@@ -6050,7 +7246,7 @@ contains
        ok=g_kind(g,n)==v_is_chan_vect
     else
        ok=g_is_a_vect(g,n).and.&
-            (g%vardata(i)%lthis==g%lthis.or.&
+            (g%vardata(i)%depth==g%depth.or.&
             iand(g%vardata(i)%flags,v_is_vect)/=0.or.&
             iand(g%vardata(i)%flags,v_is_in_dref+v_is_shared)==v_is_in_dref)
     endif
@@ -6072,44 +7268,44 @@ contains
   !=============================================
   ! Parallel nesting depth of a variable
   !=============================================
-  function g_lthis(g,n) result(lthis)
+  function g_depth(g,n) result(depth)
     type(gen_state),intent(inout):: g
     integer,intent(in):: n
-    integer:: lthis
+    integer:: depth
     integer:: i
     i=g%varindex(abs(n))
     if(i==0) then
-       lthis=get_lthis(abs(n))
-       if(lthis<0) then
-          call pm_panic('g_lthis')
+       depth=get_depth(abs(n))
+       if(depth<0) then
+          call pm_panic('g_depth')
        endif
     else
-       lthis=g%vardata(i)%lthis
+       depth=g%vardata(i)%depth
     endif
   contains
-    recursive function get_lthis(n) result(lthis)
+    recursive function get_depth(n) result(depth)
       integer,intent(in)::n
-      integer:: lthis
+      integer:: depth
       integer:: i
       select case(g_kind(g,n))
       case(v_is_alias,v_is_elem,v_is_chan_vect,&
            v_is_unit_elem,v_is_vect_wrapped)
-         lthis=get_lthis(g_v1(g,n))
+         depth=get_depth(g_v1(g,n))
       case(v_is_sub,v_is_vsub)
-         lthis=max(get_lthis(g_v1(g,n)),get_lthis(g_v2(g,n)))
+         depth=max(get_depth(g_v1(g,n)),get_depth(g_v2(g,n)))
       case(v_is_group)
-         lthis=-1
+         depth=-1
          do i=1,g_v1(g,n)
-            lthis=max(lthis,get_lthis(g_ptr(g,n,i)))
+            depth=max(depth,get_depth(g_ptr(g,n,i)))
          enddo
       case(v_is_basic)
          i=g%varindex(abs(n))
-         lthis=g%vardata(i)%lthis
+         depth=g%vardata(i)%depth
       case default
-         lthis=-1
+         depth=-1
       end select
-    end function get_lthis
-  end function g_lthis
+    end function get_depth
+  end function g_depth
 
   !=============================================
   ! Does variable v have all shared elements
@@ -6154,7 +7350,7 @@ contains
     else
        ok=g%vardata(i)%start==g%vardata(i)%finish.and.&
             iand(g%vardata(i)%flags,v_is_result)==0.and.&
-            g%vardata(i)%outer_lthis==g%vardata(i)%lthis
+            g%vardata(i)%outer_depth==g%vardata(i)%depth
        if(ok) write(*,*) '>>>>',i,g%vardata(i)%start,g%vardata(i)%finish
     endif
   end function g_var_is_dead
@@ -6202,7 +7398,7 @@ contains
     type(gen_state):: g
     character(len=6):: str
     str(1:1)='N'
-    write(str(2:),'(I5)') g%lthis
+    write(str(2:),'(I5)') g%depth
     str(2:)=adjustl(str(2:))
   end function g_this_n_str
 
@@ -6252,7 +7448,7 @@ contains
     integer:: i
     if(v/=0) then
        i=g%varindex(abs(v))
-       ok=iand(g%vardata(i)%gflags,flags)==flags
+       ok=iand(g%vardata(i)%flags,flags)==flags
     else
        ok=.false.
     endif
@@ -6268,7 +7464,7 @@ contains
     integer:: i
     if(v/=0) then
        i=g%varindex(abs(v))
-       ok=iand(g%vardata(i)%gflags,flags)==0
+       ok=iand(g%vardata(i)%flags,flags)==0
     else
        ok=.false.
     endif
@@ -6283,7 +7479,7 @@ contains
     integer:: i
     if(v/=0) then
        i=g%varindex(abs(v))
-       g%vardata(i)%gflags=ior(g%vardata(i)%gflags,flags)
+       g%vardata(i)%flags=ior(g%vardata(i)%flags,flags)
     endif
   end subroutine g_set_gflags
 
@@ -6296,7 +7492,7 @@ contains
     integer:: i
     if(v/=0) then
        i=g%varindex(abs(v))
-       g%vardata(i)%gflags=iand(g%vardata(i)%gflags,not(flags))
+       g%vardata(i)%flags=iand(g%vardata(i)%flags,not(flags))
     endif
   end subroutine g_clear_gflags
 
@@ -6328,9 +7524,11 @@ contains
     integer,intent(in):: tno
     logical:: ok
     ok=tno==pm_pointer.or.&
-         iand(pm_typ_flags(g%context,tno),pm_typ_has_array+pm_typ_has_poly)/=0
+         iand(pm_type_flags(g%context,tno),pm_type_has_array+pm_type_has_poly)/=0
   end function g_is_complex_type
 
+
+  
   ! =========================================
   ! Placefiller - not needed for compiler
   ! =========================================

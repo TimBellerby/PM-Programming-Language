@@ -1390,7 +1390,7 @@ contains
        if(pm_fast_typeof(arg(3))/=pm_array_type.and.&
             pm_fast_typeof(arg(3))/=pm_const_array_type) then
           call runtime_error(context,func,pc,ve,noexit,&
-               trim(pm_typ_as_string(context,int(pm_fast_typeof(arg(3))))))
+               trim(pm_type_as_string(context,int(pm_fast_typeof(arg(3))))))
           goto 999
        endif
        call set_arg(2,array_size(context,arg(3),esize))

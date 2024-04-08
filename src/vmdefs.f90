@@ -702,20 +702,24 @@ module pm_vmdefs
   integer,parameter:: op_2_blocks=32
   integer,parameter:: op_prints_out=64
   integer,parameter:: op_is_comm=128
-  integer,parameter:: op_is_send=256
-  integer,parameter:: op_is_recv=512
-  integer,parameter:: op_is_sync_recv=1024
+  integer,parameter:: op_is_send=256+op_is_comm
+  integer,parameter:: op_is_recv=512+op_is_comm
+  integer,parameter:: op_is_sync_recv=1024+op_is_comm
   integer,parameter:: op_is_arith=2048
   integer,parameter:: op_is_file=4096
   integer,parameter:: op_precedes_loop=8192
-  integer,parameter:: op_is_sync=16384
+  integer,parameter:: op_is_sync=16384+op_is_comm
   integer,parameter:: op_is_fixed=32768
-  integer,parameter:: op_sets_cstack=65536
+  integer,parameter:: op_sets_cstack=65536+op_is_comm
+  integer,parameter:: op_has_comm_block=131072+op_1_block
+  integer,parameter:: op_has_loop_block=262144+op_1_block
+  integer,parameter:: op_allocates=524288
 
   integer,parameter:: op_is_gate_and_jump=op_is_gate+op_is_jump
   integer,parameter:: op_is_comm_1_block=op_is_comm+op_1_block
   integer,parameter:: op_is_jump_1_block=op_is_jump+op_1_block
   integer,parameter:: op_is_recv_1_block=op_is_sync_recv+op_1_block
+  integer,parameter:: op_allocates_and_takes_type=op_allocates+op_takes_type
 
 
   data op_flags(op_call)            /op_is_call/
@@ -734,9 +738,9 @@ module pm_vmdefs
   data op_flags(op_skip_comms)      /op_is_jump/
   data op_flags(op_struct)          /op_takes_type/
   data op_flags(op_rec)             /op_takes_type/
-  data op_flags(op_array)           /op_takes_type/
-  data op_flags(op_array_noinit)    /op_takes_type/
-  data op_flags(op_var_array)       /op_takes_type/
+  data op_flags(op_array)           /op_allocates_and_takes_type/
+  data op_flags(op_array_noinit)    /op_allocates_and_takes_type/
+  data op_flags(op_var_array)       /op_allocates_and_takes_type/
   data op_flags(op_get_dom)         /0/
   data op_flags(op_elem)            /0/
   data op_flags(op_elem_ref)        /0/
@@ -1310,11 +1314,11 @@ module pm_vmdefs
   data op_flags(op_if_shared)        /op_2_blocks/
   data op_flags(op_if_shared_node)   /op_2_blocks/
   data op_flags(op_if_restart)       /op_2_blocks/
-  data op_flags(op_loop)             /op_1_block/
-  data op_flags(op_comm_loop)        /op_1_block/
-  data op_flags(op_comm_block)       /op_1_block/
-  data op_flags(op_comm_proc)        /op_1_block/
-  data op_flags(op_comm_inline)      /op_1_block/
+  data op_flags(op_loop)             /op_has_loop_block/
+  data op_flags(op_comm_loop)        /op_has_loop_block/
+  data op_flags(op_comm_block)       /op_has_comm_block/
+  data op_flags(op_comm_proc)        /op_has_comm_block/
+  data op_flags(op_comm_inline)      /op_has_comm_block/
   data op_flags(op_allocate)         /0/
   data op_flags(op_deallocate)       /0/
   data op_flags(op_set_extent)       /0/     ! Obsolete
@@ -1322,7 +1326,7 @@ module pm_vmdefs
   data op_flags(op_nested_loop)      /op_precedes_loop/
   data op_flags(op_blocked_loop)     /op_precedes_loop/
   data op_flags(op_over)             /op_1_block/          
-  data op_flags(op_comm_loop_par)    /op_1_block/
+  data op_flags(op_comm_loop_par)    /op_has_loop_block/
   data op_flags(op_inline_shared)    /op_1_block/
   data op_flags(op_assign_farray)    /0/
   data op_flags(op_init_farray)      /0/
@@ -1392,6 +1396,7 @@ module pm_vmdefs
   integer,parameter:: v_is_array_par_vect=2048
   integer,parameter:: v_is_array_par_dom=4096
   integer,parameter:: v_is_farray=8192
+  integer,parameter:: v_extra_flags=16384
  
   ! Variable group types (compiling only)
   integer,parameter:: v_is_var_array=0
@@ -1401,6 +1406,12 @@ module pm_vmdefs
   integer,parameter:: v_is_shared_dref=4
   integer,parameter:: v_is_storageless=5
   integer,parameter:: v_is_tuple=6
+
+  ! Variable access flags
+  integer,parameter:: acc_read=1
+  integer,parameter:: acc_write=2
+  integer,parameter:: acc_alloc=4
+  integer,parameter:: acc_mult=8
 
   integer,parameter:: shared_op_flag=-32767
   
@@ -2123,14 +2134,17 @@ contains
   end subroutine print_comp_procs
 
   subroutine print_comp_proc(context,iunit,name,index,rvar,vevar,pvar,&
-       op,first_index,vars,dict,values,depth,masked)
+       op,first_index,vars,dict,values,depth,masked,wstack,vsets,oindex)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
-    integer,dimension(*):: op,vars
+    integer,dimension(:),intent(in):: op,vars
     integer,intent(in):: name,index,rvar,vevar,pvar,first_index,depth
     type(pm_ptr),intent(in):: dict
     type(pm_ptr),dimension(*),intent(in):: values
     logical,intent(in):: masked
+    integer,dimension(:),optional,intent(in):: wstack
+    logical,intent(in),optional:: vsets
+    integer,dimension(:),intent(in),optional:: oindex
 
     character(len=wcode_file_cols):: line
     integer:: i
@@ -2150,22 +2164,27 @@ contains
     else
        call append_to(iunit,line,i,'{',.true.,depth)
     endif
-    call print_comp_op_block(context,iunit,op,first_index,vars,dict,values,2,masked)
+    if(size(op)>0) then
+       call print_comp_op_block(context,iunit,op,first_index,vars,dict,values,2,masked,wstack,vsets,oindex)
+    endif
     write(iunit,'(a)') '}'
     
   end subroutine print_comp_proc
 
-  subroutine print_comp_op(context,iunit,op,index,vars,dict,values,depth,masked)
+  subroutine print_comp_op(context,iunit,op,index,vars,dict,values,depth,masked,wstack,vsets,oindex)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
-    integer,dimension(*):: op,vars
+    integer,dimension(*),intent(in):: op,vars
     integer,intent(in):: index,depth
     type(pm_ptr),intent(in):: dict
     type(pm_ptr),dimension(*),intent(in):: values
     logical,intent(in):: masked
+    integer,dimension(:),optional,intent(in):: wstack
+    logical,intent(in),optional:: vsets
+    integer,dimension(:),intent(in),optional:: oindex
     character(len=wcode_file_cols):: line
     character(len=wcode_file_cols):: location
-    integer:: nargs,nret,opcode,opcode2,flags,last_arg,arg1,i,nblocks,j
+    integer:: nargs,nret,opcode,opcode2,flags,last_arg,arg1,i,nblocks,j,loc,vset,bset
     logical:: shared
     type(pm_ptr):: p
     opcode=op(comp_op_opcode+index)
@@ -2175,10 +2194,22 @@ contains
     nargs=iand(op(comp_op_nargs+index),comp_op_nargs_mask)
     nret=iand(op(comp_op_nargs+index),comp_op_nret_mask)/comp_op_nret_div
     shared=iand(op(comp_op_nargs+index),comp_op_shared)/=0
-    location=trim(pm_name_as_string(context,iand(op(index+comp_op_line),modl_mult-1)))//&
-         ':'//pm_int_as_string(op(index+comp_op_line)/modl_mult)
+    loc=op(index+comp_op_line)
+    vset=-1
+    if(present(vsets)) then
+       if(vsets) vset=loc
+       !write(*,*) '@@@@ loc=',loc,op_names(opcode)
+       loc=wstack(loc)
+    endif
+    bset=0
+    if(loc<0) then
+       bset=loc
+       loc=wstack(size(wstack)+loc)
+    endif
+    location=trim(pm_name_as_string(context,iand(loc,modl_mult-1)))//&
+         ':'//pm_int_as_string(loc/modl_mult)
 
-!    write(*,*) 'NAME=',iand(op(index+comp_op_line),modl_mult-1)
+!    write(*,*) 'NAME=',iand(loc,modl_mult-1)
 !!$    write(*,*) 'op->',op_names(opcode),opcode,opcode2,op(index+comp_op_nargs),&
 !!$         (op(index+comp_op_arg0+i),i=1,nargs-1),'#',nret
     
@@ -2230,18 +2261,23 @@ contains
     line(len(line)-len_trim(location)+1:)=location
     write(iunit,'(a)') line
     if(nblocks>0) then
+       if(bset/=0) call print_bset(context,iunit,bset,wstack,vars,values,oindex,depth)
        call print_comp_op_block(context,iunit,op,op(index+comp_op_arg0+1),&
-            vars,dict,values,min(20,depth+2),masked)
+            vars,dict,values,min(20,depth+2),masked,wstack,vsets,oindex)
        if(nblocks>1) then
           write(iunit,'(a)') repeat(' ',depth)//'} --- {'
+          if(bset/=0) call print_bset(context,iunit,bset,wstack,vars,values,oindex,depth)
           call print_comp_op_block(context,iunit,op,op(index+comp_op_arg0+2),&
-               vars,dict,values,min(20,depth+2),masked)
+               vars,dict,values,min(20,depth+2),masked,wstack,vsets,oindex)
        endif
        write(iunit,'(a)') repeat(' ',depth)//'}'
     endif
+    if(present(vsets)) then
+       if(vsets) call print_vset(context,iunit,op(index+comp_op_line),wstack,vars,values,oindex,depth)
+    endif
   end subroutine print_comp_op
 
-  subroutine print_comp_op_block(context,iunit,op,index,vars,dict,values,depth,masked)
+  subroutine print_comp_op_block(context,iunit,op,index,vars,dict,values,depth,masked,wstack,vsets,oindex)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
     integer,dimension(*),intent(in):: op,vars
@@ -2249,12 +2285,20 @@ contains
     type(pm_ptr),dimension(*),intent(in):: values
     integer,intent(in):: index,depth
     logical,intent(in):: masked
+    integer,dimension(:),optional,intent(in):: wstack
+    logical,intent(in),optional:: vsets
+    integer,dimension(:),intent(in),optional:: oindex
     integer::i
     !write(*,*) 'BLOCK>',index
     i=index
-    do while(i>0)
-       call  print_comp_op(context,iunit,op,i,vars,dict,values,depth,masked)
-       i=op(i+comp_op_link)
+    do while(i/=0)
+       if(i>0) then
+          call  print_comp_op(context,iunit,op,i,vars,dict,values,depth,masked,wstack,vsets,oindex)
+          i=op(i+comp_op_link)
+       else
+          call  print_comp_op(context,iunit,wstack,i,vars,dict,values,depth,masked,wstack,vsets,oindex)
+          i=wstack(-i+comp_op_link)
+       endif
     enddo
   end subroutine print_comp_op_block
 
@@ -2325,9 +2369,9 @@ contains
          call printv(v1,.true.)
          call append(')')
          tno2=var(v1+2)/cvar_flag_mult
-         tk=pm_typ_kind(context,tno2)
-         if(tk==pm_typ_is_struct.or.tk==pm_typ_is_rec) then
-            ename=abs(pm_typ_elem_name(context,tno2,v2))
+         tk=pm_type_kind(context,tno2)
+         if(tk==pm_type_is_struct.or.tk==pm_type_is_rec) then
+            ename=abs(pm_type_elem_name(context,tno2,v2))
             if(ename>=sym_d1.and.ename<=sym_d7) then
                call append('.'//pm_int_as_string(v2))
             else
@@ -2367,9 +2411,9 @@ contains
          case(v_is_array)
             call group(index,v1,v2,'<','>',.false.)
          case(v_is_struct)
-            tk=pm_typ_kind(context,tno)
-            if(tk==pm_typ_is_struct.or.tk==pm_typ_is_rec) then
-               call group(index,v1,v2,trim(pm_name_as_string(context,pm_typ_elem_name(context,tno,0)))//&
+            tk=pm_type_kind(context,tno)
+            if(tk==pm_type_is_struct.or.tk==pm_type_is_rec) then
+               call group(index,v1,v2,trim(pm_name_as_string(context,pm_type_elem_name(context,tno,0)))//&
                     '{','}',.false.)
             else
                call group(index,v1,v2,'{','}',.true.)
@@ -2392,7 +2436,7 @@ contains
          call append('???'//pm_int_as_string(kind))
       end select
       if(addtype) then
-         call append(':'//pm_typ_as_string(context,tno))
+         call append(':'//pm_type_as_string(context,tno))
       endif
 
     end subroutine printv
@@ -2440,13 +2484,85 @@ contains
       
   end subroutine print_cvar
 
+  subroutine print_vset(context,iunit,vset,wstack,var,values,oindex,depth)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit,vset,depth
+    integer,dimension(:),intent(in):: wstack
+    integer,dimension(*),intent(in):: var
+    type(pm_ptr),dimension(*),intent(in):: values
+    integer,dimension(*):: oindex
+    character(len=wcode_file_cols):: line
+    integer:: i,j,n
+    !write(*,*) 'vset'
+    line=' '
+    line(depth+1:depth+1)='['
+    j=depth+3
+    n=wstack(vset+2)
+    do i=1,n
+       call print_cvar(context,iunit,var,oindex(wstack(vset+i+2)/acc_mult),values,.false.,depth,line,j)
+       call print_acc(iunit,line,j,wstack(vset+i+2),depth)
+       call append_to(iunit,line,j,'('//trim(pm_int_as_string(wstack(vset+i+2)/acc_mult))//')',.false.,depth)
+       call append_to(iunit,line,j,' ',.false.,depth)
+    enddo
+    call append_to(iunit,line,j,']',.true.,depth)
+  end subroutine print_vset
+
+  subroutine print_bset(context,iunit,bset,wstack,var,values,oindex,depth)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit,bset,depth
+    integer,dimension(:),intent(in):: wstack
+    integer,dimension(*),intent(in):: var
+    type(pm_ptr),dimension(*),intent(in):: values
+    integer,dimension(*):: oindex
+    character(len=wcode_file_cols):: line
+    integer:: i,j,wmax
+    wmax=size(wstack)
+    line=' '
+    line(depth+1:depth+1)='|'
+    j=depth+3
+    i=wstack(wmax+bset+1)
+    do while(i/=0)
+       call print_cvar(context,iunit,var,oindex(wstack(wmax+i)/acc_mult),values,.false.,depth,line,j)
+       call print_acc(iunit,line,j,wstack(wmax+i),depth)
+       call append_to(iunit,line,j,'('//trim(pm_int_as_string(wstack(wmax+i)/acc_mult))//')',.false.,depth)
+       call append_to(iunit,line,j,' ',.false.,depth)
+       i=wstack(wmax+i+1)
+    enddo
+    call append_to(iunit,line,j,'|',.true.,depth)
+  end subroutine print_bset
+
+  subroutine print_acc(iunit,str,i,acc,depth)
+    integer,intent(in):: iunit
+    character(len=*),intent(inout):: str
+    integer,intent(inout):: i
+    integer,intent(in):: acc
+    integer,intent(in):: depth
+    character(len=3):: part
+    integer:: j
+    part=':'
+    j=1
+    if(iand(acc,acc_read)/=0) then
+       j=j+1
+       part(j:j)='r'
+    endif
+    if(iand(acc,acc_write)/=0) then
+       j=j+1
+       part(j:j)='w'
+    endif
+    if(iand(acc,acc_alloc)/=0) then
+       j=j+1
+       part(j:j)='a'
+    endif
+    call append_to(iunit,str,i,part(1:j),.false.,depth)
+  end subroutine print_acc
+  
   subroutine append_to(iunit,str,i,part,break,depth)
     integer,intent(in):: iunit
     character(len=*),intent(inout):: str
     integer,intent(inout):: i
     character(len=*),intent(in):: part
-    logical,intent(in):: break
     integer,intent(in):: depth
+    logical,intent(in):: break
     integer:: n
     n=len(part)
     if(i+n>len(str)) then

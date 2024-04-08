@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -90,8 +90,8 @@ module pm_codegen
   integer,parameter:: cnode_is_resolved_proc=8
   integer,parameter:: cnode_is_arg_constraint=9
   integer,parameter:: cnode_is_par_constraint=10
-  integer,parameter:: cnode_is_typ_constraint=11
-  integer,parameter:: cnode_is_interface_constraint=12
+  integer,parameter:: cnode_is_type_constraint=11
+  !integer,parameter:: cnode_is_interface_constraint=12
   integer,parameter:: cnode_is_any_sig=13
   integer,parameter:: cnode_is_autoconv_sig=14
   integer,parameter:: cnode_num_kinds=14
@@ -261,10 +261,8 @@ module pm_codegen
      type(pm_ptr):: visibility
      
      ! Stack for local variables (stack() for names, var() for info records)
-     ! Fixed size hash table to search variable names (chained using link())
-     integer,dimension(max_code_stack):: stack,link
+     integer,dimension(max_code_stack):: stack
      type(pm_ptr),dimension(max_code_stack):: var
-     integer,dimension(code_local_hash):: hash
      integer:: top
 
      ! Stack of values for creating cnodes
@@ -363,7 +361,6 @@ contains
     coder%top=1
     coder%vtop=0
     coder%wtop=0
-    coder%hash=0
     coder%reg=>pm_register(context,'coder-var stack',coder%temp,coder%temp2,&
          coder%sig_cache,coder%proc_cache,coder%true,coder%false,coder%one,&
          coder%undef_val,&
@@ -379,7 +376,6 @@ contains
     coder%prog_cblock=pm_null_obj
     coder%defer_check=pm_null_obj
     coder%proc_base=1
-    coder%link(coder%proc_base)=0
     coder%proc_ncalls=0
     coder%par_base=0
     coder%over_base=0
@@ -398,7 +394,7 @@ contains
 
     coder%one=pm_new_small(context,pm_long,1_pm_p)
     coder%one%data%ln(coder%one%offset)=1
-    coder%unit_type=pm_new_value_typ(coder%context,coder%one)
+    coder%unit_type=pm_new_value_type(coder%context,coder%one)
 
     coder%one=pm_new_small(context,pm_int,1_pm_p)
     coder%one%data%i(coder%one%offset)=1
@@ -412,8 +408,8 @@ contains
     coder%check_mess=pm_new_string(coder%context,'Failed "check" or "test""')
     coder%proc_name_vals=pm_dict_new(coder%context,8_pm_ln)
     coder%id=0
-    coder%true_name=pm_new_value_typ(coder%context,coder%true)
-    coder%false_name=pm_new_value_typ(coder%context,coder%false)
+    coder%true_name=pm_new_value_type(coder%context,coder%true)
+    coder%false_name=pm_new_value_type(coder%context,coder%false)
 
     coder%default_label=pm_fast_name(coder%context,sym_pct)
     coder%label=coder%default_label
@@ -431,7 +427,7 @@ contains
     function name_type(n) result(u)
       integer,intent(in):: n
       integer:: u
-      u=pm_new_name_typ(coder%context,n)
+      u=pm_new_name_type(coder%context,n)
     end function name_type
 
   end subroutine init_coder
@@ -554,7 +550,6 @@ contains
           else
              call code_null(coder)
           endif
-          call resolve_if_inits(coder,node)
           call make_sp_call(coder,cblock,node,&
                sym_if,3,0)
           coder%par_state=save_par_state
@@ -574,7 +569,6 @@ contains
           else
              call code_null(coder)
           endif
-          call resolve_if_inits(coder,node)
           call make_sp_call(coder,cblock,node,sym,3,0)
        case(sym_switch)
           save_par_state=coder%par_state
@@ -673,7 +667,7 @@ contains
           p=node_arg(node,1)
           call trav_call(coder,cblock,node,p,0,.true.)
        case(sym_var,sym_const)
-          call trav_var_no_init(coder,cblock,list,node)
+          ! No init var/const
        case(sym_with)
           base=coder%top
           call trav_open_stmt_list(coder,cblock,node,node_arg(node,1))
@@ -952,7 +946,7 @@ contains
       case(sym_list)
          call trav_exprlist(coder,cblock,nodep,node)
       case(sym_result)
-         call push_word(coder,pm_typ_is_tuple)
+         call push_word(coder,pm_type_is_tuple)
          call push_word(coder,0)
          do i=1,node_numargs(node),2
             call trav_expr(coder,cblock,node,node_arg(node,i))
@@ -1056,7 +1050,6 @@ contains
        call trav_switch_stmt(coder,cblock2,stmt,idx+2,var,sym)
        call close_cblock(coder,cblock2)
     endif
-    call resolve_if_inits(coder,stmt)
     call make_sp_call(coder,cblock,stmt,sym,3,0)
   contains
     include 'fisnull.inc'
@@ -2294,7 +2287,7 @@ contains
     call init_var(coder,cblock_pre,stmt,coder%var(iter+lv_num))
     
     ! Alias the region variable
-    call make_var_tab_entry(coder,sym_region,coder%var(iter+lv_distr))
+    call push_var(coder,sym_region,coder%var(iter+lv_distr))
 
     ! Create the subregion variable
     call make_sys_var(coder,cblock,stmt,sym_subregion,var_is_shadowed)
@@ -2875,8 +2868,6 @@ contains
     var=find_var(coder,name)
     if(pm_fast_isnull(var)) then
        call make_definition(coder,cblock,node,lhs,0)
-    elseif(cnode_flags_set(var,var_flags,var_is_not_inited)) then
-       call var_init_in_cblock(coder,cblock,node,var,0)
     else
        call make_assignment(coder,cblock,node,lhs,rhs,var)
     endif
@@ -3109,213 +3100,6 @@ contains
     endif
   end subroutine make_op_assignment_noalias
 
-  !===============================================================
-  ! Traverse var or const definition with no immediate definition
-  !===============================================================
-  subroutine trav_var_no_init(coder,cblock,pnode,node)
-    type(code_state):: coder
-    type(pm_ptr),intent(in):: cblock,pnode,node
-    integer:: n,flags,i
-    type(pm_ptr):: tnode
-    n=node_numargs(node)-1
-    tnode=node_arg(node,n+1)
-    flags=var_is_not_inited
-    if(node_sym(node)==sym_var) flags=ior(flags,var_is_var)
-    do i=1,n
-       call make_var(coder,cblock,node,node_arg(node,i),flags,tnode)
-       call cache_var_init(coder,cblock,node,top_code(coder))
-       if(pm_is_compiling) then
-          call make_sp_call(coder,cblock,node,sym_init_var,1,0)
-       else
-          call drop_code(coder)
-       endif
-    enddo
-  end subroutine trav_var_no_init
-
-  !==================================================================
-  ! Initialise a variable in a nested block (relative to definition)
-  !==================================================================
-  subroutine var_init_in_cblock(coder,cblock,node,var,flags)
-    type(code_state):: coder
-    type(pm_ptr),intent(in):: cblock,node,var
-    integer,intent(in):: flags
-    type(pm_ptr):: p,def_block,tnode
-    logical:: has_if
-
-    def_block=cnode_get(var,var_parent)
-    has_if=.false.
-    p=cblock
-    do while(.not.p==def_block)
-       select case(cnode_get_num(p,cblock_sym))
-       case(sym_for)
-          call code_error(coder,node,&
-               'Cannot intialise a "var" or "const" inside a nested "for" or "par"statement')
-          call cnode_error(coder,var,&
-                  'Variable definition incorrectly intialised by the above')
-       case(sym_if,sym_if_invar,sym_switch)
-          if(var_init_cached(coder,p,var)) then
-             if(.not.has_if) then
-                call code_error(coder,node,&
-                     'Cannot initialise variable twice: ',&
-                     cnode_get(var,var_name))
-             endif
-             exit
-          else
-             call cache_var_init(coder,p,node,var)
-             has_if=.true.
-          endif
-       case(sym_while,sym_until,sym_each)
-          call code_error(coder,node,&
-               'Cannot initialise a variable defined outside '//&
-               'of a sequential loop within that loop: ',&
-               cnode_get(var,var_name))
-          call cnode_error(coder,var,&
-                  'Variable definition incorrectly intialised by the above')
-       case(sym_any)
-          call code_error(coder,node,&
-               'Cannot initialise a variable defined outside '//&
-               'of an "any" statement within that statement: ',&
-               cnode_get(var,var_name))
-          call cnode_error(coder,var,&
-               'Variable definition incorrectly intialised by the above')
-       end select
-       p=cnode_get(p,cblock_parent)
-    enddo
-    if(.not.has_if) then
-       call cnode_clear_flags(var,var_flags,var_is_not_inited)
-    endif
-    call trav_cast(coder,cblock,node,&
-         cnode_get(var,var_extra_info),&
-         merge(sym_var,sym_const,cnode_flags_set(var,var_flags,var_is_var)))
-    call init_var(coder,cblock,node,var)
-  contains
-    include 'fisnull.inc'
-    include 'fvkind.inc'
-  end subroutine var_init_in_cblock
-
-  !========================================================
-  ! Check 2 cblocks (or null) on the top of the
-  ! vstack to see if initialisations match
-  !========================================================
-  subroutine resolve_if_inits(coder,node)
-    type(code_state):: coder
-    type(pm_ptr),intent(in):: node
-    type(pm_ptr):: cblock1,cblock2,cache1,cache2
-    logical:: empty1,empty2
-    integer:: i
-    cblock1=coder%vstack(coder%vtop-1)
-    cblock2=coder%vstack(coder%vtop)
-    cache1=cnode_get(cblock1,cblock_var_inits)
-    if(pm_fast_isnull(cblock2)) then
-       cache2=pm_null_obj
-    else
-       cache2=cnode_get(cblock2,cblock_var_inits)
-    endif
-    empty1=pm_fast_isnull(cache1)
-    empty2=pm_fast_isnull(cache2)
-    if(empty1.and.empty2) then
-       return
-    elseif(.not.(empty1.or.empty2)) then
-       if(pm_dict_size(coder%context,cache1)>&
-            pm_dict_size(coder%context,cache2)) then
-          call compare(cache1,cache2)
-       else
-          call compare(cache2,cache1)
-       endif
-    else
-       if(empty1) cache1=cache2
-       do i=1,pm_dict_size(coder%context,cache1)
-          call error(cache1,i)
-       enddo
-    endif
-  contains
-    include 'fisnull.inc'
-
-    ! Compare larger cache1 to cache2
-    subroutine compare(cache1,cache2)
-      type(pm_ptr),intent(in):: cache1,cache2
-      type(pm_ptr):: var,dblock,p
-      integer:: i
-      
-      outer: do i=1,pm_dict_size(coder%context,cache1)
-         if(pm_fast_isnull(pm_dict_lookup(coder%context,cache2,&
-              pm_dict_key(coder%context,cache1,int(i,pm_ln))))) then
-            call error(cache1,i)
-         endif
-         ! Check if variable is now completely initialised
-         ! (true if not still nested in any conditional statement)
-         var=pm_dict_val(coder%context,cache1,int(i,pm_ln))
-         dblock=cnode_get(var,var_parent)
-         p=cnode_get(cblock1,cblock_parent)
-         do while(.not.p==dblock)
-            select case(cnode_get_num(p,cblock_sym))
-            case(sym_if,sym_if_invar)
-               cycle outer
-            end select
-            p=cnode_get(p,cblock_parent)
-         enddo
-         call cnode_clear_flags(var,var_flags,var_is_not_inited)
-      enddo outer
-    end subroutine compare
-    
-    subroutine error(cache,j)
-      type(pm_ptr):: cache
-      integer:: j
-      call code_error(coder,node,&
-           'Variable is only intialised in one branch of this if statement: ',&
-           cnode_get(pm_dict_val(coder%context,cache,int(j,pm_ln)),var_name))
-    end subroutine error
-    
-  end subroutine resolve_if_inits
-
-  !====================================================================
-  ! Check if variable initialisation is in the cache for a given block
-  !====================================================================
-  function var_init_cached(coder,cblock,var) result(iscached)
-    type(code_state):: coder
-    type(pm_ptr),intent(in):: cblock,var
-    logical:: iscached
-    type(pm_ptr):: index,cache
-    index=cnode_get(var,var_index)
-    cache=cnode_get(cblock,cblock_var_inits)
-    if(pm_fast_isnull(cache)) then
-       iscached=.false.
-    else
-       iscached=.not.pm_fast_isnull(pm_dict_lookup(coder%context,&
-            cache,index))
-    endif
-  contains
-    include 'fisnull.inc'
-  end function var_init_cached
-
-  !========================================================
-  ! Add a variable initialisation to the cache for a block
-  !========================================================
-  subroutine cache_var_init(coder,cblock,node,var)
-    type(code_state):: coder
-    type(pm_ptr),intent(in):: cblock,node,var
-    type(pm_ptr):: index,cache,tnode2
-    logical:: ok
-    integer(pm_ln):: i
-    index=cnode_get(var,var_index)
-    cache=cnode_get(cblock,cblock_var_inits)
-    if(pm_fast_isnull(cache)) then
-       cache=pm_dict_new(coder%context,8_pm_ln)
-       call pm_ptr_assign(coder%context,cblock,&
-            int(cblock_var_inits,pm_ln),&
-            cache)
-    endif
-    call pm_dict_set(coder%context,cache,index,var,.true.,.false.,ok)
-    if(.not.ok) then
-       call code_error(coder,node,&
-            'Cannot re-initialise variable: ',&
-            cnode_get(var,var_name))
-    endif
-  contains
-    include 'fisnull.inc'
-    include 'ftiny.inc'
-  end subroutine cache_var_init
-
   !===================================================================
   ! Use expression on top of stack to create new variable or constant
   !===================================================================
@@ -3334,7 +3118,6 @@ contains
        pnode=node
     endif
     if(pm_fast_isname(name)) then
-       var=find_var(coder,name)
        call make_var(coder,cblock,pnode,name,flags)
        var=top_code(coder)
        call swap_code(coder)
@@ -4138,7 +3921,7 @@ contains
                p%offset==sym_true)
        else
           call make_const(coder,cblock,node,p,&
-               pm_new_value_typ(coder%context,p))
+               pm_new_value_type(coder%context,p))
        endif
        return
     case(sym_fix)
@@ -4360,7 +4143,7 @@ contains
        if(coder%fixed) then
           p=node_arg(node,1)
           call make_const(coder,cblock,node,p,&
-               pm_new_value_typ(coder%context,p))
+               pm_new_value_type(coder%context,p))
        else
           call make_const(coder,cblock,node,node_arg(node,1))
        endif
@@ -4385,7 +4168,7 @@ contains
       integer:: junk
       call make_const(coder,cblock,pnode,&
            pm_fast_name(coder%context,nm),&
-           pm_new_name_typ(coder%context,nm))
+           pm_new_name_type(coder%context,nm))
     end subroutine name_const
     
     subroutine range_const(p,n)
@@ -4415,36 +4198,6 @@ contains
     end subroutine array_span
     
   end subroutine trav_expr
-
-  !========================================================
-  ! Traverse single variable in an expression
-  !========================================================
-  subroutine trav_var(coder,cblock,node,name)
-    type(code_state):: coder
-    type(pm_ptr),intent(in):: cblock,node,name
-    type(pm_ptr):: var
-    var=find_var(coder,name)
-    if(pm_fast_isnull(var)) then
-       call code_error(coder,node,'Variable has not been defined: ',name)
-       call make_temp_var(coder,cblock,node)
-       return
-    endif
-    if(cnode_flags_set(var,var_flags,var_is_not_inited)) then
-       call code_error(coder,node,&
-            'Variable is not yet initialised: ',name)
-    endif
-    if(cnode_flags_set(var,var_flags,var_is_aliased)) then
-       coder%aliased=.true.
-       var=cnode_get(var,var_extra_info)
-    endif
-    if(cnode_flags_set(var,var_flags,var_is_sync)) then
-       call cnode_error(coder,node,&
-            'Cannot access "sync" left-hand-side variable in right-hand-side expression')
-    endif
-    call code_val(coder,var)
-  contains
-    include 'fisnull.inc'
-  end subroutine trav_var
 
   !==================================================================
   ! Name in usual expression context (may be variable or parameter)
@@ -4573,10 +4326,10 @@ contains
     if(pm_fast_isnull(node_arg(node,1))) then
        call code_num(coder,-1)
        tno=info%data%i(info%offset+1)
-       tno=pm_typ_arg(coder%context,tno,1)
+       tno=pm_type_arg(coder%context,tno,1)
     else
        call trav_type(coder,node,node_arg(node,1))
-       tno=pm_user_typ_body(coder%context,top_word(coder))
+       tno=pm_user_type_body(coder%context,top_word(coder))
        call code_num(coder,pop_word(coder))
     endif
     ! At this point tno contains the body of the struct/rec type
@@ -4594,7 +4347,7 @@ contains
           if(nam1==nam2) then
              count=count+1
              call code_val(coder,coder%vstack(vbase+i))
-             call cast_element(node_arg(exprs,i),pm_typ_arg(coder%context,tno,j))
+             call cast_element(node_arg(exprs,i),pm_type_arg(coder%context,tno,j))
              cycle outer
           endif
        enddo
@@ -4766,7 +4519,7 @@ contains
        call push_word(coder,0)
     case(sym_or)
        n=node_numargs(node)
-       call push_word(coder,pm_typ_new_any)
+       call push_word(coder,pm_type_new_any)
        call push_word(coder,0)
        do i=1,n
           call trav_type(coder,pnode,node_arg(node,i))
@@ -4774,24 +4527,24 @@ contains
        call make_type(coder,2+n)
     case(sym_and)
        n=node_numargs(node)
-       call push_word(coder,pm_typ_new_all)
+       call push_word(coder,pm_type_new_all)
        call push_word(coder,0)
        do i=1,n
           call trav_type(coder,pnode,node_arg(node,i))
        enddo
        call make_type(coder,2+n)
     case(sym_pval)
-       call push_word(coder,pm_typ_new_poly)
+       call push_word(coder,pm_type_new_poly)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        call make_type(coder,3)
     case(sym_type_val)
-       call push_word(coder,pm_typ_new_type)
+       call push_word(coder,pm_type_new_type)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        call make_type(coder,3)
     case(sym_includes)
-       call push_word(coder,pm_typ_new_includes)
+       call push_word(coder,pm_type_new_includes)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        typno=top_word(coder)
@@ -4825,7 +4578,7 @@ contains
        call push_word(coder,proc_type_from_decl(coder,p,node))
     case(sym_unique)
        name=node_arg(node,1)
-       call push_word(coder,pm_new_name_typ(coder%context,int(name%offset)))
+       call push_word(coder,pm_new_name_type(coder%context,int(name%offset)))
     case(sym_dash)
        name=node_arg(node,1)
        if(pm_fast_isname(name)) then
@@ -4835,20 +4588,20 @@ contains
              call push_word(coder,coder%false_name)
           endif
        else
-          call push_word(coder,pm_new_value_typ(coder%context,name))
+          call push_word(coder,pm_new_value_type(coder%context,name))
        endif
     case(sym_contains)
-       call push_word(coder,pm_typ_new_contains)
+       call push_word(coder,pm_type_new_contains)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        call make_type(coder,3)
     case(sym_casts_to)
-       call push_word(coder,pm_typ_new_has)
+       call push_word(coder,pm_type_new_has)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        call make_type(coder,3)
     case(sym_except)
-       call push_word(coder,pm_typ_new_except)
+       call push_word(coder,pm_type_new_except)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        call trav_type(coder,pnode,node_arg(node,2))
@@ -4857,7 +4610,7 @@ contains
        call trav_type_decl(coder,pnode,node)
     case(sym_open_brace)
        name=node_arg(node,1)
-       call push_word(coder,pm_typ_new_user)
+       call push_word(coder,pm_type_new_user)
        call push_word(coder,int(name%offset))
        typno=get_typeno(2)
        if(typno==0) call pm_panic('Intrinsic type not found')
@@ -4866,9 +4619,9 @@ contains
        flags=node_num_arg(node,7)
        name=node_arg(node,2)
        if(sym==sym_struct) then
-          call push_word(coder,pm_typ_new_struct+flags)
+          call push_word(coder,pm_type_new_struct+flags)
        else
-          call push_word(coder,pm_typ_new_rec+flags)
+          call push_word(coder,pm_type_new_rec+flags)
        endif
        call push_word(coder,abs(int(name%offset)))
        val=node_arg(node,1)
@@ -4878,31 +4631,31 @@ contains
        enddo
        call make_type(coder,n+2)
     case(sym_caret)
-       call push_word(coder,pm_typ_new_array)
+       call push_word(coder,pm_type_new_array)
        call push_word(coder,node_get_num(node,node_args+1))
        call trav_type(coder,pnode,node_arg(node,1))
        call trav_type(coder,pnode,node_arg(node,3))
        call push_word(coder,int(pm_long))
        call make_type(coder,5)
     case(sym_dcaret)
-       call push_word(coder,pm_typ_new_vect)
+       call push_word(coder,pm_type_new_vect)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        call make_type(coder,3)
     case(sym_underscore)
-       call push_word(coder,pm_typ_new_bottom)
+       call push_word(coder,pm_type_new_bottom)
        call push_word(coder,0)
        call make_type(coder,2)
     case(sym_const)
-       call push_word(coder,pm_typ_new_const)
+       call push_word(coder,pm_type_new_const)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        call make_type(coder,3)
     case(sym_list,sym_dotdotdot)
        if(sym==sym_dotdotdot) then
-          call push_word(coder,pm_typ_new_vtuple)
+          call push_word(coder,pm_type_new_vtuple)
        else
-          call push_word(coder,pm_typ_new_tuple)
+          call push_word(coder,pm_type_new_tuple)
        endif
        call push_word(coder,0)
        base=coder%wtop
@@ -4918,7 +4671,7 @@ contains
     case(sym_define,sym_var)
        call trav_type(coder,pnode,node_arg(node,1))
     case(sym_pm_dref)
-       call push_word(coder,pm_typ_is_dref)
+       call push_word(coder,pm_type_is_dref)
        n=node_get_num(node,node_args)
        call push_word(coder,n)
        n=node_numargs(node)
@@ -4927,7 +4680,7 @@ contains
        enddo
        call make_type(coder,n+1)
     case(sym_amp)
-       call push_word(coder,pm_typ_new_amp)
+       call push_word(coder,pm_type_new_amp)
        call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
        call make_type(coder,3)
@@ -4935,10 +4688,10 @@ contains
        call trav_type(coder,pnode,node_arg(node,1))
        typno=pop_word(coder)
        call push_word(coder,&
-            pm_typ_add_mode(coder%context,typno,&
+            pm_type_add_mode(coder%context,typno,&
             node_num_arg(node,2),.false.,.true.)) 
     case(sym_result)
-       call push_word(coder,pm_typ_new_tuple)
+       call push_word(coder,pm_type_new_tuple)
        call push_word(coder,0)
        n=node_numargs(node)
        do i=1,n
@@ -4971,7 +4724,7 @@ contains
     function get_typeno(size) result(tno)
       integer,intent(in):: size
       integer:: tno
-      tno=pm_typ_lookup(coder%context,&
+      tno=pm_type_lookup(coder%context,&
            coder%wstack(coder%wtop-size+1:coder%wtop))
     end function get_typeno
 
@@ -4979,7 +4732,7 @@ contains
     function get_user_typeno(size) result(tno)
       integer,intent(in):: size
       integer:: tno
-      tno=pm_user_typ_lookup(coder%context,&
+      tno=pm_user_type_lookup(coder%context,&
            coder%wstack(coder%wtop-size+1:coder%wtop))
     end function get_user_typeno
 
@@ -4987,7 +4740,7 @@ contains
       type(pm_ptr):: dp,list,arg
       integer:: i,j,n,base
 
-      call push_word(coder,pm_typ_new_proc)
+      call push_word(coder,pm_type_new_proc)
       call push_word(coder,0)
 
       base=coder%wtop
@@ -4998,13 +4751,13 @@ contains
                  'Cannot shadow type-match parameter:',node_arg(dp,i))
          endif
       enddo
-      call push_word(coder,pm_typ_new_proc_sig)
+      call push_word(coder,pm_type_new_proc_sig)
       call push_word(coder,node_get_num(node,node_args+1))
  
       do i=3,4
          list=node_arg(node,i)
          call push_word(coder,&
-              merge(pm_typ_is_vtuple,pm_typ_is_tuple,node_sym(list)==sym_dotdotdot))
+              merge(pm_type_is_vtuple,pm_type_is_tuple,node_sym(list)==sym_dotdotdot))
          if(i==4.or.pm_fast_isnull(node_arg(node,5))) then
             call push_word(coder,0)
          else
@@ -5037,7 +4790,7 @@ contains
     type(pm_ptr):: namenode,name,decl,dec,inc,pargs,also_dec
     type(pm_ptr):: twice_dec,main_dec,tname,tval,pars,newdec
     type(pm_ptr),target:: incset
-    logical:: is_present,also_present,type_present,is_interface
+    logical:: is_present,also_present,type_present
     logical:: dotdotdot_present,multiple_modules,twice,has_constraints
     integer:: nargs,sym,i,j,n,base,parbase,ibase,npars,idepth
     integer:: new_type,tno
@@ -5052,7 +4805,7 @@ contains
     else
        name=node_arg(namenode,2)
     endif
-    call push_word(coder,pm_typ_new_user)
+    call push_word(coder,pm_type_new_user)
     call push_word(coder,-1)
     if(nargs>0) then
        ! Type arguments
@@ -5123,7 +4876,7 @@ contains
     endif
  
     ! Create user type entry - pointing to nothing to start with
-    new_type=pm_new_user_typ(coder%context,coder%wstack(base-nargs-1:base),0)
+    new_type=pm_new_user_type(coder%context,coder%wstack(base-nargs-1:base),0)
  
     ! Check for excessive recursion
     idepth=node_get_num(decl,node_args+4)
@@ -5144,13 +4897,12 @@ contains
     ! Find main definition of type
     dotdotdot_present=.false.
     multiple_modules=.false.
-    is_interface=.false.
     dec=node_arg(decl,2)
     ibase=-1
     do
        sym=node_sym(dec)
        select case(sym)
-       case(sym_includes,sym_is,sym_dotdotdot,sym_interface)
+       case(sym_includes,sym_is,sym_dotdotdot)
           main_dec=dec
           parbase=coder%wtop
           pars=node_get(dec,typ_params)
@@ -5166,11 +4918,10 @@ contains
           endif
           has_constraints=.not.pm_fast_isnull(node_get(main_dec,typ_constraints))
           if(sym/=sym_is) then
-             is_interface=sym==sym_interface
              inc=node_get(dec,typ_includes)
              if(.not.pm_fast_isnull(inc)) then
                 ibase=coder%wtop
-                call push_word(coder,pm_typ_new_any)
+                call push_word(coder,pm_type_new_any)
                 call push_word(coder,0)
                 do i=1,node_numargs(inc)
                    call trav_type(coder,pnode,node_arg(inc,i))
@@ -5181,7 +4932,7 @@ contains
              else
                 ibase=coder%wtop
                 dotdotdot_present=.true.
-                call push_word(coder,pm_typ_new_any)
+                call push_word(coder,pm_type_new_any)
                 call push_word(coder,0)
              endif
           else
@@ -5226,11 +4977,6 @@ contains
                pm_null_obj,0,0)
           call trav_type(coder,pnode,node_arg(dec,2))
           call pop_type_vars(coder)
-          if(is_interface) then
-             call defer_type_check(coder,dec,main_dec,&
-                  new_type,top_word(coder),sym_includes,&
-                  cnode_is_interface_constraint)
-          endif
           if(has_constraints) then
              call check_constraints(top_word(coder),dec)
           endif
@@ -5257,11 +5003,6 @@ contains
              if(.not.pm_fast_isnull(inc)) then
                 do i=1,node_numargs(inc)
                    call trav_type(coder,pnode,node_arg(inc,i))
-                   if(is_interface) then
-                      call defer_type_check(coder,node_arg(inc,i),main_dec,&
-                           new_type,top_word(coder),sym_includes,&
-                           cnode_is_interface_constraint)
-                   endif
                    if(has_constraints) then
                       call check_constraints(top_word(coder),dec)
                    endif
@@ -5269,9 +5010,9 @@ contains
              endif
              call pop_type_vars(coder)
           else
-             ! sym_dotdotdot, sym_includes or sym_interface
+             ! sym_dotdotdot, sym_includes
              if(pm_debug_checks) then
-                if(sym/=sym_dotdotdot.and.sym/=sym_includes.and.sym/=sym_interface) then
+                if(sym/=sym_dotdotdot.and.sym/=sym_includes) then
                    if(sym>=0.and.sym<=num_sym) then
                       write(*,*) 'SYM=',trim(sym_names(sym))
                    else
@@ -5280,7 +5021,7 @@ contains
                    call pm_panic('Not a type in trav_type_decl')
                 endif
              endif
-             if(sym==sym_dotdotdot.or.sym==sym_interface) then
+             if(sym==sym_dotdotdot) then
                 dotdotdot_present=.true.
              endif
              if(is_present.or.type_present) then
@@ -5302,18 +5043,13 @@ contains
 
     ! Create a union type from the parts brought together
     if(.not.is_present.and.coder%wtop>ibase) then
-       if(node_sym(main_dec)==sym_interface) then
-          ! This is an interface type -- create it
-          call make_type(coder,coder%wtop-ibase)
-          call trav_interface(coder,node_get(main_dec,typ_interface),&
-               pop_word(coder))
-       elseif(coder%wtop-ibase>3) then
+       if(coder%wtop-ibase>3) then
           call make_type(coder,coder%wtop-ibase)
        endif
     endif
 
     ! Set the body of the user type to be the new type
-    call pm_user_typ_set_body(coder%context,new_type,top_word(coder))
+    call pm_user_type_set_body(coder%context,new_type,top_word(coder))
 
     ! Tidy up and place new type on wstack
     base=base-nargs-1
@@ -5357,7 +5093,7 @@ contains
     if(debug_codegen) then
        write(*,*) 'definition traversed for ',&
             trim(pm_name_as_string(coder%context,int(name%offset))),'#',top_word(coder)
-       write(*,*) '#', trim(pm_typ_as_string(coder%context,top_word(coder)))
+       write(*,*) '#', trim(pm_type_as_string(coder%context,top_word(coder)))
     endif
  
     return
@@ -5386,7 +5122,7 @@ contains
     function get_typeno(size) result(tno)
       integer,intent(in):: size
       integer:: tno
-      tno=pm_typ_lookup(coder%context,&
+      tno=pm_type_lookup(coder%context,&
            coder%wstack(coder%wtop-size+1:coder%wtop))
     end function get_typeno
 
@@ -5401,34 +5137,11 @@ contains
       do i=1,node_numargs(constraints)
          call trav_type(coder,main_dec,node_arg(constraints,i))
          call defer_type_check(coder,node,node_arg(constraints,i),pop_word(coder),tno,&
-              0,cnode_is_typ_constraint)
+              0,cnode_is_type_constraint)
       enddo
     end subroutine check_constraints
     
   end subroutine trav_type_decl
-
-  !===============================================================
-  ! Traverse interface declaration and make type
-  ! base_type must be union of types conforming to the interface
-  !==============================================================
-  recursive subroutine trav_interface(coder,node,base_type)
-    type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: node
-    integer,intent(in):: base_type
-    type(pm_ptr):: p,val
-    integer:: n,i
-    p=node_arg(node,2)
-    call push_word(coder,pm_typ_new_interface)
-    call push_word(coder,int(p%offset))
-    call push_word(coder,base_type)
-    p=node_arg(node,1)
-    n=node_numargs(p)
-    do i=1,n
-       val=node_arg(p,i)
-       call trav_type(coder,val,val)
-    enddo
-    call make_type(coder,n+3)
-  end subroutine trav_interface
 
 
   !===============================================================
@@ -5452,7 +5165,7 @@ contains
        n=node_numargs(params)
        do i=1,n,2
           arg=node_arg(params,i+1)
-          call push_word(coder,pm_typ_new_param)
+          call push_word(coder,pm_type_new_param)
           call push_word(coder,(i+1)/2)
           call trav_type(coder,arg,arg)
           call make_type(coder,3)
@@ -5462,7 +5175,7 @@ contains
        call trav_type(coder,pnode,decl)
        tno=pop_word(coder)
        call pop_type_vars(coder)
-       tno=pm_new_params_typ(coder%context,n,tno)
+       tno=pm_new_params_type(coder%context,n,tno)
        vect=pm_fast_newnc(coder%context,pm_int,5)
        call code_val(coder,vect) ! protect from GC
        vect%data%i(vect%offset)=node_num_arg(decl,2)
@@ -5475,7 +5188,7 @@ contains
     else
        call trav_type(coder,pnode,decl)
        tno=pop_word(coder)
-       tno=pm_new_params_typ(coder%context,0,tno)
+       tno=pm_new_params_type(coder%context,0,tno)
        vect=pm_fast_newnc(coder%context,pm_int,5)
        call code_val(coder,vect) ! protect from GC
        vect%data%i(vect%offset)=node_num_arg(decl,2)
@@ -5486,7 +5199,7 @@ contains
        call pm_ptr_assign(coder%context,decl,node_args+5_pm_ln,vect)
        call drop_code(coder)
     endif
-    call pm_typ_record_by_name(coder%context,&
+    call pm_type_record_by_name(coder%context,&
             node_get_num(decl,node_args+2),tno)
     coder%wtop=base
   contains
@@ -5540,7 +5253,6 @@ contains
     endif
     coder%top=coder%top+1
     coder%stack(coder%top)=typevar_start
-    coder%link(coder%top)=0
     coder%var(coder%top)=pm_null_obj
  
     base=coder%top
@@ -5574,7 +5286,7 @@ contains
                   partyp,int(pname%offset),cnode_is_par_constraint)
              
              ! Intersect argument and parameter
-             call push_word(coder,pm_typ_new_all)
+             call push_word(coder,pm_type_new_all)
              call push_word(coder,0)
              call push_word(coder,min(vtyp,partyp))
              call push_word(coder,max(vtyp,partyp))
@@ -5600,15 +5312,14 @@ contains
                'Repitition of type parameter name:',&
                pname)
        else
-          call make_var_tab_entry(coder,int(pname%offset),&
+          call push_var(coder,int(pname%offset),&
                pm_fast_tinyint(coder%context,vtyp))
        endif
 
     enddo
     coder%top=coder%top+1
     coder%stack(coder%top)=typevar_end
-    coder%link(coder%top)=base
-    coder%var(coder%top)=pm_null_obj
+    coder%var(coder%top)%offset=base
   contains
     include 'ftiny.inc'
     include 'fisnull.inc'
@@ -5620,7 +5331,7 @@ contains
   subroutine pop_type_vars(coder)
     type(code_state),intent(inout):: coder
     integer:: base
-    base=coder%link(coder%top)
+    base=coder%var(coder%top)%offset
     if(pm_debug_checks) then
        if(coder%stack(coder%top)/=typevar_end) &
             call pm_panic('Pop type vars  - no end record')
@@ -5641,21 +5352,19 @@ contains
     type(code_state),intent(inout):: coder
     integer:: top,base,i,nbase
     top=coder%proc_base
-    base=coder%link(top)
+    base=coder%var(top)%offset
     coder%top=coder%top+1
     nbase=coder%top
     coder%stack(coder%top)=typevar_start
-    coder%link(coder%top)=0
     coder%var(coder%top)=pm_null_obj
     do i=base+1,top-1
        if(coder%stack(i)/=0) then
-          call make_var_tab_entry(coder,coder%stack(i),coder%var(i))
+          call push_var(coder,coder%stack(i),coder%var(i))
        endif
     enddo
     coder%top=coder%top+1
     coder%stack(coder%top)=typevar_end
-    coder%link(coder%top)=nbase
-    coder%var(coder%top)=pm_null_obj
+    coder%var(coder%top)%offset=nbase
   end subroutine copy_type_vars
 
   !========================================
@@ -5673,7 +5382,7 @@ contains
        vr=pm_null_obj
     else
        n=vname%offset
-       k=find_var_entry(coder,n,int(coder%link(coder%top)))
+       k=find_var_entry(coder,n,int(coder%var(coder%top)%offset))
        if(k/=0) then
           vr=coder%var(k)
        else
@@ -5709,7 +5418,7 @@ contains
     integer:: k
     integer:: tno,tno1,tno2
     type(pm_ptr):: tset,name
-    type(pm_typ_einfo):: einfo
+    type(pm_type_einfo):: einfo
     p=coder%prog_cblock
     keys=pm_dict_keys(coder%context,coder%context%tcache)
     vals=pm_dict_vals(coder%context,coder%context%tcache)
@@ -5717,12 +5426,12 @@ contains
     ! Check no named type is problematically recursive
     do i=0,pm_dict_size(coder%context,coder%context%tcache)-1
        tv=keys%data%ptr(keys%offset+i)
-       if(pm_tv_kind(tv)==pm_typ_is_user) then
+       if(pm_tv_kind(tv)==pm_type_is_user) then
           tno=i+1
-          if(pm_typ_is_recur(coder%context,tno,tno)) then
+          if(pm_type_is_recur(coder%context,tno,tno)) then
              call code_error(coder,pm_null_obj,&
                   'Type directly includes itself: '//&
-                  trim(pm_typ_as_string(coder%context,tno)))
+                  trim(pm_type_as_string(coder%context,tno)))
              call pm_ptr_assign(coder%context,vals,i,pm_null_obj)
           endif
        endif
@@ -5731,16 +5440,16 @@ contains
     ! Check all named types include themselves (weeds out some errors)
     do i=0,pm_dict_size(coder%context,coder%context%tcache)-1
        tv=keys%data%ptr(keys%offset+i)
-       if(pm_tv_kind(tv)==pm_typ_is_user) then
+       if(pm_tv_kind(tv)==pm_type_is_user) then
           tno=i+1
           ! Check type includes its body to avoid automatic true return
-          if(.not.pm_typ_includes(coder%context,tno,&
-               pm_user_typ_body(coder%context,tno),pm_typ_incl_typ,&
+          if(.not.pm_type_includes(coder%context,tno,&
+               pm_user_type_body(coder%context,tno),pm_type_incl_type,&
                einfo)) then
              call code_error(coder,pm_null_obj,&
                   'Type is incorrectly defined: '//&
-                  trim(pm_typ_as_string(coder%context,tno)))
-             call pm_typ_error(coder%context,einfo)
+                  trim(pm_type_as_string(coder%context,tno)))
+             call pm_type_error(coder%context,einfo)
           endif
        endif
     enddo
@@ -5754,55 +5463,46 @@ contains
        case(cnode_is_arg_constraint)
           tno1=cnode_num_arg(p,2)
           tno2=cnode_num_arg(p,3)
-          if(.not.pm_typ_includes(coder%context,tno1,tno2,pm_typ_incl_typ,&
+          if(.not.pm_type_includes(coder%context,tno1,tno2,pm_type_incl_type,&
                einfo)) then
              call cnode_error(coder,p,&
                   'Type argument "'//&
                   trim(pm_name_as_string(coder%context,&
                   int(name%offset)))//&
                   '" does not meet constraint: '//&
-                  trim(pm_typ_as_string(coder%context,tno1))//&
+                  trim(pm_type_as_string(coder%context,tno1))//&
                   ' inc '//&
-                  trim(pm_typ_as_string(coder%context,tno2)))
-             call pm_typ_error(coder%context,einfo)
+                  trim(pm_type_as_string(coder%context,tno2)))
+             call pm_type_error(coder%context,einfo)
              call code_error(coder,cnode_arg(p,5),&
                   'Constraint that gave rise to above error')
           endif
        case(cnode_is_par_constraint)
           tno1=cnode_get_num(p,cnode_args+1)
           tno2=cnode_get_num(p,cnode_args+2)
-          if(.not.pm_typ_includes(coder%context,tno1,tno2,pm_typ_incl_typ,&
+          if(.not.pm_type_includes(coder%context,tno1,tno2,pm_type_incl_type,&
                einfo)) then
              call cnode_error(coder,p,&
                   'Parameter "'//&
                   trim(pm_name_as_string(coder%context,&
                   int(name%offset)))//&
                   '" does not match base type; parameter contraint: '//&
-                  trim(pm_typ_as_string(coder%context,tno1))//&
+                  trim(pm_type_as_string(coder%context,tno1))//&
                   ' ,argument: '//&
-                  trim(pm_typ_as_string(coder%context,tno2)))
-             call pm_typ_error(coder%context,einfo)
+                  trim(pm_type_as_string(coder%context,tno2)))
+             call pm_type_error(coder%context,einfo)
              call code_error(coder,cnode_arg(p,5),&
                   'Constraint that gave rise to the above error')
           endif
-       case(cnode_is_typ_constraint)
+       case(cnode_is_type_constraint)
           tno1=cnode_get_num(p,cnode_args+1)
           tno2=cnode_get_num(p,cnode_args+2)
-          if(.not.pm_typ_includes(coder%context,tno1,tno2,pm_typ_incl_equiv,&
+          if(.not.pm_type_includes(coder%context,tno1,tno2,pm_type_incl_equiv,&
                einfo)) then
              call cnode_error(coder,p,'Type does not meet constraint:')
-             call pm_typ_error(coder%context,einfo)
+             call pm_type_error(coder%context,einfo)
              call code_error(coder,cnode_arg(p,5),&
                   'Type constraint referenced in above error')
-          endif
-       case(cnode_is_interface_constraint)
-          tno1=pm_user_typ_body(coder%context,cnode_get_num(p,cnode_args+1))
-          tno2=cnode_get_num(p,cnode_args+2)
-          if(.not.pm_interface_typ_conforms(coder%context,tno1,tno2,einfo)) then
-             call cnode_error(coder,p,'Type does not conform to interface')
-             call pm_typ_error(coder%context,einfo)
-             call code_error(coder,cnode_arg(p,5),&
-                  'Definition of interface referenced in above error')
           endif
        end select
        p=cnode_arg(p,1)
@@ -6748,7 +6448,7 @@ contains
       
 
       !coder%over_base=coder%top
-      call make_var_tab_entry(coder,sym_for,&
+      call push_var(coder,sym_for,&
            coder%var(loop_pars+1))
  
       
@@ -6767,12 +6467,12 @@ contains
       call drop_code(coder)
       
       ! Alias the region and subregion variables
-      call make_var_tab_entry(coder,sym_region,coder%var(iter+lv_distr))
-      call make_var_tab_entry(coder,sym_subregion,coder%var(loop_pars+2))
+      call push_var(coder,sym_region,coder%var(iter+lv_distr))
+      call push_var(coder,sym_subregion,coder%var(loop_pars+2))
       coder%over_base =coder%top
       
       call push_par_scope(coder,cblock2)
-      call make_var_tab_entry(coder,sym_here_in_tile,coder%var(loop_pars+3))
+      call push_var(coder,sym_here_in_tile,coder%var(loop_pars+3))
       call make_sys_var(coder,cblock2,node,sym_here,var_is_shadowed)
       call code_val(coder,coder%var(iter+lv_tile))
       call code_val(coder,coder%var(iter+lv_index))
@@ -6985,7 +6685,7 @@ contains
     type(pm_ptr):: p
     p=node_arg(node,1)
     name=p%offset
-    call push_word(coder,pm_typ_new_proc)
+    call push_word(coder,pm_type_new_proc)
     call push_word(coder,name)
     n=2
     p=node_arg(node,2)
@@ -7022,7 +6722,7 @@ contains
        else
           sym=sym_proc
        endif
-       call push_word(coder,pm_typ_new_proc_sig)
+       call push_word(coder,pm_type_new_proc_sig)
        call push_word(coder,sym)
        call push_word(coder,proc_param_type(coder,node))
        call push_word(coder,proc_result_type(coder,node))
@@ -7056,7 +6756,7 @@ contains
     if(tno>0) return
     
     p=node_get(node,proc_params)
-    call push_word(coder,merge(pm_typ_is_vtuple,pm_typ_is_tuple,&
+    call push_word(coder,merge(pm_type_is_vtuple,pm_type_is_tuple,&
          node_sym(p)==sym_dotdotdot))
     amp=node_get(node,proc_amplocs)
     if(pm_fast_isnull(amp)) then
@@ -7095,10 +6795,10 @@ contains
     if(pm_fast_isnull(p)) then
        nret=node_get_num(node,proc_numret)
        if(nret==0) then
-          call push_word(coder,pm_typ_is_tuple)
+          call push_word(coder,pm_type_is_tuple)
           call push_word(coder,0)
        else
-          call push_word(coder,pm_typ_is_undef_result)
+          call push_word(coder,pm_type_is_undef_result)
           call push_word(coder,nret)
        endif
        call make_type(coder,2)
@@ -7106,7 +6806,7 @@ contains
        if(node_sym(p)==sym_dash) then
           p=node_arg(p,1)
        endif
-       call push_word(coder,pm_typ_is_tuple)
+       call push_word(coder,pm_type_is_tuple)
        call push_word(coder,0)
        nret=node_numargs(p)
        do i=1,nret
@@ -7545,7 +7245,7 @@ contains
     integer:: typ1,typ2,typ3,inter,union
     type(pm_ptr):: code,pars
     logical:: ok
-    type(pm_typ_einfo):: einfo
+    type(pm_type_einfo):: einfo
     start=sig%offset+cnode_args+2
     end=sig%offset+pm_fast_esize(sig)
     if(debug_codegen) write(*,*) 'SORT SIGNATURE>',start,end
@@ -7559,26 +7259,26 @@ contains
           if(debug_codegen) then
              write(*,*) 'COMPARE SIGS>',typ1,typ2
              write(*,*) '--------------------------------------'
-             write(*,*) trim(pm_typ_as_string(coder%context,typ2))
-             write(*,*) trim(pm_typ_as_string(coder%context,typ1))
+             write(*,*) trim(pm_type_as_string(coder%context,typ2))
+             write(*,*) trim(pm_type_as_string(coder%context,typ1))
              write(*,*) '--------------------------------------'
           endif
           if(typ1==typ2) then
              call cnode_error(coder,code,&
                   'Procedure "'//trim(sig_name_str(coder,signo))//&
                   '" defined with identical signatures:'//&
-                  trim(pm_typ_as_string(coder%context,typ2)))
+                  trim(pm_type_as_string(coder%context,typ2)))
              call cnode_error(coder,sig%data%ptr(j+1),&
                   'Conflicting definition')
              return
-          else if(pm_typ_includes(coder%context,typ2,typ1,pm_typ_incl_typ,&
+          else if(pm_type_includes(coder%context,typ2,typ1,pm_type_incl_type,&
                einfo)) then
              if(debug_more_codegen) write(*,*) 'INCL'
              call check_nesting(code,sig%data%ptr(j+1))
              exit
           else
              if(debug_more_codegen) write(*,*) 'NOT INCL'
-             if(pm_typ_includes(coder%context,typ1,typ2,pm_typ_incl_typ,&
+             if(pm_type_includes(coder%context,typ1,typ2,pm_type_incl_type,&
                   einfo)) then
                 call check_nesting(sig%data%ptr(j+1),code)
              endif
@@ -7649,16 +7349,16 @@ contains
       endif
       ret1=cnode_get_num(second,pr_rtype)
       ret2=cnode_get_num(first,pr_rtype)
-      tv1=pm_typ_vect(coder%context,ret1)
-      tv2=pm_typ_vect(coder%context,ret2)
-      if(pm_tv_kind(tv1)/=pm_typ_is_undef_result.and.&
-           pm_tv_kind(tv2)/=pm_typ_is_undef_result) then
+      tv1=pm_type_vect(coder%context,ret1)
+      tv2=pm_type_vect(coder%context,ret2)
+      if(pm_tv_kind(tv1)/=pm_type_is_undef_result.and.&
+           pm_tv_kind(tv2)/=pm_type_is_undef_result) then
          isbad=.false.
          do ii=1,pm_tv_numargs(tv1)
             rtype1=pm_tv_arg(tv1,ii)
             rtype2=pm_tv_arg(tv2,ii)
-            if(.not.pm_typ_includes(coder%context,&
-                 rtype1,rtype2,pm_typ_incl_typ,einfo)) then
+            if(.not.pm_type_includes(coder%context,&
+                 rtype1,rtype2,pm_type_incl_type,einfo)) then
                if(.not.isbad) then
                   call cnode_error(coder,first,&
                        'Procedure "'//trim(sig_name_str(coder,signo))//&
@@ -7667,10 +7367,10 @@ contains
                call more_error(coder%context,'Return value #'//&
                     trim(pm_int_as_string(ii))//&
                     ' in original procedure has type: '//&
-                    trim(pm_typ_as_string(coder%context,rtype1)))
+                    trim(pm_type_as_string(coder%context,rtype1)))
                call more_error(coder%context,&
                     'but in this procedure has type: '//&
-                    trim(pm_typ_as_string(coder%context,rtype2)))
+                    trim(pm_type_as_string(coder%context,rtype2)))
                isbad=.true.
                
                
@@ -7823,7 +7523,7 @@ contains
        if(coder%wtop<1) call pm_panic('make type')
     endif
     coder%wstack(coder%wtop)=&
-         pm_new_typ(coder%context,coder%wstack(coder%wtop:coder%wtop+size-1),&
+         pm_new_type(coder%context,coder%wstack(coder%wtop:coder%wtop+size-1),&
          val)
   end subroutine make_type
 
@@ -7840,7 +7540,7 @@ contains
        if(coder%wtop<1) call pm_panic('make type')
     endif
     coder%wstack(coder%wtop)=&
-         pm_new_basic_typ(coder%context,coder%wstack(coder%wtop:coder%wtop+size-1),&
+         pm_new_basic_type(coder%context,coder%wstack(coder%wtop:coder%wtop+size-1),&
          val)
   end subroutine make_basic_type
 
@@ -7853,11 +7553,11 @@ contains
     integer,intent(in):: tno
     integer:: new_type
     integer:: deftyp
-    deftyp=pm_typ_lookup(coder%context,coder%wstack(coder%wtop-n+1:coder%wtop))
+    deftyp=pm_type_lookup(coder%context,coder%wstack(coder%wtop-n+1:coder%wtop))
     if(deftyp>=0) then
        new_type=-1
     else
-       new_type=pm_new_typ(coder%context,coder%wstack(coder%wtop-n+1:coder%wtop),&
+       new_type=pm_new_type(coder%context,coder%wstack(coder%wtop-n+1:coder%wtop),&
             val=pm_fast_typeno(coder%context,tno))
     endif
   contains
@@ -7981,19 +7681,11 @@ contains
     type(pm_ptr):: node
 
     index=0
-    i=coder%hash(var_hash(n))
-    if(pm_debug_checks) then
-       if(i>coder%top) then
-          write(*,*) '#',i,coder%top,var_hash(n)
-          call pm_panic('bad hash')
-       endif
-    endif
-    do while(i>base)
+    do i=coder%top,base+1,-1
        if(coder%stack(i)==n) then
           index=i
           return
        endif
-       i=coder%link(i)
     enddo    
   end function find_var_entry
 
@@ -8145,8 +7837,8 @@ contains
        call make_code(coder,node,cnode_is_var,var_node_size)
     endif
 
-    ! Add variable to hash table
-    call make_var_tab_entry(coder,int(name%offset),top_code(coder))
+    ! Add variable to stack
+    call push_var(coder,int(name%offset),top_code(coder))
 
     ! Link variable to enclosing code block
     link=cnode_get(cblock,cblock_last_var)
@@ -8173,7 +7865,7 @@ contains
   !====================================================
   ! Make an entry for a variable in the hash table
   !=====================================================
-  subroutine make_var_tab_entry(coder,name,var)
+  subroutine push_var(coder,name,var)
     type(code_state),intent(inout):: coder
     integer:: name
     type(pm_ptr),intent(in):: var
@@ -8187,10 +7879,7 @@ contains
     j=coder%top
     coder%stack(j)=name
     coder%var(j)=var
-    i=var_hash(coder%stack(j))
-    coder%link(j)=coder%hash(i)
-    coder%hash(i)=j
-  end subroutine make_var_tab_entry
+  end subroutine push_var
 
   !=====================================
   ! Pop variables down to newbase
@@ -8200,38 +7889,8 @@ contains
     integer,intent(in):: newbase
     integer:: i,k
     integer:: j
-    if(pm_debug_checks) then
-       if(newbase>coder%top) call pm_panic('pop_vars_to')
-    endif
-    do i=coder%top,newbase+1,-1
-       j=coder%stack(i)
-       if(j/=0) then
-           if(pm_debug_checks) then
-             if(j==typevar_start.or.j==typevar_end) then
-                write(*,*) 'i=',i,j
-                do j=coder%top,newbase+1,-1
-                   write(*,*) j,coder%stack(j),&
-                        trim(pm_name_as_string(coder%context,max(0,coder%stack(j))))
-                enddo
-                call pm_panic('Cannot pop typevar start/end')
-             endif
-          endif
-          k=var_hash(abs(j))
-          coder%hash(k)=coder%link(i)
-       endif
-    enddo
     coder%top=newbase
   end subroutine pop_vars_to
-
-  !=======================================
-  ! Variable hash from variable name
-  !=======================================
-  function var_hash(n) result(h)
-    integer,intent(in):: n
-    integer:: h
-    h=iand(abs(int(n)),code_local_hash-1)+1
-    h=1
-  end function var_hash
 
   !=========================================
   ! Make integer constant node (PM sint)
@@ -8278,7 +7937,7 @@ contains
     ptr=pm_fast_newnc(coder%context,pm_long,1)
     ptr%data%ln(ptr%offset)=val
     coder%temp=ptr
-    call make_const(coder,cblock,node,ptr,pm_new_value_typ(coder%context,ptr))
+    call make_const(coder,cblock,node,ptr,pm_new_value_type(coder%context,ptr))
     coder%temp=pm_null_obj
   contains
     include 'fnewnc.inc'
@@ -8312,7 +7971,7 @@ contains
     if(tno==pm_string) tno=pm_string_type
     if(present(typ)) tno=typ
     if(coder%par_state/=par_state_outer) then
-       tno=pm_typ_add_mode(coder%context,tno,sym_mirrored,.false.)
+       tno=pm_type_add_mode(coder%context,tno,sym_mirrored,.false.)
     endif
     call code_val(coder,val)
     call code_num(coder,tno)
@@ -9193,13 +8852,13 @@ contains
              write(iunit,*) spaces(1:depth*2),' Unresolved!!'
           else
              write(iunit,*) spaces(1:depth*2),' Resolved:',i,&
-                  trim(pm_typ_as_string(coder%context,i))
+                  trim(pm_type_as_string(coder%context,i))
           endif
        endif
     case(cnode_is_const)
        call pm_dump_tree(coder%context,iunit,cnode_arg(node,1),depth)
 !!$       write(iunit,*)  spaces(1:depth*2),&
-!!$            trim(pm_typ_as_string(coder%context,&
+!!$            trim(pm_type_as_string(coder%context,&
 !!$            cnode_get_num(node,node_args+1)))
     case(cnode_is_call)
        p=cnode_get(node,call_sig)
@@ -9316,7 +8975,7 @@ contains
         else
            write(iunit,*) spaces(1:depth*2),'Sig List(',cnode_numargs(node)
            do i=2,cnode_numargs(node),2
-              write(iunit,*) spaces(1:depth*2),trim(pm_typ_as_string(coder%context,&
+              write(iunit,*) spaces(1:depth*2),trim(pm_type_as_string(coder%context,&
                    cnode_get_num(node,cnode_args+i-1)))
               call qdump_code_tree(coder,rvec,iunit,cnode_arg(node,i+1),depth+1)
            enddo
@@ -9389,8 +9048,8 @@ contains
                write(iunit,'(a)') '  [has vkeys]'
           if(cnode_flags_set(cnode,cnode_args+2,proc_is_dcomm)) &
                write(iunit,'(a)') '  [dcomm]'
-          if(cnode_flags_set(cnode,cnode_args+2,proc_is_variant)) &
-               write(iunit,'(a)') '  [variant]'
+          if(cnode_flags_set(cnode,cnode_args+2,proc_is_file)) &
+               write(iunit,'(a)') '  [file]'
           if(cnode_flags_set(cnode,cnode_args+2,proc_needs_par)) &
                write(iunit,'(a)') '  [needs par]'
           call print_proc_cnode(context,iunit,cnode_arg(cnode,2),&
@@ -9409,7 +9068,7 @@ contains
                 write(iunit,'(a)') '  '//&
                      trim(pm_name_as_string(context,&
                      key%data%i(key%offset+pm_fast_esize(key))))//&
-                     trim(pm_typ_as_string(context,&
+                     trim(pm_type_as_string(context,&
                      cnode_num_arg(cnode,i)))//' {'
                 call print_proc_cnode(context,iunit,pm_null_obj,&
                      sig_cache,cnode_arg(cnode,i+1))
@@ -9597,7 +9256,7 @@ contains
             "'"//trim(pm_name_as_string(context,int(cnode%offset))),.false.,depth)
     elseif(kind==pm_type) then
        call append_to_line(iunit,str,i,&
-            '<'//trim(pm_typ_as_string(context,int(cnode%offset)))//'>',.false.,depth)
+            '<'//trim(pm_type_as_string(context,int(cnode%offset)))//'>',.false.,depth)
     else
        kind=cnode_get_kind(cnode)
        select case(kind)
@@ -9613,7 +9272,7 @@ contains
           if(.not.pm_fast_isnull(rvec)) then
              tno=rvec%data%i(rvec%offset+cnode_get_num(cnode,var_index))
              call append_to_line(iunit,str,i,&
-                  '['//trim(pm_typ_as_string(context,tno))//']',.false.,depth)
+                  '['//trim(pm_type_as_string(context,tno))//']',.false.,depth)
           endif
        case(cnode_is_const)
           call append_to_line(iunit,str,i,&
@@ -9805,7 +9464,7 @@ contains
        else
           do j=3,cnode_numargs(code),2
              typ=cnode_arg(code,j)
-             write(iunit,*) 'Type:',trim(pm_typ_as_string(coder%context,&
+             write(iunit,*) 'Type:',trim(pm_type_as_string(coder%context,&
                   int(typ%offset)))
              write(iunit,*) 'Code:',j,cnode_numargs(code)
              call qdump_code_tree(coder,pm_null_obj,iunit,cnode_arg(code,j+1),2)

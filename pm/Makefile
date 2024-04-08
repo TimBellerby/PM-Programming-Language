@@ -65,25 +65,25 @@ symbol.o : ../src/symbol.f90 opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 lib.o : ../src/lib.f90 symbol.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-vmdefs.o : ../src/vmdefs.f90 symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+types.o : ../src/types.f90 symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+	$(FC) $(FFLAGS) -c $<
+
+vmdefs.o : ../src/vmdefs.f90 types.o lib.o symbol.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 parser.o : ../src/parser.f90 types.o vmdefs.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-types.o : ../src/types.f90 symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+array.o : ../src/array.f90 types.o lib.o symbol.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-array.o : ../src/array.f90 types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
-	$(FC) $(FFLAGS) -c $<
-
-parlib.o : ../src/parlib.f90 array.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+parlib.o : ../src/parlib.f90 array.o types.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(PC) $(PFLAGS) -c $<
 
 linker.o : ../src/linker.f90  parser.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-sysdefs.o : ../src/sysdefs.f90 vmdefs.o parser.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+sysdefs.o : ../src/sysdefs.f90 vmdefs.o parser.o types.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 codegen.o : ../src/codegen.f90 parser.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o

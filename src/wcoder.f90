@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -173,8 +173,8 @@ contains
     wcd%true_obj%data%l(wcd%true_obj%offset)=.true.
     wcd%false_obj=pm_new_small(context,pm_logical,1_pm_p)
     wcd%false_obj%data%l(wcd%false_obj%offset)=.false.
-    wcd%true_name=pm_new_value_typ(wcd%context,wcd%true_obj)
-    wcd%false_name=pm_new_value_typ(wcd%context,wcd%false_obj)
+    wcd%true_name=pm_new_value_type(wcd%context,wcd%true_obj)
+    wcd%false_name=pm_new_value_type(wcd%context,wcd%false_obj)
     if(pm_is_compiling) then
        wcd%typeset=pm_set_new(wcd%context,32_pm_ln)
     endif
@@ -535,8 +535,8 @@ contains
        if(.not.pm_fast_isnull(p)) then
           if(cnode_flags_set(p,var_flags,var_is_varg)) then
              typ=get_var_type(wcd,p,rv)
-             tv=pm_typ_vect(wcd%context,typ)
-             if(pm_tv_kind(tv)==pm_typ_is_tuple) then
+             tv=pm_type_vect(wcd%context,typ)
+             if(pm_tv_kind(tv)==pm_type_is_tuple) then
                 xpar=pm_tv_numargs(tv)
                 do i=1,xpar
                    typ=pm_tv_arg(tv,i)
@@ -1352,10 +1352,10 @@ contains
                      cvar_ptr(wcd,i,kk-3))
              enddo
           else
-             typ=pm_typ_strip_mode(wcd%context,get_arg_type(wcd,cnode_arg(args,1),rv),j)
-             tv=pm_typ_vect(wcd%context,typ)
+             typ=pm_type_strip_mode(wcd%context,get_arg_type(wcd,cnode_arg(args,1),rv),j)
+             tv=pm_type_vect(wcd%context,typ)
              do kk=4,nargs
-                if(pm_typ_needs_storage(wcd%context,pm_tv_arg(tv,kk-3))) then
+                if(pm_type_needs_storage(wcd%context,pm_tv_arg(tv,kk-3))) then
                    slot=arg_slot(wcd,cnode_arg(args,kk))
                    call comp_assign_slots(wcd,callnode,&
                         cvar_alloc_elem(wcd,i,kk-3),&
@@ -1375,9 +1375,9 @@ contains
        endif
     case(sym_dot,sym_dot_ref,sym_get_dot,sym_get_dot_ref,sym_method_call)
        i=rvv(cnode_get_num(callnode,call_index))   
-       if(i>pm_typ_dref_offset/2) then
+       if(i>pm_type_dref_offset/2) then
           j=op_elem_ref
-          i=i-pm_typ_dref_offset
+          i=i-pm_type_dref_offset
        else
           j=op_elem
        endif
@@ -1622,7 +1622,7 @@ contains
           if(pm_is_compiling) then
              if(debug_wcode) then
                 write(*,*) 'RETURN-ACTUAL[',n,']:',&
-                     trim(pm_typ_as_string(wcd%context,get_arg_type(wcd,cnode_arg(args,n),rv)))
+                     trim(pm_type_as_string(wcd%context,get_arg_type(wcd,cnode_arg(args,n),rv)))
              endif
              i=wcd%retvar
              do kk=1,nargs
@@ -1638,7 +1638,7 @@ contains
           do n=1,nargs
              if(debug_wcode) then
                 write(*,*) 'RETURN[',n,']:',&
-                     trim(pm_typ_as_string(wcd%context,get_arg_type(wcd,cnode_arg(args,n),rv)))
+                     trim(pm_type_as_string(wcd%context,get_arg_type(wcd,cnode_arg(args,n),rv)))
              endif
              if(pm_is_compiling) then
                 slot=cvar_strip_alias(wcd,arg_slot_in_frame(wcd,cnode_arg(args,n),wcd%base))
@@ -1646,7 +1646,7 @@ contains
 
                 if(debug_wcode) then
                    write(*,*) 'RETURN ASSN',&
-                        trim(pm_typ_as_string(wcd%context,&
+                        trim(pm_type_as_string(wcd%context,&
                         check_arg_type_with_mode(wcd,wcd%inline_args,wcd%outer_rv,n)))
                 endif
 
@@ -1657,12 +1657,12 @@ contains
                      cvar_kind(wcd,slot)==v_is_group.and.&
                      cvar_v2(wcd,slot)/=v_is_array).and.&
                      wcd%loop_extra_arg==0.and..not.wcd%proc_shared_inline.and.&
-                     pm_typ_get_mode(wcd%context,&
+                     pm_type_get_mode(wcd%context,&
                      check_arg_type_with_mode(wcd,wcd%inline_args,wcd%outer_rv,n))>=sym_mirrored&
                      .or.cvar_kind(wcd,slot2)==v_is_chan_vect) then
                    if(debug_wcode) then
                       write(*,*) 'RETURN actual ASSN',cvar_kind(wcd,slot),&
-                           trim(pm_typ_as_string(wcd%context,&
+                           trim(pm_type_as_string(wcd%context,&
                            check_arg_type_with_mode(wcd,wcd%inline_args,wcd%outer_rv,n)))
                    endif
                    
@@ -1908,9 +1908,9 @@ contains
                   enddo
                else
                   typ=check_arg_type(wcd,args,rv,j)
-                  tv=pm_typ_vect(wcd%context,typ)
+                  tv=pm_type_vect(wcd%context,typ)
                   do i=0,n-1
-                     if(pm_typ_needs_storage(wcd%context,pm_tv_arg(tv,i+1))) then
+                     if(pm_type_needs_storage(wcd%context,pm_tv_arg(tv,i+1))) then
                         call comp_assign_slots(wcd,callnode,&
                              cvar_alloc_elem(wcd,ii,i+1),&
                              rtns(j,i),&
@@ -1920,10 +1920,10 @@ contains
                endif
             else
                i=check_arg_type(wcd,args,rv,j)
-               v=pm_typ_vect(wcd%context,i)
-               if(pm_tv_kind(v)==pm_typ_is_struct) then
+               v=pm_type_vect(wcd%context,i)
+               if(pm_tv_kind(v)==pm_type_is_struct) then
                   call wc_call(wcd,callnode,op_struct,i,n+2,1,ve)
-               elseif(pm_tv_kind(v)==pm_typ_is_rec) then
+               elseif(pm_tv_kind(v)==pm_type_is_rec) then
                   call wc_call(wcd,callnode,op_rec,i,n+2,1,ve)
                else
                   call pm_panic('Wcode each proc')
@@ -2313,7 +2313,7 @@ contains
 !!$      if(pm_is_compiling.and..false.) then
 !!$         if(nret>0.and.extra_ve==0) then
 !!$            tno=check_arg_type_with_mode(wcd,args,rv,1)
-!!$            if(pm_typ_get_mode(wcd%context,tno)>=sym_mirrored) then
+!!$            if(pm_type_get_mode(wcd%context,tno)>=sym_mirrored) then
 !!$               ok=.false.
 !!$               return
 !!$            endif
@@ -2524,7 +2524,7 @@ contains
        write(*,*) 'INLINE PAR TYPES>>'
        do i=1,nargs
           p=cnode_arg(args,i)
-          write(*,*) 'Par[',i,'] {',trim(pm_typ_as_string(wcd%context,get_arg_type(wcd,p,old_rv))),'#',&
+          write(*,*) 'Par[',i,'] {',trim(pm_type_as_string(wcd%context,get_arg_type(wcd,p,old_rv))),'#',&
                arg_slot(wcd,cnode_arg(args,i)),'##',p%offset,wcd%base,old_rv%offset
           call pm_dump_tree(wcd%context,6,old_rv,2)
           call dump_cvar(wcd,6,arg_slot(wcd,cnode_arg(args,i)),nonest=.true.)
@@ -2610,8 +2610,8 @@ contains
              call wcode_error(wcd,callnode,'tno==-1')
           endif
           if(tno/=pm_tiny_int.and.tno/=-1) then
-             tv=pm_typ_vect(wcd%context,tno)
-             if(pm_tv_kind(tv)/=pm_typ_is_tuple) then
+             tv=pm_type_vect(wcd%context,tno)
+             if(pm_tv_kind(tv)/=pm_type_is_tuple) then
                 wcd%top=wcd%top+1
                 wcd%rdata(wcd%top)=&
                      arg_slot_in_frame(wcd,cnode_arg(args,i),wcd%oldbase)
@@ -3963,7 +3963,7 @@ contains
     logical,intent(in):: isref,iskey,isshared
     integer:: k
     integer:: flags
-    !write(*,*) 'PARAM>>',trim(pm_typ_as_string(wcd%context,typ))
+    !write(*,*) 'PARAM>>',trim(pm_type_as_string(wcd%context,typ))
     if(pm_is_compiling) then
        flags=v_is_param
        if(isref)   flags=ior(flags,v_is_ref)
@@ -4007,7 +4007,7 @@ contains
        if(debug_wcode) then
           write(*,*) 'ALLOC GENERAL VAR',cnode_get_num(var,var_index),';',k,'::',cvar_kind(wcd,k),':',&
                trim(pm_name_as_string(wcd%context,cnode_get_name(var,var_name))),&
-               ':',trim(pm_typ_as_string(wcd%context,typ))
+               ':',trim(pm_type_as_string(wcd%context,typ))
        endif
     else
        k=alloc_var(wcd,0)
@@ -4124,11 +4124,11 @@ contains
     var=cnode_arg(args,n)
     k=cnode_get_num(var,cnode_kind)
     if(k==cnode_is_const) then
-       tno=pm_typ_strip_mode(wcd%context,cnode_get_num(var,node_args+1),mode)
+       tno=pm_type_strip_mode(wcd%context,cnode_get_num(var,node_args+1),mode)
        return
     endif
     i=cnode_get_num(var,var_index)
-    tno=pm_typ_strip_mode(wcd%context,rv%data%i(rv%offset+i),mode)
+    tno=pm_type_strip_mode(wcd%context,rv%data%i(rv%offset+i),mode)
   contains
     include 'ftypeof.inc'
   end function check_arg_type
@@ -4186,7 +4186,7 @@ contains
     if(pm_is_compiling) then
        tno2=tno
     else
-       tno2=pm_typ_strip_mode(wcd%context,tno,mode)
+       tno2=pm_type_strip_mode(wcd%context,tno,mode)
     endif
   end function  strip_mode_for_interp
   
@@ -4445,12 +4445,12 @@ contains
           endif
        else
           tno=cnode_get_num(arg,node_args+1)
-          tno=pm_typ_strip_mode(wcd%context,tno,mode)
+          tno=pm_type_strip_mode(wcd%context,tno,mode)
           if(tno>pm_null.and.&
                tno<=pm_string.or.tno==pm_string_type) then
              call wc(wcd,cvar_const(wcd,arg))
           elseif(keep_ctime_const) then
-             if(pm_typ_kind(wcd%context,tno)==pm_typ_is_value) then
+             if(pm_type_kind(wcd%context,tno)==pm_type_is_value) then
                 call wc(wcd,cvar_const(wcd,arg))
              endif
           endif
@@ -4547,7 +4547,7 @@ contains
     case(v_is_basic,v_is_elem,v_is_unit_elem,v_is_sub,v_is_vsub,&
          v_is_vect_wrapped,v_is_chan_vect)
        if(cvar_kind(wcd,dest)==v_is_group) then
-          tv=pm_typ_vect(wcd%context,cvar_type(wcd,dest))
+          tv=pm_type_vect(wcd%context,cvar_type(wcd,dest))
           call comp_alias_slots(wcd,dest,&
                cvar_alloc_elem(wcd,source,elem))
        else
@@ -4606,7 +4606,7 @@ contains
 !!$    call dump_cvar(wcd,6,aparent)
     parent=cvar_strip_alias(wcd,aparent)
     subs=cvar_strip_alias(wcd,asubs)
-    tv=pm_typ_vect(wcd%context,cvar_type(wcd,parent))
+    tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
     if(cvar_kind(wcd,parent)==v_is_group) then
        call cvar_set_info(wcd,n,v_is_vsub,&
             cvar_ptr(wcd,parent,1),subs,pm_tv_arg(tv,1))
@@ -4626,7 +4626,7 @@ contains
     integer,intent(in):: parent,subs
     integer:: n
     type(pm_ptr):: tv
-    tv=pm_typ_vect(wcd%context,cvar_type(wcd,parent))
+    tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
     n=cvar_alloc_slots(wcd,3)
     call comp_get_subs(wcd,n,parent,subs)
   end function comp_subs
@@ -4911,16 +4911,16 @@ contains
     elseif(typ<=pm_string) then
        n=cvar_alloc_entry(wcd,v_is_basic,name,flags,typ)
     else
-       tv=pm_typ_vect(wcd%context,typ)
+       tv=pm_type_vect(wcd%context,typ)
        tk=pm_tv_kind(tv)
        select case(tk)
-       case(pm_typ_is_basic)
+       case(pm_type_is_basic)
           n=cvar_alloc_entry(wcd,v_is_basic,name,flags,typ)
           call add_to_typeset(wcd,typ)
-       case(pm_typ_is_struct,pm_typ_is_rec)
+       case(pm_type_is_struct,pm_type_is_rec)
           nflags=pm_tv_flags(tv)
-          if(iand(nflags,pm_typ_is_soa)/=0.or.&
-               iand(nflags,pm_typ_has_storage)==0)then
+          if(iand(nflags,pm_type_is_soa)/=0.or.&
+               iand(nflags,pm_type_has_storage)==0)then
              m=pm_tv_numargs(tv)
              n=cvar_alloc_slots(wcd,3+m)
              v1=m
@@ -4930,24 +4930,24 @@ contains
              enddo
              call cvar_set_info(wcd,n,v_is_group,v1,v2,typ)
           else
-             !write(*,*) 'STRUCT>',trim(pm_typ_as_string(wcd%context,typ))
+             !write(*,*) 'STRUCT>',trim(pm_type_as_string(wcd%context,typ))
              n=cvar_alloc_entry(wcd,v_is_basic,name,flags,typ)
              call add_to_typeset(wcd,typ)
           endif
-       case(pm_typ_is_array)
+       case(pm_type_is_array)
           if(iand(flags,v_is_param+v_is_result)/=0.and.&
                iand(flags,v_is_chan)==0) then
              nflags=ior(flags,v_is_array_par_dom)
              if(pm_tv_name(tv)/=sym_var) nflags=iand(nflags,not(v_is_ref))
              tno=pm_tv_arg(tv,1)
-             if(iand(pm_typ_flags(wcd%context,tno),pm_typ_has_storage)/=0) then
+             if(iand(pm_type_flags(wcd%context,tno),pm_type_has_storage)/=0) then
                 vec=cvar_alloc_entry(wcd,v_is_basic,pm_tv_arg(tv,3),&
                      ior(flags,v_is_array_par_vect),tno)
              else
                 vec=cvar_alloc(wcd,tno,flags,aname)
              endif
              tno=pm_tv_arg(tv,2)
-             if(iand(pm_typ_flags(wcd%context,tno),pm_typ_has_storage)/=0) then
+             if(iand(pm_type_flags(wcd%context,tno),pm_type_has_storage)/=0) then
                 dom=cvar_alloc_entry(wcd,v_is_basic,name,&
                      nflags,tno)
              else
@@ -4958,9 +4958,9 @@ contains
              n=cvar_alloc_entry(wcd,v_is_basic,name,ior(flags,v_is_farray),typ)
           endif
           call add_to_typeset(wcd,typ)
-       case(pm_typ_is_user)
-          n=cvar_alloc(wcd,pm_user_typ_body(wcd%context,typ),flags,aname)
-       case(pm_typ_is_tuple,pm_typ_is_vtuple)
+       case(pm_type_is_user)
+          n=cvar_alloc(wcd,pm_user_type_body(wcd%context,typ),flags,aname)
+       case(pm_type_is_tuple,pm_type_is_vtuple)
           m=pm_tv_numargs(tv)
           n=cvar_alloc_slots(wcd,3+m)
           v1=m
@@ -4969,14 +4969,14 @@ contains
              wcd%vinfo(n+i+2)=ptr(cvar_alloc(wcd,pm_tv_arg(tv,i),flags))
           enddo
           call cvar_set_info(wcd,n,v_is_group,v1,v2,typ)
-       case(pm_typ_is_dref)
+       case(pm_type_is_dref)
           nflags=ior(iand(flags,not(v_is_shared+v_is_ref+v_is_vect)),&
                merge(0,v_is_in_dref,pm_tv_name(tv)==sym_pling))
           i=pm_tv_flags(tv)
           n=cvar_alloc_slots(wcd,8)
           v1=5
           v2=merge(v_is_shared_dref,v_is_dref,&
-               pm_typ_get_mode(wcd%context,pm_tv_arg(tv,3))>=sym_mirrored)
+               pm_type_get_mode(wcd%context,pm_tv_arg(tv,3))>=sym_mirrored)
           wcd%vinfo(n+3)=dptr(pm_tv_arg(tv,1),nflags) !ptr(cvar_alloc(wcd,pm_tv_arg(tv,1),nflags))
           wcd%vinfo(n+4)=dptr(pm_tv_arg(tv,2),ior(nflags,iand(flags,v_is_ref)))
           !ptr(cvar_alloc(wcd,pm_tv_arg(tv,2),ior(nflags,v_is_ref)))
@@ -4984,14 +4984,14 @@ contains
           wcd%vinfo(n+6)=dptr(pm_tv_arg(tv,4),nflags) !ptr(cvar_alloc(wcd,pm_tv_arg(tv,4),nflags))
           wcd%vinfo(n+7)=dptr(pm_tv_arg(tv,5),nflags) !ptr(cvar_alloc(wcd,pm_tv_arg(tv,5),nflags))
           call cvar_set_info(wcd,n,v_is_group,v1,v2,typ)
-       case(pm_typ_is_poly)
+       case(pm_type_is_poly)
           n=cvar_alloc_entry(wcd,v_is_basic,name,ior(flags,v_is_poly),typ)
-       case(pm_typ_is_single_name,pm_typ_is_proc,pm_typ_is_type)
+       case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_type)
           n=cvar_alloc_entry(wcd,v_is_group,0,v_is_storageless,typ)
-       case(pm_typ_is_value)
+       case(pm_type_is_value)
           n=cvar_alloc_entry(wcd,v_is_ctime_const,add_const(wcd,&
-               pm_typ_val(wcd%context,typ)),0,typ)
-       case(pm_typ_is_par_kind)
+               pm_type_val(wcd%context,typ)),0,typ)
+       case(pm_type_is_par_kind)
           k=pm_tv_name(tv)
           nflags=flags
           if(k>=sym_mirrored) nflags=ior(nflags,v_is_shared)
@@ -5004,14 +5004,14 @@ contains
           else
              n=cvar_alloc(wcd,pm_tv_arg(tv,1),nflags,name)
           endif
-       case(pm_typ_is_all)
+       case(pm_type_is_all)
           ! This just caters for _nhd variables
           n=cvar_alloc(wcd,pm_tv_arg(tv,1),flags,name)
-       case(pm_typ_is_vect)
+       case(pm_type_is_vect)
           n=cvar_alloc(wcd,pm_tv_arg(tv,1),ior(flags,v_is_vect),name)
           n=cvar_alloc_entry(wcd,v_is_vect_wrapped,n,0,pm_tv_arg(tv,1))
        case default
-          write(*,*) 'CVAR ALLOC:', tk,trim(pm_typ_as_string(wcd%context,typ))
+          write(*,*) 'CVAR ALLOC:', tk,trim(pm_type_as_string(wcd%context,typ))
           call pm_panic('cvar_alloc')
        end select
     endif
@@ -5056,11 +5056,11 @@ contains
     integer:: tno,key(2),m
     integer:: i
     type(pm_ptr):: tv
-    tno=pm_typ_strip_to_basic(wcd%context,typ)
+    tno=pm_type_strip_to_basic(wcd%context,typ)
     tset=wcd%typeset
     if(tno>0.and.tno<=pm_string.and..not.present(dim)) return
-    if(.not.pm_typ_needs_storage(wcd%context,abs(tno))) return
-    if(pm_typ_kind(wcd%context,tno)==pm_typ_is_poly) tno=pm_pointer
+    if(.not.pm_type_needs_storage(wcd%context,abs(tno))) return
+    if(pm_type_kind(wcd%context,tno)==pm_type_is_poly) tno=pm_pointer
     key(1)=tno
     if(present(dim)) then
        key(2)=dim
@@ -5068,8 +5068,8 @@ contains
        key(2)=0
     endif
     if(pm_ivect_lookup(wcd%context,tset,key,2)<=0) then
-       tv=pm_typ_vect(wcd%context,abs(tno))
-       if(pm_tv_kind(tv)==pm_typ_is_array) then
+       tv=pm_type_vect(wcd%context,abs(tno))
+       if(pm_tv_kind(tv)==pm_type_is_array) then
           call add_to_typeset(wcd,pm_tv_arg(tv,1),pm_tv_arg(tv,3))
        endif
        do i=1,pm_tv_numargs(tv)
@@ -5109,18 +5109,18 @@ contains
     integer:: slot1,slot2
     integer:: tno,mode,tk
     type(pm_ptr):: tv
-    tno=pm_typ_strip_mode(wcd%context,cnode_get_num(arg,cnode_args+1),mode)
+    tno=pm_type_strip_mode(wcd%context,cnode_get_num(arg,cnode_args+1),mode)
     if(tno<=pm_null) then
        slot1=cvar_alloc_entry(wcd,v_is_group,0,v_is_storageless,tno)
     else
-       tv=pm_typ_vect(wcd%context,tno)
+       tv=pm_type_vect(wcd%context,tno)
        tk=pm_tv_kind(tv)
-       if(tk==pm_typ_is_single_name.or.tk==pm_typ_is_proc) then
+       if(tk==pm_type_is_single_name.or.tk==pm_type_is_proc) then
           slot1=cvar_alloc_entry(wcd,v_is_group,0,v_is_storageless,tno)
        else
           slot2=add_const(wcd,cnode_arg(arg,1))
           slot1=cvar_alloc_entry(wcd,&
-               merge(v_is_ctime_const,v_is_const,pm_tv_kind(tv)==pm_typ_is_value),&
+               merge(v_is_ctime_const,v_is_const,pm_tv_kind(tv)==pm_type_is_value),&
                slot2,0,tno)
        endif
     endif
@@ -5222,7 +5222,7 @@ contains
     integer,intent(in):: parent,elem
     integer:: n
     type(pm_ptr):: tv
-    tv=pm_typ_vect(wcd%context,cvar_type(wcd,parent))
+    tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
     n=cvar_alloc_entry(wcd,merge(v_is_unit_elem,v_is_elem,pm_tv_numargs(tv)==1.and..false.),&
          parent,elem,pm_tv_arg(tv,elem))
   end function cvar_alloc_elem
@@ -5263,9 +5263,9 @@ contains
           call pm_panic('cvar_set_elem')
        endif
     endif
-    tv=pm_typ_vect(wcd%context,cvar_type(wcd,parent))
-!!$    write(*,*) cvar_type(wcd,parent),'>>',elem,';',trim(pm_typ_as_string(wcd%context,cvar_type(wcd,parent))),&
-!!$         ';',trim(pm_typ_as_string(wcd%context,cvar_type(wcd,n)))
+    tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
+!!$    write(*,*) cvar_type(wcd,parent),'>>',elem,';',trim(pm_type_as_string(wcd%context,cvar_type(wcd,parent))),&
+!!$         ';',trim(pm_type_as_string(wcd%context,cvar_type(wcd,n)))
     call cvar_set_info(wcd,n,merge(v_is_unit_elem,v_is_elem,pm_tv_numargs(tv)==1.and..false.),&
          parent,elem,pm_tv_arg(tv,elem))
   end subroutine cvar_set_elem
@@ -5306,7 +5306,7 @@ contains
        if(kind==v_is_alias.and.v1==0) then
           call pm_panic('Alias to nothing...')
        endif
-       if(tno/=0) junk=pm_typ_name(wcd%context,tno)
+       if(tno/=0) junk=pm_type_name(wcd%context,tno)
     endif
     wcd%vinfo(n)=v1*cvar_flag_mult+kind
     wcd%vinfo(n+1)=v2*cvar_flag_mult
@@ -5893,7 +5893,7 @@ contains
     typ=array(n+2)/cvar_flag_mult
     if(kind==v_is_group) then
        write(iunit,'(i6,1x,a5,1x,a7,1x,a,1x,10i6)') n,v_names(kind),&
-            v_groups(v2),trim(pm_typ_as_string(context,typ)),&
+            v_groups(v2),trim(pm_type_as_string(context,typ)),&
             (array(n+2+i)/cvar_flag_mult,i=1,min(10,v1))
        n=n+v1+3
     elseif(kind==v_is_basic) then
@@ -5911,18 +5911,18 @@ contains
        if(iand(v2,v_is_array_par_vect)==0) then
           write(iunit,'(i6,1x,a5,1x,a,1x,i6,a,1x,a)') n,v_names(kind),&
                trim(pm_name_as_string(context,v1)),&
-               typ,trim(pm_typ_as_string(context,typ)),flag_str
+               typ,trim(pm_type_as_string(context,typ)),flag_str
        else
           write(iunit,'(i6,1x,a5,1x,a,1x,i6,a,1x,a)') n,v_names(kind),&
-               trim(pm_typ_as_string(context,v1)),&
-               typ,trim(pm_typ_as_string(context,typ)),flag_str
+               trim(pm_type_as_string(context,v1)),&
+               typ,trim(pm_type_as_string(context,typ)),flag_str
        endif
        n=n+3
     elseif(kind==0) then
        n=n+1
     else
        write(iunit,'(i6,1x,a5,i6,i6,1x,a)') n,v_names(kind),&
-            v1,v2,trim(pm_typ_as_string(context,typ))
+            v1,v2,trim(pm_type_as_string(context,typ))
        n=n+3
     endif
   end subroutine dump_single_cvar

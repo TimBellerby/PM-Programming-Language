@@ -1176,8 +1176,8 @@ contains
     integer:: k,errno
     tno=pm_fast_typeof(v)
     if(pm_fast_typeof(e)/=tno) then
-       write(*,*) trim(pm_typ_as_string(context,tno)),'<>',&
-            trim(pm_typ_as_string(context,pm_fast_typeof(e)))
+       write(*,*) trim(pm_type_as_string(context,tno)),'<>',&
+            trim(pm_type_as_string(context,pm_fast_typeof(e)))
        call pm_panic('export_vector')
     endif
     n=pm_fast_esize(v)
@@ -1706,7 +1706,7 @@ contains
           enddo
        enddo
     case default
-       write(*,*) '%%',trim(pm_typ_as_string(context,tno)),tno,pm_dref_type
+       write(*,*) '%%',trim(pm_type_as_string(context,tno)),tno,pm_dref_type
        call pm_panic('Make vector')
     end select
   contains
@@ -2060,8 +2060,8 @@ contains
     tno=pm_fast_typeof(lhs)
 !!$    if(full_type(lhs)/=full_type(rhs)) then
 !!$       errno=vector_type_error
-!!$       write(*,*) 'Full types',pm_typ_as_string(context,full_type(lhs)),&
-!!$            pm_typ_as_string(context,full_type(rhs))
+!!$       write(*,*) 'Full types',pm_type_as_string(context,full_type(lhs)),&
+!!$            pm_type_as_string(context,full_type(rhs))
 !!$       !call pm_dump_tree(context,6,lhs,2)
 !!$       !call pm_dump_tree(context,6,rhs,2)
 !!$       return
@@ -2314,8 +2314,8 @@ contains
        endif
 
     case default
-       write(*,*) 'vector assign',trim(pm_typ_as_string(context,int(tno))),tno,&
-            2595,trim(pm_typ_as_string(context,2595))
+       write(*,*) 'vector assign',trim(pm_type_as_string(context,int(tno))),tno,&
+            2595,trim(pm_type_as_string(context,2595))
        
     end select
   contains
@@ -3411,8 +3411,8 @@ contains
     type(pm_ptr):: len,off,avec,len2,off2,avec2
     tno=pm_fast_typeof(v)
     if(full_type(e)/=full_type(v)) then
-       write(*,*) trim(pm_typ_as_string(context,tno)),&
-            '<-->',trim(pm_typ_as_string(context,pm_fast_typeof(e)))
+       write(*,*) trim(pm_type_as_string(context,tno)),&
+            '<-->',trim(pm_type_as_string(context,pm_fast_typeof(e)))
        errno=vector_type_error
        return
     endif
@@ -3995,7 +3995,7 @@ contains
        write(*,*) spaces(1:depth*2),')'
     case(pm_struct_type,pm_rec_type)
        tno=full_type(v)
-       name=pm_typ_vect(context,tno)
+       name=pm_type_vect(context,tno)
        name=pm_name_val(context,pm_tv_name(name))
        tno=name%data%i(name%offset)
        if(k==pm_struct_type) then
@@ -4019,7 +4019,7 @@ contains
             trim(pm_name_as_string(context,int(v%offset))),'}'
     case(pm_type)
        write(*,*) spaces(1:depth*2),'type{',&
-            trim(pm_typ_as_string(context,int(v%offset))),'}'
+            trim(pm_type_as_string(context,int(v%offset))),'}'
     case default
        call pm_dump_tree(context,6,v,depth)
     end select
@@ -4077,7 +4077,7 @@ contains
        call output(context,spaces(1:depth*2)//')')
     case(pm_struct_type,pm_rec_type)
        tno=full_type(v)
-       name=pm_typ_vect(context,tno)
+       name=pm_type_vect(context,tno)
        name=pm_name_val(context,pm_tv_name(name))
        tno=name%data%i(name%offset)
        if(k==pm_struct_type) then
@@ -4104,7 +4104,7 @@ contains
     case(pm_null)
        call output(context,spaces(1:depth*2)//'null')
     case(pm_type)
-       call output(context,spaces(1:depth*2)//trim(pm_typ_as_string(context,int(v%offset))))
+       call output(context,spaces(1:depth*2)//trim(pm_type_as_string(context,int(v%offset))))
     case(pm_proc)
        call output(context,spaces(1:depth*2)//'proc('//&
             trim(pm_name_as_string(context,int(v%offset)))//')')
@@ -4115,7 +4115,7 @@ contains
     case(pm_int:pm_complex256)
        call output(context,spaces(1:depth*2)//trim(pm_number_as_string(context,v,j)))
     case default
-       call output(context,spaces(1:depth*2)//'?'//trim(pm_typ_as_string(context,k)))
+       call output(context,spaces(1:depth*2)//'?'//trim(pm_type_as_string(context,k)))
     end select
 
   contains
