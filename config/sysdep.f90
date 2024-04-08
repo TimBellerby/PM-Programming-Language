@@ -66,6 +66,8 @@ module pm_sysdep
   ! ************ Compiler defaults ****************
   integer,parameter:: pm_default_ftn_dims=15
   logical,parameter:: pm_default_ftn_has_contiguous=.true.
+  integer,parameter:: pm_default_ftn_lines=255
+  integer,parameter:: pm_default_ftn_max_stack_array=10*1024*1024
 
 
   ! ************ Memory model *********************
@@ -80,8 +82,9 @@ module pm_sysdep
   
   ! Types used by memory model (block offsets,object sizes,bitmap flags)
   
- ! integer,parameter:: pm_p=kind(1)    ! Pointer offsets, object types +
+  ! integer,parameter:: pm_p=kind(1)    ! Pointer offsets, object types +
                                        ! flags  (>~24 bits, typically int)
+
 integer,parameter:: pm_p=8
   
   integer,parameter:: pm_f=kind(1)    ! Bitmap storage  (integer word)
@@ -166,7 +169,11 @@ integer,parameter:: pm_p=8
 
   ! Long long integers - big enough to address any file
   integer,parameter:: pm_lln=MPI_OFFSET_KIND
-   
+
+  ! Maximum arguments to a PM procedure (must be 2**m-1 for some m)
+  integer,parameter:: pm_max_args=31
+  character(len=3),parameter:: pm_maxargs_str=' 31'
+
 
 contains
 
