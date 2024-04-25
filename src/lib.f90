@@ -279,6 +279,8 @@ contains
              str(i+3:i+3)='"'
           endif
        end do
+    case(pm_name)
+       str="'"//pm_name_as_string(context,int(v%offset))
     case default
        str=pm_number_as_string(context,v,0_pm_ln)
     end select

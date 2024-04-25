@@ -38,8 +38,8 @@ module pm_wcode
   use pm_symbol
   use pm_types
   use pm_sysdefs
-  use pm_parser
-  use pm_codegen
+  use pm_ast
+  use pm_cnodes
   use pm_infer
   implicit none
 
@@ -1508,7 +1508,7 @@ contains
           enddo
        endif
     case(sym_coherent,sym_partial,sym_set_mode,&
-         sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign)
+         sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign,sym_assignment)
        continue ! Nothing to do
     case(sym_cast)
        i=rvv(cnode_get_num(callnode,call_index))

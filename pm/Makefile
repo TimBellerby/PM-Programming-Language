@@ -24,12 +24,12 @@
 # THE SOFTWARE.
 FC=gfortran
 PC=mpifort
-FFLAGS=  -g  -I../src   -fbounds-check   -fcheck=mem # -Wall
+FFLAGS=  -g -I../src   -fbounds-check   -fcheck=mem # -Wall
 PFLAGS=  -g -I../src    -fbounds-check   -fcheck=mem
 
-PMCODE= sysdep.o kinds.o pcomp.o memory.o hash.o opts.o lib.o symbol.o types.o parser.o linker.o vmdefs.o sysdefs.o codegen.o infer.o wcoder.o array.o parlib.o vm.o main.o
+PMCODE= sysdep.o kinds.o pcomp.o memory.o hash.o opts.o lib.o symbol.o types.o ast.o parser.o linker.o vmdefs.o sysdefs.o cnodes.o codegen.o infer.o wcoder.o array.o parlib.o vm.o main.o
 
-PMCODE2= ../config/sysdep.f90 ../src/kinds.f90 ../src/pcomp.f90 ../src/memory.f90 ../src/hash.f90 ../src/opts.f90 ../src/lib.f90 ../src/symbol.f90 ../src/types.f90 ../src/parser.f90 ../src/linker.f90 ../src/vmdefs.f90 ../src/sysdefs.f90 ../src/codegen.f90 ../src/infer.f90 ../src/wcoder.f90 ../src/array.f90 ../src/parlib.f90 ../src/vm.f90 ../src/main.f90
+PMCODE2= ../config/sysdep.f90 ../src/kinds.f90 ../src/pcomp.f90 ../src/memory.f90 ../src/hash.f90 ../src/opts.f90 ../src/lib.f90 ../src/symbol.f90 ../src/types.f90 ../src/ast.f90 ../src/parser.f90 ../src/linker.f90 ../src/vmdefs.f90 ../src/sysdefs.f90 ../src/cnodes.f90 ../src/codegen.f90 ../src/infer.f90 ../src/wcoder.f90 ../src/array.f90 ../src/parlib.f90 ../src/vm.f90 ../src/main.f90
 
 
 
@@ -71,7 +71,10 @@ types.o : ../src/types.f90 symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o
 vmdefs.o : ../src/vmdefs.f90 types.o lib.o symbol.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-parser.o : ../src/parser.f90 types.o vmdefs.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+ast.o : ../src/ast.f90 types.o vmdefs.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+	$(FC) $(FFLAGS) -c $<
+
+parser.o : ../src/parser.f90 ast.o types.o vmdefs.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 array.o : ../src/array.f90 types.o lib.o symbol.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
@@ -80,19 +83,22 @@ array.o : ../src/array.f90 types.o lib.o symbol.o opts.o hash.o memory.o kinds.o
 parlib.o : ../src/parlib.f90 array.o types.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(PC) $(PFLAGS) -c $<
 
-linker.o : ../src/linker.f90  parser.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+linker.o : ../src/linker.f90  ast.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-sysdefs.o : ../src/sysdefs.f90 vmdefs.o parser.o types.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+sysdefs.o : ../src/sysdefs.f90 vmdefs.o ast.o parser.o types.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-codegen.o : ../src/codegen.f90 parser.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+cnodes.o : ../src/cnodes.f90 ast.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-infer.o : ../src/infer.f90 codegen.o parser.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+codegen.o : ../src/codegen.f90 cnodes.o ast.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-wcoder.o : ../src/wcoder.f90 array.o infer.o codegen.o parser.o symbol.o sysdefs.o vmdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+infer.o : ../src/infer.f90 cnodes.o ast.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+	$(FC) $(FFLAGS) -c $<
+
+wcoder.o : ../src/wcoder.f90 array.o infer.o cnodes.o ast.o symbol.o sysdefs.o vmdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 vm.o : ../src/vm.f90 parlib.o array.o sysdefs.o types.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o

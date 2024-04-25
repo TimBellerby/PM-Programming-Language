@@ -46,6 +46,7 @@ module pm_infer
   use pm_types
   use pm_parser
   use pm_sysdefs
+  use pm_cnodes
   use pm_codegen
   implicit none
 
@@ -82,6 +83,18 @@ contains
   ! applying type inference and resolving polymorphic procedure 
   ! calls at compile time
   !=============================================================
+
+  subroutine arg_set_info(coder,arg)
+    type(code_state),intent(inout):: coder
+  end subroutine arg_set_info
+
+  function arg_type(coder,arg) result(type)
+    type(code_state),intent(inout):: coder
+  end function arg_type
+
+  function arg_type_and_mode(coder,arg,mode) result(type)
+    type(code_state),intent(inout):: coder
+  end function arg_type_and_mode
 
   !==============================
   ! Type-infer main program

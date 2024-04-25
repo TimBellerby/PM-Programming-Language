@@ -27,7 +27,7 @@ PC=mpifort
 FFLAGS= -I../src/ -g   -fbounds-check -fcheck=mem # -Wall
 PFLAGS= -I../src/ -g   -fbounds-check -fcheck=mem
 
-PMCODE= sysdep.o scomp.o kinds.o memory.o hash.o opts.o lib.o types.o symbol.o vmdefs.o parser.o linker.o sysdefs.o codegen.o infer.o wcoder.o optimise.o cfortran.o main.o
+PMCODE= sysdep.o scomp.o kinds.o memory.o hash.o opts.o lib.o types.o symbol.o vmdefs.o ast.o parser.o linker.o sysdefs.o cnodes.o codegen.o infer.o wcoder.o optimise.o cfortran.o main.o
 
 
 all : pmc
@@ -68,8 +68,10 @@ lib.o : ../src/lib.f90 symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
 vmdefs.o : ../src/vmdefs.f90 lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
+ast.o : ../src/ast.f90 vmdefs.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
+	$(FC) $(FFLAGS) -c $<
 
-parser.o : ../src/parser.f90 vmdefs.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
+parser.o : ../src/parser.f90 ast.o vmdefs.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 types.o : ../src/types.f90 lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
@@ -81,13 +83,16 @@ linker.o : ../src/linker.f90  parser.o lib.o symbol.o opts.o hash.o memory.o kin
 sysdefs.o : ../src/sysdefs.f90 vmdefs.o parser.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-codegen.o : ../src/codegen.f90 parser.o symbol.o sysdefs.o types.o lib.o symbol.o opts.o hash.o  memory.o kinds.o scomp.o sysdep.o
+cnodes.o : ../src/cnodes.f90 parser.o symbol.o sysdefs.o types.o lib.o symbol.o opts.o hash.o  memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-infer.o : ../src/infer.f90 codegen.o parser.o symbol.o sysdefs.o types.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
+codegen.o : ../src/codegen.f90 cnodes.o ast.o symbol.o sysdefs.o types.o lib.o symbol.o opts.o hash.o  memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-wcoder.o : ../src/wcoder.f90 infer.o codegen.o parser.o sysdefs.o types.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
+infer.o : ../src/infer.f90 codegen.o cnodes.o ast.o symbol.o sysdefs.o types.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
+	$(FC) $(FFLAGS) -c $<
+
+wcoder.o : ../src/wcoder.f90 infer.o cnodes.o ast.o sysdefs.o types.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 optimise.o : ../src/optimise.f90 ../src/rtime.inc wcoder.o infer.o codegen.o linker.o parser.o sysdefs.o types.o lib.o symbol.o opts.o hash.o memory.o kinds.o scomp.o sysdep.o
