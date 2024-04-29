@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -84,17 +84,6 @@ contains
   ! calls at compile time
   !=============================================================
 
-  subroutine arg_set_info(coder,arg)
-    type(code_state),intent(inout):: coder
-  end subroutine arg_set_info
-
-  function arg_type(coder,arg) result(type)
-    type(code_state),intent(inout):: coder
-  end function arg_type
-
-  function arg_type_and_mode(coder,arg,mode) result(type)
-    type(code_state),intent(inout):: coder
-  end function arg_type_and_mode
 
   !==============================
   ! Type-infer main program
@@ -1469,7 +1458,8 @@ contains
           endif
           coder%stack(get_slot(1))=tno
        case(sym_dcaret)
-          coder%stack(get_slot(1))=pm_new_vect_type(coder%context,arg_type(2))
+          coder%stack(get_slot(1))=pm_type_add_mode(coder%context,&
+               pm_new_vect_type(coder%context,arg_type(2)),sym_shared,.false.)
        case(sym_open)
           if(nargs>0) then
              t=pm_type_vect(coder%context,coder%stack(base))

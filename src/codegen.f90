@@ -816,10 +816,10 @@ contains
     integer:: if_scope
     if_scope=coder%if_scope
     do while(cnode_get_num(var,var_if_scope)<if_scope)
-       write(*,*) coder%vstack(if_scope)%data%vkind
+       !write(*,*) coder%vstack(if_scope)%data%vkind
        call add_to_change_list(coder,coder%vstack(if_scope),var)
        if_scope=coder%vstack(if_scope-1)%offset
-       write(*,*) 'Updating',if_scope,cnode_get_num(var,var_if_scope)
+       !write(*,*) 'Updating',if_scope,cnode_get_num(var,var_if_scope)
     end do
   end subroutine update_change_lists
 
@@ -860,7 +860,7 @@ contains
     count=0
     p=list
     do while(.not.pm_fast_isnull(p))
-       call qdump_code_tree(coder,pm_null_obj,6,p%data%ptr(p%offset),2)
+       !call qdump_code_tree(coder,pm_null_obj,6,p%data%ptr(p%offset),2)
        call code_val(coder,p%data%ptr(p%offset))
        p=p%data%ptr(p%offset+1)
        count=count+1
