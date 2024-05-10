@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -153,12 +153,13 @@ module pm_symbol
   integer,parameter:: last_key =          sym_shared
   
   ! Declaration keywords
-  integer,parameter:: sym_use = last_key + 1
+  integer,parameter:: sym_package = last_key +1
+  integer,parameter:: sym_use = last_key + 2
   integer,parameter:: first_decl = sym_use
-  integer,parameter:: sym_proc = last_key + 2
-  integer,parameter:: sym_param = last_key + 3
-  integer,parameter:: sym_type = last_key + 4
-  integer,parameter:: sym_render = last_key + 5
+  integer,parameter:: sym_proc = last_key + 3
+  integer,parameter:: sym_param = last_key + 4
+  integer,parameter:: sym_type = last_key + 5
+  integer,parameter:: sym_render = last_key + 6
   integer,parameter:: last_decl = sym_render
 
   ! Statement keywords 
@@ -559,6 +560,7 @@ module pm_symbol
   data sym_names(sym_shared)           /'shared'/
 
   ! Declaration keywords
+  data sym_names(sym_package)          /'package'/
   data sym_names(sym_use)              /'use'/
   data sym_names(sym_proc)             /'proc'/
   data sym_names(sym_param)            /'param'/

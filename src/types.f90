@@ -571,7 +571,7 @@ contains
     integer:: flags
     integer:: tno2
     type(pm_ptr):: tv
-    if(tno==0) then
+    if(tno<=0) then
        flags=pm_type_has_generic
        return
     else

@@ -4327,6 +4327,57 @@ contains
   end function param_list
 
   !======================================================
+  ! Specialised kind of communicating procedure
+  !======================================================
+  function proc_comm_kinds(parser,flags) result(iserr)
+    type(parse_state),intent(inout):: parser
+    integer,intent(inout):: flags
+    logical:: iserr
+    iserr=.true.
+    do
+       select case(parser%sym) 
+       case(sym_shared)
+          call set_flags(proc_run_shared)
+          call scan(parser)
+       case(sym_pm_node)
+          call set_flags(proc_run_local+proc_run_always)
+          call scan(parser)
+       case(sym_complete)
+          call set_flags(proc_run_complete)
+          call scan(parser)
+       case(sym_cond_attr)
+          call set_flags(proc_is_cond)
+          call scan(parser)
+       case(sym_uncond)
+          call set_flags(proc_is_uncond)
+          call scan(parser)
+       end select
+       if(parser%sym/=sym_comma) exit
+       call scan(parser)
+    enddo
+    if(iand(flags,proc_is_cond+proc_is_uncond)==&
+         proc_is_cond+proc_is_uncond) then
+       call parse_error(parser,&
+            'Cannot have both "cond" and "uncond" together')
+    endif
+    iserr=.false.
+  contains
+    subroutine set_flags(new_flags)
+      integer,intent(in):: new_flags
+      if(iand(flags,proc_is_comm)==0) then
+         call parse_error(parser,&
+              'Can only apply "'//trim(sym_names(parser%sym))//&
+              '" to a communicating procedure')
+      endif
+      if(iand(flags,new_flags)/=0) then
+         call parse_error(parser,&
+              'Cannot repeat "'//trim(sym_names(parser%sym))//'"')
+      endif
+      flags=ior(flags,new_flags)
+    end subroutine set_flags
+  end function proc_comm_kinds
+
+  !======================================================
   ! Procedure/call attributes
   !======================================================
   recursive function proc_call_attr(parser,iscall,flags) result(iserr)
@@ -4334,16 +4385,15 @@ contains
     logical,intent(in):: iscall
     integer,intent(inout):: flags
     logical:: iserr
-    logical:: iscomm
     integer:: m
     iserr=.true.
     call scan(parser)
-    iscomm=iand(flags,proc_is_comm)/=0
     do
        select case(parser%sym) 
        case(sym_each)
+          call set_flags(proc_is_each_proc)
           if(iscall) then
-             call bad_attr
+             call parse_error(parser,'each^ in call')
              exit
           endif
           call scan(parser)
@@ -4358,48 +4408,22 @@ contains
           enddo
           call make_node(parser,sym_each,m)
           if(expect(parser,sym_close)) return
-          flags=ior(flags,proc_is_each_proc)
-       case(sym_shared)
-          if(iscomm.eqv.iscall) then
-             call bad_attr
-          endif
-          call scan(parser)
-          flags=ior(flags,proc_run_shared)
-       case(sym_pm_node)
-          if(iscomm.eqv.iscall) then
-             call bad_attr
-          endif
-          call scan(parser)
-          flags=ior(flags,proc_run_local+proc_run_always)
-       case(sym_complete)
-          if(iscomm.eqv.iscall) then
-             call bad_attr
-          endif
-          call scan(parser)
-          flags=ior(flags,proc_run_complete)
        case(sym_always)
-          if((.not.iscomm).and.(.not.iscall)) then
-             call bad_attr
+          if(iscall) then
+             call parse_error(parser,&
+                  '"always" is not a valid attribute for a call')
           endif
+          call set_flags(proc_run_always)
           call scan(parser)
-          flags=ior(flags,proc_run_always)
        case(sym_inline)
+          call set_flags(proc_inline)
           call scan(parser)
-          flags=ior(flags,proc_inline)
        case(sym_no_inline)
+          call set_flags(proc_no_inline)
           call scan(parser)
-          flags=ior(flags,proc_no_inline)
-       case(sym_cond_attr)
+        case(sym_ignore_rules)
+          call set_flags(call_ignore_rules)
           call scan(parser)
-          if(iscall.or..not.iscomm) call bad_attr
-          flags=ior(flags,proc_is_cond)
-       case(sym_uncond)
-          call scan(parser)
-          if(iscall.or..not.iscomm) call bad_attr
-          flags=ior(flags,proc_is_uncond)
-       case(sym_ignore_rules)
-          call scan(parser)
-          flags=ior(flags,call_ignore_rules)
        end select
        if(parser%sym/=sym_comma) exit
        call scan(parser)
@@ -4409,25 +4433,19 @@ contains
        call parse_error(parser,&
             'Cannot have both "<<inline>>" and "<<no_inline>>" attributes together')
     endif
-    if(iand(flags,proc_is_cond+proc_is_uncond)==&
-         proc_is_cond+proc_is_uncond) then
-       call parse_error(parser,&
-            'Cannot have both "<<cond>>" and "<<uncond>>" attributes together')
-    endif
     if(expect(parser,sym_close_attr)) return
     iserr=.false.
   contains
-    subroutine bad_attr
-      if(iscall) then
-         call parse_error(parser,&
-              'Cannot have "'//trim(sym_names(parser%sym))//&
-              '" attribute in a communicating call') 
-      else
-         call parse_error(parser,&
-              'Cannot have "'//trim(sym_names(parser%sym))//&
-              '" attribute in a non-communicating procedure') 
+    subroutine set_flags(new_flags)
+      integer,intent(in):: new_flags
+      if(iand(flags,new_flags)/=0) then
+         if(.not.(iand(flags,proc_run_local)/=0.and.new_flags==proc_run_always)) then
+            call parse_error(parser,&
+                 'Cannot repeat attribute "'//trim(sym_names(parser%sym))//'"')
+         endif
       endif
-    end subroutine bad_attr
+      flags=ior(flags,new_flags)
+    end subroutine set_flags
   end function proc_call_attr
   
   !======================================================
@@ -4533,6 +4551,9 @@ contains
        call push_null_val(parser)
        nret=-1
     endif
+
+    ! Special kinds of comm proc
+    if(proc_comm_kinds(parser,flags)) goto 999
 
     ! Attributes
     if(parser%sym==sym_open_attr) then

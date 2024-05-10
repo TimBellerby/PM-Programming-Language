@@ -112,7 +112,7 @@ contains
     type(pm_ptr),intent(out):: root,dict,visibility
     ! Parser state
     type(parse_state),target:: parser
-    integer:: name
+    integer:: name,module_name,package_name
     character(len=pm_max_filename_size):: str,str2
 
     if(pm_debug_level>1) write(*,*) 'PARSING>>'
@@ -151,8 +151,8 @@ contains
           parser%modl%offset+modl_link)
        if(pm_fast_isnull(parser%modl)) exit
        str=' '
-       call pm_name_string(context,&
-            get_modl_name(parser%modl),str)
+       module_name=get_modl_name(parser%modl)
+       call pm_name_string(context,module_name,str)
        call pm_module_filename(str,str2)
        call pm_open_file(pm_comp_file_unit,str2,ok)
        if(.not.ok) then

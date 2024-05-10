@@ -136,7 +136,7 @@ module pm_codegen
      type(pm_ptr):: visibility
      
      ! Stack for local variables (stack() for names, var() for info records)
-     integer,dimension(max_code_stack):: stack
+     integer,dimension(max_code_stack):: stack,imps
      type(pm_ptr),dimension(max_code_stack):: var
      integer:: top
 
@@ -156,8 +156,7 @@ module pm_codegen
 
      ! for & par statements - import/export 
      type(pm_ptr):: loop_cblock
-     type(pm_ptr),dimension(max_par_depth):: &
-          imports,import_cblock,region
+     type(pm_ptr),dimension(max_par_depth):: import_cblock
      integer:: par_depth,proc_par_depth
      integer:: par_base,over_base
 
@@ -210,7 +209,12 @@ module pm_codegen
 
      ! Type inference flag recursion -- use to locate infinite recursion
      logical:: flag_recursion
- 
+
+     ! Type inference procedure trace
+     type(pm_ptr),dimension(max_par_depth):: trace
+     integer,dimension(max_par_depth)::trace_keys
+     integer:: trace_depth
+
      ! Error count
      type(pm_ptr):: error_nodes(max_error_nodes)
      integer:: num_errors
@@ -247,9 +251,7 @@ contains
          coder%proc_name_vals,coder%poly_cache,coder%comm_amp,array=&
          coder%vstack,array_size=coder%vtop)
     coder%reg3=>pm_register(context,'coder-for stack',coder%defer_check,&
-         coder%check_mess,&
-         array=coder%imports,&
-         array_size=coder%par_depth)
+         coder%check_mess)
     coder%sig_cache=pm_dict_new(context,32_pm_ln)
     coder%prog_cblock=pm_null_obj
     coder%defer_check=pm_null_obj
@@ -576,7 +578,7 @@ contains
           case(par_state_cond,par_state_par)
              save_par_state=coder%par_state
              coder%par_state=par_state_labelled
-             call check_par_nesting(coder,cblock,node,.false.)
+             call check_par_context(coder,cblock,node,.false.)
              coder%label=node_arg(node,2)
              call make_const(coder,cblock,node,&
                   node_arg(node,2))
@@ -676,7 +678,7 @@ contains
              call close_cblock(coder,cblock2)
           endif
           call set_var_as_shared(coder,pop_code(coder))
-          call check_par_nesting(coder,cblock,node,.false.)
+          call check_par_context(coder,cblock,node,.false.)
           if(coder%vtop/=base) call pm_panic('pm_send/recv')
        case(sym_pm_bcast)
           call make_sys_var(coder,cblock,node,node_get_num(node,node_args),&
@@ -688,7 +690,7 @@ contains
           call trav_expr(coder,cblock,node,node_arg(node,5))
           call trav_stmt_list(coder,cblock,node,node_arg(node,6),sym_caret)
           call make_sp_call(coder,cblock,node,sym,4,2)
-          call check_par_nesting(coder,cblock,node,.false.)
+          call check_par_context(coder,cblock,node,.false.)
        case(sym_pm_recv_req)
           call make_sys_var(coder,cblock,node,node_get_num(node,node_args),&
                var_is_shadowed)
@@ -2336,6 +2338,7 @@ contains
        call make_sys_call(coder,cblock_main,stmt,sym_get_element,2,1)
        
        if(coder%top/=iter+7) then
+          write(*,*) '==========================='
           do i=iter,coder%top
              write(*,*) pm_name_as_string(coder%context,coder%stack(i))
           enddo
@@ -2424,11 +2427,10 @@ contains
     type(pm_ptr),intent(in):: cblock
     integer:: depth, kk
     depth=coder%par_depth
-    if(depth==max_par_depth) &
-         call pm_panic('Program too complex (nested loops)')
+    if(depth==max_par_depth) then
+       call pm_panic('Program too complex (nested parallel scopes)')
+    endif
     depth=depth+1
-    coder%imports(depth)=&
-         pm_dict_new(coder%context,32_pm_ln)
     coder%import_cblock(depth)=cblock
     coder%par_depth=depth
   end subroutine push_par_scope
@@ -2440,19 +2442,15 @@ contains
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,node
     integer:: depth
-    depth=coder%par_depth
-    coder%imports(depth)=pm_null_obj
     coder%par_depth=coder%par_depth-1
   contains
     include 'fisnull.inc'
   end subroutine pop_par_scope
 
-  !========================================================
+  !====================================================================
   ! Import argument list for a call
-  ! - returns parallel depth of call
-  ! Also returns export information for return values
-  ! at vstack locations base..vtop
-  !========================================================
+  ! Arguments must be on vstack (nret, nkey, narg items respectively) 
+  !====================================================================
   subroutine import_args(coder,cblock,node,narg,nret,nkey,amps,flags,base) 
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,node,amps
@@ -2496,7 +2494,7 @@ contains
 
     if(export) then
        do i=top+1-narg-nkey-nret,top-narg-nkey
-          call var_set_par_depth(coder,coder%vstack(i),depth)
+         call var_set_par_depth(coder,coder%vstack(i),depth)
        enddo
     endif
     
@@ -2513,7 +2511,6 @@ contains
       var=coder%vstack(index)
       if(pm_fast_vkind(var)/=pm_pointer) return
       if(cnode_get_kind(var)/=cnode_is_var) return
-      !write(*,*) 'IMPORT>',trim(pm_name_as_string(coder%context,cnode_get_name(var,var_name)))
       if(iscomm.and.index<=top+2-narg) return
       if(cnode_flags_set(var,var_flags,var_is_no_import_export)) then
          coder%vstack(index)=cnode_get(var,var_extra_info)
@@ -2525,8 +2522,8 @@ contains
               'Cannot modify variable from outside of parallel scope enclosing current parallel scope: ',&
               cnode_get(var,var_name))
          nvar=var
-      elseif(modify.and.depth/=vdepth.and.&
-           (iand(flags,call_ignore_rules)==0.and.vdepth<depth).and..not.iscomm) then
+      elseif(modify.and.iand(flags,call_ignore_rules)==0.and.&
+           vdepth<depth.and..not.iscomm) then
          call make_temp_var(coder,cblock,node)
          call dup_code(coder)
          call code_val(coder,var)
@@ -2536,16 +2533,20 @@ contains
          nvar=pop_code(coder)
       elseif(vdepth<depth) then
          nvar=import_to_par_scope(coder,cblock,node,var,&
-              depth,modify)
+              depth)
       elseif(vdepth>depth.and.export) then
-         call make_temp_var(coder,cblock,node)
-         call dup_code(coder)
-         call cnode_set_flags(top_code(coder),var_flags,var_is_imported)
-         call code_val(coder,var)
-         call make_basic_sp_call(coder,cblock,node,sym_export_as_new,&
-              1,1,coder%par_depth)
-         call var_set_par_depth(coder,top_code(coder),depth)
-         nvar=pop_code(coder)
+         if(cnode_flags_set(var,var_flags,var_is_imported)) then
+            nvar=cnode_get(var,var_extra_info)
+         else
+            call make_temp_var(coder,cblock,node)
+            call dup_code(coder)
+            call cnode_set_flags(top_code(coder),var_flags,var_is_imported)
+            call code_val(coder,var)
+            call make_basic_sp_call(coder,cblock,node,sym_export_as_new,&
+                 1,1,coder%par_depth)
+            call var_set_par_depth(coder,top_code(coder),depth)
+            nvar=pop_code(coder)
+         endif
       else
          nvar=var
       endif
@@ -2554,18 +2555,15 @@ contains
     
   end subroutine import_args
 
-
   !========================================================
   ! Import a variable into a parallel scope at given depth
   !========================================================
-  function import_to_par_scope(coder,cblock,node,var,depth,modify) result(ivar)
+  function import_to_par_scope(coder,cblock,node,var,depth) result(ivar)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,node,var
     integer,intent(in):: depth
-    logical,intent(in):: modify
     type(pm_ptr):: ivar
-    type(pm_ptr):: jvar,kvar,iblock
-    integer:: i,j,vdepth,vcdepth,name
+    integer:: i,j,vdepth,vcdepth,name,base
     ivar=var
     if(pm_fast_vkind(var)/=pm_pointer) return
     if(cnode_get_kind(var)/=cnode_is_var) return
@@ -2573,130 +2571,47 @@ contains
        ivar=cnode_get(var,var_extra_info)
        return
     endif
-    vdepth=cnode_get_num(var,var_par_depth)+coder%proc_par_depth
+    vdepth=par_depth(coder,var)
     vcdepth=cnode_get_num(var,var_create_depth)+coder%proc_par_depth
-    if(debug_codegen) then
-       write(*,*) 'IMPORT TO:',&
-            trim(pm_name_as_string(coder%context,&
-            cnode_get_num(var,var_name))),&
-            depth,vdepth,coder%par_depth,modify
-    endif
-    if(depth==0) then
-       ivar=var
-    elseif(vdepth>depth) then
-       ivar=var
-    elseif(vdepth==depth) then
-       ivar=var
-    elseif(modify.and.vdepth<coder%par_depth-1) then
-       call code_error(coder,node,&
-            'Cannot modify a variable outside of the enclosing scope')
-       ivar=var
-    else
-       if(depth==coder%par_depth.and.cnode_flags_set(var,var_flags,var_is_var)) then
-          jvar=pm_null_obj
-       else
-          jvar=import_cached(coder,node,var,depth)
+    if(vcdepth>vdepth) then
+       if(pm_debug_checks) then
+          if(depth/=vdepth+1) call pm_panic('import temp gone wrong')
        endif
-       if(pm_fast_isnull(jvar)) then
-          do i=depth-1,vdepth+1,-1
-             jvar=import_cached(coder,node,var,i)
-             if(.not.pm_fast_isnull(jvar)) exit
-          enddo
-          if(pm_fast_isnull(jvar)) jvar=var
-          do i=cnode_get_num(jvar,var_par_depth)+1+coder%proc_par_depth,depth
-             j=i
-             if(j<vcdepth+1) then
-                j=vcdepth+1
-             endif
-             if(j>=coder%par_depth) then
-                iblock=cblock
-             else
-                iblock=coder%import_cblock(j)
-             endif
-             name=cnode_get_num(jvar,var_name)
-             if(name/=0) name=pm_name2(coder%context,sym_gt,name)
-             call make_sys_var(coder,iblock,node,&
-                  name,var_is_shadowed+var_is_imported)
-             kvar=top_code(coder)
-             call cnode_set_num(kvar,var_par_depth,i-coder%proc_par_depth)
-             call code_val(coder,jvar)
-             
-             if(cnode_flags_set(jvar,var_flags,var_is_varg)) then
-                call cnode_set_flags(kvar,var_flags,var_is_varg)
-                call make_basic_sp_call(coder,iblock,node,&
-                     sym_import_varg,1,1,i+1)
-             else
-                call code_val(coder,coder%var(coder%par_base+lv_distr))
-                call make_basic_sp_call(coder,iblock,node,&
-                     sym_import_val,2,1,i+1)
-             endif
-             if(debug_codegen) then
-                write(*,*) 'IMPORT VAL> ',&
-                     trim(pm_name_as_string(coder%context,&
-                     cnode_get_num(var,var_name))),i
-             endif
-             ! Note cannot cache import to current level
-             ! - shared variable may change
-             ! - import may be in code that does not run
-             !    if 'false or similar
-             if(i<coder%par_depth) then
-                call cache_import(coder,node,var,i,kvar)
-             endif
-             jvar=kvar
-          enddo
-          ivar=jvar
-       else
-          ivar=jvar
-       endif
+       call make_temp_var(coder,cblock,node)
+       call dup_code(coder)
+       call code_val(coder,ivar)
+       call make_basic_sp_call(coder,cblock,node,sym_import_val,1,1,depth)
+       ivar=pop_code(coder)
+    elseif(vdepth<depth) then
+       base=coder%vtop
+       do i=vdepth+1,depth
+          call make_var(coder,&
+               coder%import_cblock(i),&
+               node,&
+               cnode_get(ivar,var_name),&
+               ior(cnode_get_num(ivar,var_flags),var_is_imported),&
+               ivar)
+          call code_val(coder,ivar)
+          call make_basic_sp_call(coder,&
+               coder%import_cblock(i),&
+               node,sym_import_val,1,1,i)
+          ivar=coder%var(coder%top)
+          call var_set_par_depth(coder,ivar,i)
+          coder%top=coder%top-1
+       enddo
+       coder%top=coder%top+1
+       coder%imps(coder%top)=depth
+       coder%vtop=base
     endif
   contains
-    include 'ftiny.inc'
-    include 'fisnull.inc'
     include 'fvkind.inc'
-    include 'fnewnc.inc'
-    
   end function import_to_par_scope
 
-  !============================================================
-  ! Retrieve a cached import (if one exists)
-  !============================================================
-  function import_cached(coder,node,var,depth) result(ivar)
-    type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: node,var
-    integer,intent(in)::depth
-    type(pm_ptr):: ivar
-    integer:: vindex
-    type(pm_ptr):: entry
-    vindex=cnode_get_num(var,var_index)
-    ivar=pm_dict_lookup(coder%context,&
-         coder%imports(depth),&
-         pm_fast_tinyint(coder%context,vindex))
-  contains
-    include 'ftiny.inc'
-    include 'fisnull.inc'
-  end function import_cached
-
-  !==========================================================
-  ! Cache an import
-  !==========================================================
-  subroutine cache_import(coder,node,var,depth,ivar)
-    type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: node,var,ivar
-    integer,intent(in):: depth
-    integer:: vindex
-    logical:: ok
-    vindex=cnode_get_num(var,var_index)
-    call pm_dict_set(coder%context,&
-           coder%imports(depth),&
-           pm_fast_tinyint(coder%context,vindex),&
-           ivar,.true.,.false.,ok)
-    if(.not.ok) call pm_panic('Cache import')
-  contains
-    include 'ftiny.inc'
-    include 'fnewnc.inc'
-  end subroutine cache_import
-
-  subroutine check_par_nesting(coder,list_head,node,cond_is_ok)
+  !========================================================
+  ! Check communicating operation is in an ok context
+  ! Also flag any enclosing blocks as containing a comm op
+  !========================================================
+  subroutine check_par_context(coder,list_head,node,cond_is_ok)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: list_head,node
     logical,intent(in):: cond_is_ok
@@ -2750,7 +2665,6 @@ contains
        if(cnode_flags_set(list,cblock_flags,cblock_is_comm)) exit
        call cnode_set_flags(list,cblock_flags,cblock_is_comm)
 
- 
        list=cnode_get(list,cblock_parent)
        if(pm_fast_isnull(list)) then
           call code_error(coder,node,&
@@ -2761,7 +2675,7 @@ contains
     enddo
   contains
     include 'fisnull.inc'
-  end subroutine check_par_nesting
+  end subroutine check_par_context
 
 
   !*****************************************************
@@ -2923,7 +2837,7 @@ contains
          var_is_shadowed+var_is_sync+var_is_var,extra_info=node_arg(node,1))
     call drop_code(coder)
     call trav_expr(coder,cblock,node,node_arg(node,n))
-    call check_par_nesting(coder,cblock,pnode,.false.)
+    call check_par_context(coder,cblock,pnode,.false.)
     save_par_state=coder%par_state
     coder%in_sync=.true.
     if(n==3) then
@@ -3048,7 +2962,7 @@ contains
          call code_val(coder,v)
          call code_val(coder,w)
          call make_static_bool_const(coder,cblock,pnode,has_pling)
-         call check_par_nesting(coder,cblock,pnode,.true.)
+         call check_par_context(coder,cblock,pnode,.true.)
          call make_comm_sys_call(coder,cblock,pnode,&
               merge(sym_aliased_assign,sym_assignment,present(alias)),&
               3,0,assign=.true.)
@@ -3085,10 +2999,10 @@ contains
        call trav_expr(coder,cblock,pnode,op)
        call make_static_bool_const(coder,cblock,pnode,&
             iand(outmode,ref_has_at)/=0)
-       call check_par_nesting(coder,cblock,pnode,.true.)
+       call check_par_context(coder,cblock,pnode,.true.)
        call make_comm_sys_call(coder,cblock,pnode,&
             sym_assignment,4,0,assign=.true.)
-       call check_par_nesting(coder,cblock,pnode,.false.)
+       call check_par_context(coder,cblock,pnode,.false.)
     else
        call swap_code(coder)
        if(node_sym(op)==sym_proc.and.node_sym(node_arg(op,1))==sym_minus) then
@@ -3195,8 +3109,7 @@ contains
             'Cannot assign to a non-initialised variable: ',name)
     endif
     if(iand(mode,ref_is_val)/=0) then
-       var=import_to_par_scope(coder,cblock,pnode,var,coder%par_depth,&
-            .false.)
+       var=import_to_par_scope(coder,cblock,pnode,var,coder%par_depth)
     endif
     call code_val(coder,var)
     if(iand(mode,ref_is_val)==0) then
@@ -3265,7 +3178,7 @@ contains
              call code_val(coder,q)
              call make_comm_sys_call(coder,cblock,node,acall,2,1,&
                   aflags=aflags)
-             call check_par_nesting(coder,cblock,node,.true.)
+             call check_par_context(coder,cblock,node,.true.)
           else
              if(sym==sym_dot_sub) then
                 if(iand(mode,ref_is_val)/=0) then
@@ -3320,7 +3233,7 @@ contains
              call code_error(coder,node,&
                   'Cannot change value of "@" expression outside of a "sync" statement') 
           endif
-          call check_par_nesting(coder,cblock,node,.false.)
+          call check_par_context(coder,cblock,node,.false.)
           call make_temp_var(coder,cblock,node)
           call dup_code(coder)
           call make_comm_call_args(coder,cblock,node)
@@ -3331,7 +3244,7 @@ contains
           call dup_code(coder)
           call code_num(coder,sym_shared)
           call make_basic_sp_call(coder,cblock,node,sym_set_mode,2,0,coder%par_depth)
-          call check_par_nesting(coder,cblock,node,.true.)
+          call check_par_context(coder,cblock,node,.true.)
        case(sym_name)
           call trav_ref_to_var(coder,cblock,node,node_arg(node,1),mode)
           outmode=0
@@ -4029,7 +3942,7 @@ contains
              call code_val(coder,p)
              call make_static_bool_const(coder,cblock,node,iand(outmode,ref_has_at)/=0)
              call make_comm_sys_call(coder,cblock,node,sym_get_ref,2,1)
-             call check_par_nesting(coder,cblock,node,.true.)
+             call check_par_context(coder,cblock,node,.true.)
           else
              call make_sys_call(coder,cblock,node,sym_get_val_ref,1,1)
           endif
@@ -4046,7 +3959,7 @@ contains
           call code_val(coder,p)
           call make_static_bool_const(coder,cblock,node,iand(outmode,ref_has_at)/=0)
           call make_comm_sys_call(coder,cblock,node,sym_get_ref,2,1)
-          call check_par_nesting(coder,cblock,node,.true.)
+          call check_par_context(coder,cblock,node,.true.)
        else
           call make_sys_call(coder,cblock,node,sym_get_val_ref,1,1)
        endif
@@ -5256,6 +5169,7 @@ contains
     coder%top=coder%top+1
     coder%stack(coder%top)=typevar_start
     coder%var(coder%top)=pm_null_obj
+    coder%imps(coder%top)=0
  
     base=coder%top
     wbase=coder%wtop
@@ -5322,6 +5236,7 @@ contains
     coder%top=coder%top+1
     coder%stack(coder%top)=typevar_end
     coder%var(coder%top)%offset=base
+    coder%imps(coder%top)=0
   contains
     include 'ftiny.inc'
     include 'fisnull.inc'
@@ -5339,7 +5254,7 @@ contains
             call pm_panic('Pop type vars  - no end record')
     endif 
     coder%top=coder%top-1
-    call pop_vars_to(coder,base)
+    coder%top=base
     if(pm_debug_checks) then
        if(coder%stack(coder%top)/=typevar_start) &
             call pm_panic('Pop type vars  - not at start record')
@@ -5359,6 +5274,7 @@ contains
     nbase=coder%top
     coder%stack(coder%top)=typevar_start
     coder%var(coder%top)=pm_null_obj
+    coder%imps(coder%top)=0
     do i=base+1,top-1
        if(coder%stack(i)/=0) then
           call push_var(coder,coder%stack(i),coder%var(i))
@@ -5367,6 +5283,7 @@ contains
     coder%top=coder%top+1
     coder%stack(coder%top)=typevar_end
     coder%var(coder%top)%offset=nbase
+    coder%imps(coder%top)=0
   end subroutine copy_type_vars
 
   !========================================
@@ -5565,7 +5482,7 @@ contains
     ! Extra argument for comm calls
     if(iand(flags,call_is_comm)/=0) then
        iscomm=.true.
-       call check_par_nesting(coder,cblock,node,pm_fast_isnull(amp))
+       call check_par_context(coder,cblock,node,pm_fast_isnull(amp))
 
        ! Comm call (& its args) operates in standard run mode
        ! - not the current one
@@ -5574,10 +5491,10 @@ contains
        coder%run_mode=sym_complete
        coder%run_flags=0
     elseif(iand(flags,proc_run_shared+proc_run_local)/=0) then
-       call check_par_nesting(coder,cblock,node,pm_fast_isnull(amp))
+       call check_par_context(coder,cblock,node,pm_fast_isnull(amp))
        iscomm=.false.
     elseif(iand(flags,proc_run_complete)/=0) then
-       call check_par_nesting(coder,cblock,node,.false.)
+       call check_par_context(coder,cblock,node,.false.)
        iscomm=.false.
     else
        iscomm=.false.
@@ -7794,7 +7711,7 @@ contains
     integer:: vflags
     
     ! Check for prior definition
-    if(iand(flags,var_is_shadowed)==0) then
+    if(iand(flags,var_is_shadowed+var_is_imported)==0) then
        var=find_var(coder,name)
        if(.not.pm_fast_isnull(var)) then
           if(pm_debug_checks) then
@@ -7886,6 +7803,7 @@ contains
     j=coder%top
     coder%stack(j)=name
     coder%var(j)=var
+    coder%imps(j)=0
   end subroutine push_var
 
   !=====================================
@@ -7894,9 +7812,19 @@ contains
   subroutine pop_vars_to(coder,newbase)
     type(code_state),intent(inout):: coder
     integer,intent(in):: newbase
-    integer:: i,k
-    integer:: j
+    integer:: i,old_top
+    old_top=coder%top
     coder%top=newbase
+    do i=newbase+1,old_top
+       if(coder%imps(i)/=0) then
+          if(coder%imps(i)<=coder%par_depth) then
+             coder%top=coder%top+1
+             coder%imps(coder%top)=coder%imps(i)
+             coder%stack(coder%top)=coder%stack(i)
+             coder%var(coder%top)=coder%var(i)
+          end if
+       endif
+    enddo
   end subroutine pop_vars_to
 
   !=========================================

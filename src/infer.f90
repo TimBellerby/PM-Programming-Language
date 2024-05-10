@@ -96,7 +96,7 @@ contains
     if(debug_inference) write(*,*) 'PRC PROG>'
 
     coder%flag_recursion=.false.
-    coder%par_depth=0
+    coder%trace_depth=0
     coder%poly_cache=pm_dict_new(coder%context,32_pm_ln)
     coder%first_pass=.true.
    
@@ -390,7 +390,6 @@ contains
              cnode%offset=sp_sig_break
              call pm_dict_set_val(coder%context,&
                   coder%proc_cache,k,cnode)
-             coder%proc_par_depth=coder%par_depth
              coder%incomplete=.true.
              coder%taints=save_taints
              rtype=error_type
@@ -897,21 +896,22 @@ contains
           call prc_cblock(coder,cnode_arg(args,2),base)
        case(sym_import_val,sym_import_param)
           tno=pm_type_strip_mode(coder%context,arg_type_with_mode(2),mode)
-          coder%stack(get_slot(1))=pm_type_add_mode(coder%context,tno,sym_shared,.false.)
-          if(tno>0.and.(coder%par_kind==par_mode_conc)) then
-             if(iand(pm_type_flags(coder%context,tno),&
-                  pm_type_has_distributed)/=0) then
-                tno=pm_type_strip_mode(coder%context,arg_type_with_mode(3),mode)
-                if(iand(pm_type_flags(coder%context,tno),&
-                     pm_type_has_distributed)==0) then
-                   if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
-                      call infer_error_with_trace(coder,callnode,&
-                           'Cannot import distributed value into mirrored "forall"')
-                      coder%stack(get_slot(1))=error_type
-                   endif
-                endif
+          mode=merge(sym_shared,sym_mirrored,&
+               iand(pm_type_flags(coder%context,tno),&
+               pm_type_has_distributed)/=0)
+          coder%stack(get_slot(1))=pm_type_add_mode(coder%context,tno,&
+               mode,.false.)
+          if(tno>0.and.coder%par_kind==par_mode_conc.and.mode==sym_shared) then
+             if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
+                call infer_error_with_trace(coder,callnode,&
+                     'Cannot import distributed value into mirrored "forall"')
+                coder%stack(get_slot(1))=error_type
              endif
           endif
+          write(*,*) 'import to',trim(pm_name_as_string(coder%context,&
+               cnode_get_num(cnode_arg(args,1),var_name))),coder%stack(get_slot(1)),tno,&
+               cnode_get_num(cnode_arg(args,2),var_index),cnode_get_num(cnode_arg(args,1),var_index),&
+               coder%stack(86),get_slot(1)
           call flag_import_export(tno)
        case(sym_import_varg)
           tno=arg_type(2)
@@ -924,21 +924,21 @@ contains
                 tno=pm_type_strip_mode(coder%context,pm_tv_arg(t,i),mode)
                 if(iand(pm_type_flags(coder%context,tno),pm_type_has_distributed)/=0) then
                    call infer_error_with_trace(coder,callnode,&
-                        'Cannot use a distibuted shared value as an argument'//&
+                        'Cannot use a shared value as an argument'//&
                         ' to a non-communicating operation')
                 endif
                 call push_word(coder,&
-                     pm_type_add_mode(coder%context,tno,sym_shared,.false.))
+                     pm_type_add_mode(coder%context,tno,sym_mirrored,.false.))
              enddo
              call make_type(coder,n+2)
              tno=pop_word(coder)
              coder%stack(get_slot(1))=tno
              call flag_import_export(tno)
           endif
-       case(sym_import_shared)
-          tno=pm_type_strip_mode(coder%context,arg_type_with_mode(2),mode)
-          coder%stack(get_slot(1))=pm_type_add_mode(coder%context,tno,sym_shared,.false.)
-          call flag_import_export(tno)
+!!$       case(sym_import_shared)
+!!$          tno=pm_type_strip_mode(coder%context,arg_type_with_mode(2),mode)
+!!$          coder%stack(get_slot(1))=pm_type_add_mode(coder%context,tno,sym_shared,.false.)
+!!$          call flag_import_export(tno)
        case(sym_export)
           tno=arg_type_with_mode(1)
           mode=pm_type_get_mode(coder%context,tno)
@@ -1144,7 +1144,7 @@ contains
              if(mode>-1000) then
                 namep=pm_name_val(coder%context,pm_tv_name(t2))
                 call infer_error_with_trace(coder,callnode,&
-                     'Cannot use a shared distributed value'//&
+                     'Cannot use a shared value'//&
                      ' in "new" to initialise: '//&
                      trim(pm_name_as_string(coder%context,&
                      namep%data%i(namep%offset-mode))))
@@ -1981,9 +1981,9 @@ contains
             ignore_rules.or.run_shared,is_complete,is_cond,is_unlabelled)
        if(mode<0) then
           if(mode>-1000) then
-             call call_error('Cannot pass a shared distributed value to a standard procedure')
+             call call_error('Cannot pass a shared value to a standard procedure')
              call infer_error_with_trace(coder,cnode_arg(args,nret-mode),&
-                  'Cannot pass a shared distributed value to a standard procedure')
+                  'Cannot pass a shared value to a standard procedure')
           elseif(mode>-2000) then
              call infer_error_with_trace(coder,cnode_arg(args,nret-mode-1000),&
                   'Cannot pass a "partial" value to a "complete" procedure'//&
@@ -2543,17 +2543,16 @@ contains
                   
                   ! Misuse loop stack as a traceback record 
                   ! of calls being processed
-                  coder%par_depth=coder%par_depth+1
-                  if(coder%par_depth<max_par_depth) then
-                     coder%imports(coder%par_depth)=callnode
-                     coder%import_cblock(coder%par_depth)=&
-                          pm_fast_tinyint(coder%context,coder%proc_key_base)
+                  coder%trace_depth=coder%trace_depth+1
+                  if(coder%trace_depth<max_par_depth) then
+                     coder%trace(coder%trace_depth)=callnode
+                     coder%trace_keys(coder%trace_depth)=coder%proc_key_base
                   endif
                   rt=prc_proc(coder,proc,callnode,apars,pars,nret,nkey,keynames,base)
                   if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
                      coder%supress_errors=.false.
                   endif
-                  coder%par_depth=coder%par_depth-1
+                  coder%trace_depth=coder%trace_depth-1
                   if(rt<0) then
                      if(debug_inference) then
                         write(*,*) 'INCOMPLETE PROC>',coder%vtop,start,coder%incomplete
@@ -3256,11 +3255,11 @@ contains
        if(modl_name==sym_pm_system.and.pm_opts%hide_sysmod) then
           ! Search call stack for source outside of the system module
           ! (note- par/import stack is misused here)
-          do i=coder%par_depth,1,-1
-             modl_name=cnode_get_name(coder%imports(i),cnode_modl_name)
+          do i=coder%trace_depth,1,-1
+             modl_name=cnode_get_name(coder%trace(i),cnode_modl_name)
              if(modl_name/=sym_pm_system) then
-                lineno=cnode_get_name(coder%imports(i),cnode_lineno)
-                charno=cnode_get_name(coder%imports(i),cnode_charno)
+                lineno=cnode_get_name(coder%trace(i),cnode_lineno)
+                charno=cnode_get_name(coder%trace(i),cnode_charno)
                 exit
              endif
           enddo
@@ -3289,9 +3288,8 @@ contains
 
   ! ============================================================
   ! Output trace of current call stack
-  ! Calls stored in coder%imports(1:coder%par_depth)
-  !  and coder%import_cblock(1:coder%par_depth)
-  !  misused for this purpose
+  ! Calls stored in coder%trace(1:coder%trace_depth)
+  !  and coder%trace_keys(1:coder%trace_depth)
   ! Ignores internal calls within PM__system
   !  unless pm_opts%hide_sysmod is false
   ! =============================================================
@@ -3301,14 +3299,14 @@ contains
     integer:: k,top
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
-    if(coder%par_depth<1) return
-    top=coder%par_depth
+    if(coder%trace_depth<1) return
+    top=coder%trace_depth
     if(pm_opts%hide_sysmod.and.top<max_par_depth) then
-       node=coder%imports(top)
+       node=coder%trace(top)
        if(hide(node)) then
           do while(top>1)
              top=top-1
-             node=coder%imports(top)
+             node=coder%trace(top)
              if(.not.hide(node)) then
 !!$                call pm_error_header(coder%context,&
 !!$                     cnode_get_name(node,cnode_modl_name),&
@@ -3323,7 +3321,7 @@ contains
     endif
 
     if(top==1.and.pm_opts%hide_sysmod) then
-       if(hide(coder%imports(top))) return
+       if(hide(coder%trace(top))) return
     endif
     
     write(*,*)
@@ -3333,11 +3331,11 @@ contains
           write(*,*) 'Procedure call: (call not recorded)'
           cycle
        endif
-       node=coder%imports(k)
+       node=coder%trace(k)
        if((.not.hide(node)).or.&
             (.not.pm_opts%hide_sysmod)) then
           call print_call_details(coder,node,&
-               int(coder%import_cblock(k)%offset))
+               coder%trace_keys(k))
           if(k>1) write(*,*)
        endif
     enddo

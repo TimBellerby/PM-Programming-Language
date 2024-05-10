@@ -2857,7 +2857,7 @@ contains
     call dcl_uproc(parser,'PM__redim(a,d)=_redim(a,d)',line)
     call dcl_uproc(parser,'PM__local(a:any^dshape)=_redim(a,(#a)._tilesz)',line)
     call dcl_uproc(parser,'PM__local(a:any^mshape)=a',line)
-    call dcl_uproc(parser,'PM__local%(x:shared)<<shared>>=PM__local(x)',line)
+    call dcl_uproc(parser,'PM__local%(x:shared) shared =PM__local(x)',line)
     call dcl_uproc(parser,'element(a:any^dshape,t) { '//&
          'p,i=node_and_index((#a).dist,(#a)._mshape#_tup(t));'//&
          'var r=_arb(a);if p==_this_node():r=_get_aelem(a,i);_bcast_shared(&r,p);return r} ',line)
@@ -3280,7 +3280,7 @@ contains
          'PM__dref($[](x,t),x,t,null,null)',line)
     
     ! Subscript or slice of distributed array
-    call dcl_uproc(parser,'PM__subref%(x:shared any^dshape,t:invar index) <<complete,always>>'//&
+    call dcl_uproc(parser,'PM__subref%(x:shared any^dshape,t:invar index) complete <<always>>'//&
          '{tt=_tup(t);check_contains(#(x),tt);'//&
          'return PM__dref(_arb(x),x,i,p,_s_ref) '//&
          'where p,i=node_and_index((#x).dist,(#x)._mshape#tt)}',line)
@@ -3292,13 +3292,13 @@ contains
          '{tt=_tup(t);check_contains(#(x),tt);var xx=varray(_arb(x),empty(#x));'//&
          'return PM__drefs(xx,x,tt,p,_p_ref) '//&
          'where p=nodes_for_grid((#x).dist,tt)}',line)
-    call dcl_uproc(parser,'PM__subref%(x:shared any^dshape,t:invar indexed)<<cond>>=PM__subref%(x,*t)',line)
+    call dcl_uproc(parser,'PM__subref%(x:shared any^dshape,t:invar indexed) cond =PM__subref%(x,*t)',line)
     call dcl_uproc(parser,&
-         'PM__subref%(region:shape(,blocked_distr),x:shared any^dshape(,blocked_distr),t:invar indexed) <<uncond>> {'//&
+         'PM__subref%(region:shape(,blocked_distr),x:shared any^dshape(,blocked_distr),t:invar indexed) uncond {'//&
          'check_contains(#x,_dmap(t,here));'//&
          'return PM__drefi(_arb(x),x,tt,[tt,#x],_d_ref) where tt=_tup(t)}',line)
     call dcl_uproc(parser,&
-         'PM__subref%(x:shared any^dshape,t:invar indexed)<<uncond>>=PM__subref%(x,*t)',line)
+         'PM__subref%(x:shared any^dshape,t:invar indexed) uncond =PM__subref%(x,*t)',line)
 
     ! Subscript or slice of non-distristuted array which is itself result of variant slice
     call dcl_uproc(parser,'PM__subref%(x:priv ^*(any^mshape,,,null,null),t:index)'//&
@@ -3333,9 +3333,9 @@ contains
     
     ! Subscript of distributed reference
     call dcl_uproc(parser,'_arb%(x:partial)=_arb(x)',line)
-    call dcl_uproc(parser,'_arb%(x:complete)<<complete,always>>=_arb(x)',line)
-    call dcl_uproc(parser,'_arb%(x:chan)<<complete,always>>=_arb(x)',line)
-    call dcl_uproc(parser,'_arb%(x:invar)<<complete,always>>=_arb(x)',line)
+    call dcl_uproc(parser,'_arb%(x:complete) complete <<always>>=_arb(x)',line)
+    call dcl_uproc(parser,'_arb%(x:chan) complete <<always>>=_arb(x)',line)
+    call dcl_uproc(parser,'_arb%(x:invar) complete <<always>>=_arb(x)',line)
     
     call dcl_uproc(parser,'PM__subref%(x:priv ^*(any^any,,,,),t:invar subs)='//&
          'PM__drefi(_arb%(_v1%(x)),x,_tup%(t))',line)
@@ -3420,38 +3420,38 @@ contains
          '  d=#region._mshape;a={_getref(_import_dref%(x),j): j in d};'//&
          '  p=index(dims(region.dist),node);'//&
          '  _send_slice(p,a,region.dist[node])}}',line)
-    call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,int,_s_ref),at:invar) <<complete,always>> {'//&
+    call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,int,_s_ref),at:invar) complete <<always>> {'//&
          'chan var xx=_v1%(x);_getref_s%(&xx@,^^(x),at);_bcast_shared(&xx);return xx}',line)
-    call dcl_uproc(parser,'_getref_s%(&xx:invar,x:invar,at:invar) <<PM__node>> {'//&
+    call dcl_uproc(parser,'_getref_s%(&xx:invar,x:invar,at:invar) PM__node {'//&
          'PM__head_node{_irecv(_v4(x),&xx)};'//&
          '_scatter(x,region);'//&
          '_sync_messages(xx,x)}',line)
-    call dcl_uproc(parser,'PM__getref%(x:complete ^*(_comp,,,int,_s_ref),at:invar) <<complete,always>>{'//&
+    call dcl_uproc(parser,'PM__getref%(x:complete ^*(_comp,,,int,_s_ref),at:invar) complete <<always>>{'//&
          'chan var xx=_v1%(x);_getref_sc%(&xx@,^^(x),at);_bcast_shared(&xx);return xx}',line)
-    call dcl_uproc(parser,'_getref_sc%(&xx:invar,x:invar,at:invar) <<PM__node>> {'//&
+    call dcl_uproc(parser,'_getref_sc%(&xx:invar,x:invar,at:invar) PM__node {'//&
          '_scatter(x,region);PM__head_node{_recv(_v4(x),&xx)};'//&
          '_sync_messages(xx,x)}',line)
-    call dcl_uproc(parser,'PM__getref%(x:complete ^*(,^*(,,,,),,,_d_ref),at:invar) <<complete,always>> {'//&
+    call dcl_uproc(parser,'PM__getref%(x:complete ^*(,^*(,,,,),,,_d_ref),at:invar) complete <<always>> {'//&
          'chan var a=_v1%(x);_getref_d%(&^(PM__local%(^(&a@))),'//&
          '^^(x),at  <<PM__ignore>>);'//&
          '_bcast_shared(&a);return a}',line)
-    call dcl_uproc(parser,'_getref_d%(&a:invar,x:invar,at:invar) <<PM__node>> {'//&
+    call dcl_uproc(parser,'_getref_d%(&a:invar,x:invar,at:invar) PM__node {'//&
          '_get_dindex_from_dref(&a,x,t.2,'//&
          '_local_region(region._tile,subregion(schedule)),region,t.1,'//&
          '_drat(at,region._tile,t.1)) where t=_v4(x)'//&
          '}',line)
-    call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,,_d_ref),at:invar) <<complete,always>> {'//&
+    call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,,_d_ref),at:invar) complete <<always>> {'//&
          'chan var a=_arb(_v2%(x));'//&
          '_getref_dc%(&a@,^^(x),at <<PM__ignore>>);_bcast_shared(&a);return a}',line)
-    call dcl_uproc(parser,'_getref_dc%(&a:invar,x:invar,at:invar) <<PM__node>> {'//&
+    call dcl_uproc(parser,'_getref_dc%(&a:invar,x:invar,at:invar) PM__node {'//&
          'PM__head_node{_get_dindex(&^(PM__local(^(&a))),PM__local(_v2(x)),t.2,'//&
          '_local_region(region._tile,subregion(schedule)),region,t.1,_drat(at,region._tile,t.1)) '//&
          ' where t=_v4(x)}}',line)
-    call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,,_dp_ref),at:invar) <<complete,always>> {'//&
+    call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,,_dp_ref),at:invar) complete <<always>> {'//&
          'chan var a=_v1%(x);'//&
          '_getref_dp%(&^(^^(^(&a))),^^(_cap%(x,here)),at,^^(^??),_v4(x) <<PM__ignore>>);'//&
          '_bcast_shared(&a);return a}',line)
-    call dcl_uproc(parser,'_getref_dp%(&a:invar,x:invar,at:invar,atq:invar,t:invar) <<PM__node>>{'//&
+    call dcl_uproc(parser,'_getref_dp%(&a:invar,x:invar,at:invar,atq:invar,t:invar) PM__node {'//&
          'PM__head_node{_get_dindex_from_ref(&a,x,t.2,'//&
          ' _local_region(region._tile,subregion(schedule)),region,'//&
          ' t.1,atq,_drat(at,region._tile,t.1))}'//&
@@ -3504,9 +3504,9 @@ contains
     call dcl_uproc(parser,'PM__assign%(&x:priv,y,at) {'//&
          '_sync%(&x);PM__assign(&x,y <<PM__ignore>>)}',line)
     call dcl_uproc(parser,'PM__assign%(&x:invar,y,at) {_sync%(&x);_assign_to_invar%(&x,y) }',line)
-    call dcl_uproc(parser,'_assign_to_invar%(&x:uniform,y:invar) <<complete>> '//&
+    call dcl_uproc(parser,'_assign_to_invar%(&x:uniform,y:invar) complete '//&
          '{ PM__assign(&x,y <<PM__ignore>>) }',line)
-    call dcl_uproc(parser,'_assign_to_invar%(&x:shared,y:invar) <<shared>>'//&
+    call dcl_uproc(parser,'_assign_to_invar%(&x:shared,y:invar) shared'//&
          '{ PM__assign(&x,y) }',line)
     call dcl_uproc(parser,&
          '_assign_to_invar%(&x:invar,y:priv) '//&
@@ -3545,7 +3545,7 @@ contains
          ' $_just_assign,^^(^??),at,_v4(x) <<PM__ignore>>)}',line)
     call dcl_uproc(parser,'_just_assign(x,y)=y',line)
     call dcl_uproc(parser,'_set_ref_dp%(&x:invar,y:invar,'//&
-         '  prc:invar,atq:invar,at:invar,t:invar) <<PM__node>> {'//&
+         '  prc:invar,atq:invar,at:invar,t:invar) PM__node {'//&
          '_set_dindex_of_ref(&x,y,t.2,'//&
          '_local_region(region._tile,subregion(schedule)),'//&
          'region,t.1,prc,atq,at)'//&
@@ -3555,9 +3555,9 @@ contains
     call dcl_uproc(parser,'PM__assign%(&x:priv,y:priv,pr,at) {PM__assign(&x,y,pr)}',line)
     call dcl_uproc(parser,'PM__assign%(&x:priv,y:invar,pr,at) {PM__assign(&x,y,pr)}',line)
     call dcl_uproc(parser,'PM__assign%(&x:invar,y,pr,at) { _assign_to_invar%(&x,y,pr,at) }',line)
-    call dcl_uproc(parser,'_assign_to_invar%(&x:uniform,y:invar,pr:uniform,at:uniform) <<complete>>'//&
+    call dcl_uproc(parser,'_assign_to_invar%(&x:uniform,y:invar,pr:uniform,at:uniform) complete'//&
          '{ PM__assign(&x,y,pr <<PM__ignore>>) }',line)
-    call dcl_uproc(parser,'_assign_to_invar%(&x:shared,y:invar,pr:uniform,at:uniform) <<shared>> '//&
+    call dcl_uproc(parser,'_assign_to_invar%(&x:shared,y:invar,pr:uniform,at:uniform) shared '//&
          '{ PM__assign(&x,y,pr) }',line)
     call dcl_uproc(parser,'_assign_to_invar%(&x:invar,y:priv,pr,at){'//&
          '_assign_to_invar%(&x,_reduce_for_assign%(pr,y,x),pr,at)}',line)
@@ -3953,7 +3953,7 @@ contains
     ! Resolve x[ indexed ][ whatever ] <pr> = priv
     call dcl_uproc(parser,&
          '_set_dindex_of_ref%(&x:invar,y:invar,shapex:invar,this_tile:invar,local_region:invar,tt:invar indexed,'//&
-         '     pr:invar proc,complt:invar,at:invar) <<PM__node,always>>:'//&
+         '     pr:invar proc,complt:invar,at:invar) PM__node <<always>>:'//&
          '_set_dindex_of_ref(&x,y,shapex,this_tile,local_region,tt,pr,complt,at)',line)
     call dcl_uproc(parser,&
          '_set_dindex_of_ref(&x,y,shapex,this_tile,local_region,tt:indexed,'//&
@@ -4009,7 +4009,7 @@ contains
 
     call dcl_type(parser,'_nhd is rec{_nbhd,_tile,_tilesz,_interior,_limits}',line)
     call dcl_type(parser,'nbhd(t) is struct^{_array:farray(t),_nbhd,_index,_here}',line)
-    call dcl_uproc(parser,'PM__nhd%(x:invar envelope or extent,bound:invar)<<shared,always>>='//&
+    call dcl_uproc(parser,'PM__nhd%(x:invar envelope or extent,bound:invar) shared <<always>>='//&
          'new _nhd {_nbhd=x,_tile=t,_tilesz=#t,_interior=overlap(t,region._tile),'//&
          '_limits=_expand_limits(region._extent,envelope(x),bound)} '//&
          'where t=_get_halo(region,region._tile,envelope(x))',line)
@@ -4062,7 +4062,7 @@ contains
     call dcl_uproc(parser,'_nhd_active(r,n,b:range)=low(r)-min(0,low(b))..high(r)-max(0,high(b))',line)
     call dcl_uproc(parser,'_nhd_active(r,n,b:EXCLUDED)=_nhd_active(r,n,n)',line)
     
-    call dcl_uproc(parser,'_make_nhd%(x:invar,d:invar)<<shared,always>>{var v=array(x,d);return v}',line)
+    call dcl_uproc(parser,'_make_nhd%(x:invar,d:invar) shared <<always>>{var v=array(x,d);return v}',line)
 
     call dcl_uproc(parser,'PM__set_edge%(&x,y,z){}',line)
 
@@ -4096,7 +4096,7 @@ contains
     call dcl_uproc(parser,'_positive(x)=x>0',line)
     
     call dcl_uproc(parser,&
-         'PM__send_nhd%(&a:invar,nbhd:invar,b:invar boundary) <<shared,always>> { '//&
+         'PM__send_nhd%(&a:invar,nbhd:invar,b:invar boundary) shared <<always>> { '//&
          ' PM__head_node{this_tile=region._tile;this_tile_x=nbhd._tile;'//&
          ' pp=index2point(_this_node(),dims(region.dist));'//&
          ' foreach i in node_nhd(region.dist,pp,envelope(nbhd._nbhd)) {'//&
@@ -4123,7 +4123,7 @@ contains
          '}}',line)
 
     call dcl_uproc(parser,&
-         'PM__send_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) <<shared,always>> { '//&
+         'PM__send_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) shared <<always>> { '//&
          ' PM__head_node{this_tile=region._tile;this_tile_x=nbhd._tile;'//&
          ' pp=index2point(_this_node(),dims(region.dist));'//&
          ' foreach i in node_nhd(region.dist,pp,_rev(envelope(nbhd._nbhd))) { '//&
@@ -4150,12 +4150,12 @@ contains
     call dcl_uproc(parser,'_foot(d,n:envelope)=if(_crss(d)=>n.cross,n.corner)',line)
     call dcl_uproc(parser,'_foot(d,n:extent)=n',line)
 
-    call dcl_uproc(parser,'PM__recv_nhd%(&a:invar,nbhd:invar,b:invar) <<shared,always>> {'//&
+    call dcl_uproc(parser,'PM__recv_nhd%(&a:invar,nbhd:invar,b:invar) shared <<always>> {'//&
          'PM__head_node{_apply_boundaries(&a,region,envelope(nbhd._nbhd),nbhd._tile,extent(region),'//&
          '   envelope(nbhd._nbhd),b,rank(extent(region)),''true)}}',line)
     
     call dcl_uproc(parser,&
-         'PM__recv_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) <<shared,always>> { '//&
+         'PM__recv_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) shared <<always>> { '//&
          ' PM__head_node{this_tile=region._tile;this_tile_x=nbhd._tile;'//&
          ' pp=index2point(_this_node(),dims(region.dist));'//&
          ' foreach i in node_nhd(region.dist,pp,envelope(nbhd._nbhd)) {'//&
@@ -4173,7 +4173,7 @@ contains
          '}}',line)
 
       call dcl_uproc(parser,&
-           'PM__bcast_nhd%(&a:invar,nbhd:invar,b:invar) <<shared,always>> {'//&
+           'PM__bcast_nhd%(&a:invar,nbhd:invar,b:invar) shared <<always>> {'//&
            'if shrd_nnode()>1 {'//&
            ' foreach i in 1..chunks(region,envelope(nbhd._nbhd))-1 {'//&
            '   chunk=chunk(region,envelope(nbhd._nbhd),i,b);'//&
@@ -4941,7 +4941,7 @@ contains
     
     call dcl_uproc(parser,'_assemble%(&a:invar array_slice(any^shape,),xregion:invar mshape) {}',line)
     
-    call dcl_uproc(parser,'_assemble%(&a:invar any^mshape,xregion:invar) <<shared,always>> {'//&
+    call dcl_uproc(parser,'_assemble%(&a:invar any^mshape,xregion:invar) shared <<always>> {'//&
          ' dist=xregion.dist; '//&
          ' foreach p in #(dist) {'//&
          '   tile=dist[p];'//&
@@ -4961,7 +4961,7 @@ contains
          ' } }',&
          line)
   
-   call dcl_uproc(parser,'_assemble%(&a:invar array_slice(any^shape,),xregion:invar) <<shared,always>> {'//&
+   call dcl_uproc(parser,'_assemble%(&a:invar array_slice(any^shape,),xregion:invar) shared <<always>> {'//&
         ' dist=xregion.dist; '//&
          ' foreach p in #(dist) {'//&
          '   tile=intersect((#(a._a))#a._s,dist[p]);'//&
@@ -4988,7 +4988,7 @@ contains
     ! Support for @ operator
     if(pm_is_compiling) then
        call dcl_uproc(parser,&
-            'PM__makearray%(x:chan)<<complete,always>>=_makearray(x,region,size(region))',line)
+            'PM__makearray%(x:chan) complete <<always>>=_makearray(x,region,size(region))',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:priv)=_makearray(x,region,size(region))'//&
             ':test "Can only apply ""@"" to a ""chan"" " => ''false',line)
@@ -5000,7 +5000,7 @@ contains
             op_make_array,0,line,proc_needs_type)
     else
        call dcl_uproc(parser,&
-            'PM__makearray%(x:chan)<<complete,always>>=_makearray(x,region)',line)
+            'PM__makearray%(x:chan) complete <<always>>=_makearray(x,region)',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:priv)=_makearray(x,region)'//&
             ':test "Can only apply ""@"" to a ""chan"" " => ''false',line)
@@ -5015,7 +5015,7 @@ contains
     
     ! active%() intrinsic
     call dcl_uproc(parser,'active%(x)=_masked%(^(x,coherent),^(^??,coherent) <<PM__ignore>>)',line)
-    call dcl_uproc(parser,'_masked%(x)<<complete,always>>=masked(x)',line)
+    call dcl_uproc(parser,'_masked%(x) complete <<always>>=masked(x)',line)
     call dcl_uproc(parser,'active%()=^(^??,coherent)',line)
     call dcl_proc(parser,'PM__active()->bool',op_active,0,line,0)
     
@@ -5048,18 +5048,18 @@ contains
     call dcl_uproc(parser,'subtile(schedule:schedule)=schedule._subtile',line)
  
     ! Over statements
-     call dcl_uproc(parser,'PM__over%(schedule:null,x:invar,block:invar)<<shared,always>>='//&
+     call dcl_uproc(parser,'PM__over%(schedule:null,x:invar,block:invar) shared <<always>>='//&
           'new schedule{_subregion=x,_subtile=overlap(region._tile,x),_blocking=_blocking(block,region)}',line)
-    call dcl_uproc(parser,'PM__over%(x:invar,block:invar)<<shared,always>>='//&
+    call dcl_uproc(parser,'PM__over%(x:invar,block:invar) shared <<always>>='//&
          'new schedule{_subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}'//&
          'where s=intersect(x,schedule._subregion)',line)
     call dcl_uproc(parser,'PM__make_over%(schedule:null,'//&
-         'x:invar tuple(subs_dim except stretch_dim),block:invar)<<shared,always>>='//&
+         'x:invar tuple(subs_dim except stretch_dim),block:invar) shared <<always>>='//&
          'new schedule{_subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}'//&
          'check "Value"++s++" in ""over"" out of bounds: "++region._extent=>region._extent inc s '//&
          'where s=fill_in(region._extent,x,null)',line)
     call dcl_uproc(parser,'PM__make_over%(x:invar tuple(subs_dim except stretch_dim)'//&
-         ',block:invar)<<shared,always>>='//&
+         ',block:invar) shared <<always>>='//&
          'new schedule{_subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}'//&
          'where s=intersect(map($norm,fill_in(region._extent,x,''true)),schedule._subregion)',line)
     call dcl_uproc(parser,'PM__make_over%(x:invar,block)=x'//&
@@ -5080,12 +5080,12 @@ contains
        call dcl_uproc(parser,'PM__do_over%(x:null)=true',line)
        call dcl_uproc(parser,'PM__do_over%(x:invar schedule(tuple(seq or block_seq)))=here in x._subregion',line)
        call dcl_uproc(parser,'PM__do_over%(x:invar schedule(grid))=PM__do_over%(schedule._subtile)',line)
-       call dcl_uproc(parser,'PM__do_over%(x:invar grid) <<complete,always>>'//&
+       call dcl_uproc(parser,'PM__do_over%(x:invar grid) complete <<always>>'//&
             '{chan var t=false;'//&
             ' _in%(x,&^(PM__local(^(&t@))) <<PM__ignore>>);'//&
             ' return t}',line)
        call dcl_uproc(parser,'PM__do_over%(x:invar tuple(seq or block_seq),h:complete)=h in x',line)
-       call dcl_uproc(parser,'_in%(x:invar,&t:invar)<<shared,always>>{forall i in x {sync t[i]=true}}',line)
+       call dcl_uproc(parser,'_in%(x:invar,&t:invar) shared <<always>>{forall i in x {sync t[i]=true}}',line)
     else
        call dcl_uproc(parser,'PM__do_over(x:null,region)=x',line)
        call dcl_uproc(parser,'PM__do_over(x:schedule,region)='//&
@@ -5538,7 +5538,7 @@ contains
     call dcl_uproc(parser,'_tup(x:tuple)=x',line)
     call dcl_uproc(parser,'_tup(arg...)=tuple(arg...)',line)
     call dcl_uproc(parser,'_tup(x:null)=x',line)
-    call dcl_uproc(parser,'_tup%(x:invar)<<shared>>=_tup(x)',line)
+    call dcl_uproc(parser,'_tup%(x:invar) shared=_tup(x)',line)
     
     call dcl_proc(parser,'PM__broadcast(&b:any,a:int)',op_broadcast,&
          0,line,proc_is_impure+proc_is_dcomm)
@@ -5631,8 +5631,8 @@ contains
     call dcl_uproc(parser,'_reduce%(p:invar proc,y:chan)='//&
          '^(__reduce_on_node%(p,_reduce_on_node%(p,PM__local(y@) <<PM__ignore>>)<<PM__ignore>>),uniform)',line)
 
-    call dcl_uproc(parser,'_reduce_on_node%(p:invar,y:invar)<<PM__node>>=reduce(p,y)',line)
-    call dcl_uproc(parser,'__reduce_on_node%(p:invar,y:invar)<<PM__node>>=_reduce(p,y)',line)
+    call dcl_uproc(parser,'_reduce_on_node%(p:invar,y:invar) PM__node=reduce(p,y)',line)
+    call dcl_uproc(parser,'__reduce_on_node%(p:invar,y:invar) PM__node=_reduce(p,y)',line)
 
     
     call dcl_uproc(parser,'_reduce(p:proc,y) {'//&

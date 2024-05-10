@@ -95,7 +95,7 @@ cnodes.o : ../src/cnodes.f90 ast.o symbol.o sysdefs.o types.o lib.o opts.o hash.
 codegen.o : ../src/codegen.f90 cnodes.o ast.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-infer.o : ../src/infer.f90 cnodes.o ast.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+infer.o : ../src/infer.f90 codegen.o cnodes.o ast.o symbol.o sysdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 wcoder.o : ../src/wcoder.f90 array.o infer.o cnodes.o ast.o symbol.o sysdefs.o vmdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
