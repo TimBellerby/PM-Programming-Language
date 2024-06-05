@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -38,30 +38,6 @@ module pm_sysdefs
   use pm_vmdefs
   implicit none
 
-  ! Flag values for procs
-  ! (note values 1=proc_is_comm,...  defined in parser)
-  integer,parameter:: proc_is_thru_each =     2**12
-  integer,parameter:: proc_is_empty_each =    2**13
-  integer,parameter:: proc_is_dup_each =      2**14
-  integer,parameter:: proc_is_var =           2**15
-  integer,parameter:: proc_is_generator =     2**16
-  integer,parameter:: proc_needs_type =       2**17
-  integer,parameter:: proc_is_recursive =     2**18
-  integer,parameter:: proc_unfinished =       2**19
-  integer,parameter:: proc_is_impure =        2**20
-  integer,parameter:: proc_is_not_inlinable = 2**21
-  integer,parameter:: proc_has_for =          2**22
-  integer,parameter:: proc_is_not_pure_each = 2**23
-  integer,parameter:: proc_has_vkeys =        2**24
-  integer,parameter:: proc_is_dcomm =         2**25
-  integer,parameter:: proc_is_file =          2**26
-  integer,parameter:: proc_needs_par =        2**27
-  integer,parameter:: proc_prints_out =       2**28
-
-  integer,parameter:: proc_taints = proc_is_impure &
-       + proc_is_not_inlinable + proc_has_for      &
-       + proc_is_not_pure_each + proc_is_dcomm + proc_is_file   &
-       + proc_needs_par + proc_prints_out
 
 contains
 
@@ -72,6 +48,82 @@ contains
 
     call dcl_module(parser,'PM__system')
     parser%sysmodl=parser%modl
+
+    call dcl_type(parser,'literal is ^^^any',line)
+    call dcl_type(parser,'int_literal is ^^^int',line)
+    call dcl_type(parser,'real_literal is ^^^real',line)
+    call dcl_type(parser,'bool_literal is ^^^bool',line)
+    call dcl_type(parser,'string_literal is ^^^string',line)
+    
+    call dcl_proc(parser,'mod(int_literal,int_literal)->int_literal',op_mod_fold,0,line,0)
+    call dcl_proc(parser,'==(int_literal,int_literal)->bool_literal',op_eq_fold,0,line,0)
+    call dcl_proc(parser,'/=(int_literal,int_literal)->bool_literal',op_ne_fold,0,line,0)
+    call dcl_proc(parser,'>=(int_literal,int_literal)->bool_literal',op_ge_fold,0,line,0)
+    call dcl_proc(parser,'>(int_literal,int_literal)->bool_literal',op_gt_fold,0,line,0)
+    call dcl_proc(parser,'+(int_literal,int_literal)->int_literal',op_add_fold,0,line,0)
+    call dcl_proc(parser,'-(int_literal,int_literal)->int_literal',op_sub_fold,0,line,0)
+    call dcl_proc(parser,'*(int_literal,int_literal)->int_literal',op_mult_fold,0,line,0)
+    call dcl_proc(parser,'/(int_literal,int_literal)->int_literal',op_divide_fold,0,line,0)
+    call dcl_proc(parser,'**(int_literal,int_literal)->int_literal',op_pow_fold,0,line,0)
+    call dcl_proc(parser,'max(int_literal,int_literal)->int_literal',op_max_fold,0,line,0)
+    call dcl_proc(parser,'min(int_literal,int_literal)->int_literal',op_min_fold,0,line,0)
+    call dcl_proc(parser,'-(int_literal)->int_literal',op_uminus_fold,0,line,0)
+    call dcl_proc(parser,'string(int_literal)->string',op_string_fold,0,line,0)
+    call dcl_proc(parser,'abs(int_literal)->int_literal',op_abs_fold,0,line,0)
+    call dcl_proc(parser,'~(int_literal)->int_literal',op_bnot_fold,0,line,0)
+    call dcl_proc(parser,'&(int_literal,int_literal)->int_literal',op_band_fold,0,line,0)
+    call dcl_proc(parser,'|(int_literal,int_literal)->int_literal',op_bor_fold,0,line,0)
+    call dcl_proc(parser,'xor(int_literal,int_literal)->int_literal',op_bxor_fold,0,line,0)
+    call dcl_proc(parser,'shift(int_literal,int_literal)->int_literal',&
+         op_bshift_fold,0,line,0)
+    call dcl_proc(parser,'pdiff(int_literal,int_literal)->int_literal',op_pdiff_fold,0,line,0)
+    call dcl_proc(parser,'sign(int_literal,int_literal)->int_literal',op_sign_fold,0,line,0)
+    call dcl_proc(parser,'rem(int_literal,int_literal)->int_literal',op_modulo_fold,0,line,0)
+    call dcl_proc(parser,'and(bool_literal,bool_literal)->bool_literal',op_and_fold,0,line,0)
+    call dcl_proc(parser,'or(bool_literal,bool_literal)->bool_literal',op_or_fold,0,line,0)
+    call dcl_proc(parser,'except(bool_literal,bool_literal)->bool_literal',op_except_fold,0,line,0)
+    call dcl_proc(parser,'==(bool_literal,bool_literal)->bool_literal',op_eq_fold,0,line,0)
+    call dcl_proc(parser,'/=(bool_literal,bool_literal)->bool_literal',op_ne_fold,0,line,0)
+    call dcl_proc(parser,'==(string_literal,string_literal)->bool_literal',op_eq_fold,0,line,0)
+    call dcl_proc(parser,'/=(string_literal,string_literal)->bool_literal',op_ne_fold,0,line,0)
+    call dcl_proc(parser,'==(real_literal,real_literal)->bool_literal',op_eq_fold,0,line,0)
+    call dcl_proc(parser,'/=(real_literal,real_literal)->bool_literal',op_ne_fold,0,line,0)
+    call dcl_proc(parser,'++(string_literal,string_literal)->string_literal',op_concat_fold,0,line,0)
+
+    call dcl_proc(parser,'mod(fix int,fix int)->fix int',op_mod_fold,0,line,0)
+    call dcl_proc(parser,'==(fix int,fix int)->fix bool',op_eq_fold,0,line,0)
+    call dcl_proc(parser,'/=(fix int,fix int)->fix bool',op_ne_fold,0,line,0)
+    call dcl_proc(parser,'>=(fix int,fix int)->fix bool',op_ge_fold,0,line,0)
+    call dcl_proc(parser,'>(fix int,fix int)->fix bool',op_gt_fold,0,line,0)
+    call dcl_proc(parser,'+(fix int,fix int)->fix int',op_add_fold,0,line,0)
+    call dcl_proc(parser,'-(fix int,fix int)->fix int',op_sub_fold,0,line,0)
+    call dcl_proc(parser,'*(fix int,fix int)->fix int',op_mult_fold,0,line,0)
+    call dcl_proc(parser,'/(fix int,fix int)->fix int',op_divide_fold,0,line,0)
+    call dcl_proc(parser,'**(fix int,fix int)->fix int',op_pow_fold,0,line,0)
+    call dcl_proc(parser,'max(fix int,fix int)->fix int',op_max_fold,0,line,0)
+    call dcl_proc(parser,'min(fix int,fix int)->fix int',op_min_fold,0,line,0)
+    call dcl_proc(parser,'-(fix int)->fix int',op_uminus_fold,0,line,0)
+    call dcl_proc(parser,'string(fix int)->string',op_string_fold,0,line,0)
+    call dcl_proc(parser,'abs(fix int)->fix int',op_abs_fold,0,line,0)
+    call dcl_proc(parser,'~(fix int)->fix int',op_bnot_fold,0,line,0)
+    call dcl_proc(parser,'&(fix int,fix int)->fix int',op_band_fold,0,line,0)
+    call dcl_proc(parser,'|(fix int,fix int)->fix int',op_bor_fold,0,line,0)
+    call dcl_proc(parser,'xor(fix int,fix int)->fix int',op_bxor_fold,0,line,0)
+    call dcl_proc(parser,'shift(fix int,fix int)->fix int',&
+         op_bshift_fold,0,line,0)
+    call dcl_proc(parser,'pdiff(fix int,fix int)->fix int',op_pdiff_fold,0,line,0)
+    call dcl_proc(parser,'sign(fix int,fix int)->fix int',op_sign_fold,0,line,0)
+    call dcl_proc(parser,'rem(fix int,fix int)->fix int',op_modulo_fold,0,line,0)
+    call dcl_proc(parser,'and(fix bool,fix bool)->fix bool',op_and_fold,0,line,0)
+    call dcl_proc(parser,'or(fix bool,fix bool)->fix bool',op_or_fold,0,line,0)
+    call dcl_proc(parser,'except(fix bool,fix bool)->fix bool',op_except_fold,0,line,0)
+    call dcl_proc(parser,'==(fix bool,fix bool)->fix bool',op_eq_fold,0,line,0)
+    call dcl_proc(parser,'/=(fix bool,fix bool)->fix bool',op_ne_fold,0,line,0)
+    call dcl_proc(parser,'==(fix string,fix string)->fix bool',op_eq_fold,0,line,0)
+    call dcl_proc(parser,'/=(fix string,fix string)->fix bool',op_ne_fold,0,line,0)
+    call dcl_proc(parser,'==(fix real,fix real)->fix bool',op_eq_fold,0,line,0)
+    call dcl_proc(parser,'/=(fix real,fix real)->fix bool',op_ne_fold,0,line,0)
+    call dcl_proc(parser,'++(fix string,fix string)->fix string',op_concat_fold,0,line,0)
 
     ! **************************************
     !  BASIC TYPES
@@ -128,43 +180,43 @@ contains
     ! int type
     call dcl_proc(parser,'PM__assign_var(&int,int)',&
          op_assign_ln,0,line,0)
-    call dcl_proc(parser,'mod(int,int)->''int',op_mod_ln,0,line,0)
-    call dcl_proc(parser,'==(int,int)->''bool',op_eq_ln,0,line,0)
-    call dcl_proc(parser,'/=(int,int)->''bool',op_ne_ln,0,line,0)
-    call dcl_proc(parser,'>=(int,int)->''bool',op_ge_ln,0,line,0)
-    call dcl_proc(parser,'>(int,int)->''bool',op_gt_ln,0,line,0)
-    call dcl_proc(parser,'+(int,int)->''int',op_add_ln,0,line,0)
-    call dcl_uproc(parser,'+(x:int,y:''0)=x',line)
-    call dcl_uproc(parser,'+(x:''0,y:int)=y',line)
-    call dcl_proc(parser,'-(int,int)->''int',op_sub_ln,0,line,0)
-    call dcl_uproc(parser,'-(x:int,y:''0)=x',line)
-    call dcl_proc(parser,'*(int,int)->''int',op_mult_ln,0,line,0)
+    call dcl_proc(parser,'mod(int,int)->int',op_mod_ln,0,line,0)
+    call dcl_proc(parser,'==(int,int)->bool',op_eq_ln,0,line,0)
+    call dcl_proc(parser,'/=(int,int)->bool',op_ne_ln,0,line,0)
+    call dcl_proc(parser,'>=(int,int)->bool',op_ge_ln,0,line,0)
+    call dcl_proc(parser,'>(int,int)->bool',op_gt_ln,0,line,0)
+    call dcl_proc(parser,'+(int,int)->int',op_add_ln,0,line,0)
+!!$    call dcl_uproc(parser,'+(x:int,y:''0)=x',line)
+!!$    call dcl_uproc(parser,'+(x:''0,y:int)=y',line)
+    call dcl_proc(parser,'-(int,int)->int',op_sub_ln,0,line,0)
+!!$    call dcl_uproc(parser,'-(x:int,y:''0)=x',line)
+    call dcl_proc(parser,'*(int,int)->int',op_mult_ln,0,line,0)
     call dcl_uproc(parser,'*(x:int,y:''1)=x',line)
-    call dcl_uproc(parser,'*(x:''1,y:int)=y',line)
-    call dcl_proc(parser,'/(int,int)->''int',op_divide_ln,0,line,0)
+!!$    call dcl_uproc(parser,'*(x:''1,y:int)=y',line)
+    call dcl_proc(parser,'/(int,int)->int',op_divide_ln,0,line,0)
     call dcl_uproc(parser,'/(x:int,y:''1)=x',line)
-    call dcl_proc(parser,'**(int,int)->''int',op_pow_ln,0,line,0)
-    call dcl_uproc(parser,'**(x:int,y:''0)=1',line)
-    call dcl_uproc(parser,'**(x:int,y:''1)=x',line)
-    call dcl_uproc(parser,'**(x:int,y:''2)=x*x',line)
-    call dcl_proc(parser,'max(int,int)->''int',op_max_ln,0,line,0)
-    call dcl_proc(parser,'min(int,int)->''int',op_min_ln,0,line,0)
-    call dcl_proc(parser,'-(int)->''int',op_uminus_ln,0,line,0)
+    call dcl_proc(parser,'**(int,int)->int',op_pow_ln,0,line,0)
+!!$    call dcl_uproc(parser,'**(x:int,y:''0)=1',line)
+!!$    call dcl_uproc(parser,'**(x:int,y:''1)=x',line)
+!!$    call dcl_uproc(parser,'**(x:int,y:''2)=x*x',line)
+    call dcl_proc(parser,'max(int,int)->int',op_max_ln,0,line,0)
+    call dcl_proc(parser,'min(int,int)->int',op_min_ln,0,line,0)
+    call dcl_proc(parser,'-(int)->int',op_uminus_ln,0,line,0)
     call dcl_proc(parser,'string(int)->string',op_string_ln,0,line,0)
     call dcl_proc(parser,'sint(int)->sint',op_int_ln,0,line,0)
     call dcl_proc(parser,'sreal(int)->sreal',op_real_ln,0,line,0)
     call dcl_proc(parser,'real(int)->real',op_double_ln,0,line,0)
     call dcl_uproc(parser,'int(x:int)=x',line)
     call dcl_proc(parser,'abs(int)->int',op_abs_ln,0,line,0)
-    call dcl_proc(parser,'!(int)->int',op_bnot_ln,0,line,0)
+    call dcl_proc(parser,'~(int)->int',op_bnot_ln,0,line,0)
     call dcl_proc(parser,'&(int,int)->int',op_band_ln,0,line,0)
     call dcl_proc(parser,'|(int,int)->int',op_bor_ln,0,line,0)
     call dcl_proc(parser,'xor(int,int)->int',op_bxor_ln,0,line,0)
     call dcl_proc(parser,'shift(int,int)->int',&
          op_bshift_ln,0,line,0)
-    call dcl_proc(parser,'pdiff(int,int)->''int',op_pdiff_ln,0,line,0)
-    call dcl_proc(parser,'sign(int,int)->''int',op_sign_ln,0,line,0)
-    call dcl_proc(parser,'rem(int,int)->''int',op_modulo_ln,0,line,0)
+    call dcl_proc(parser,'pdiff(int,int)->int',op_pdiff_ln,0,line,0)
+    call dcl_proc(parser,'sign(int,int)->int',op_sign_ln,0,line,0)
+    call dcl_proc(parser,'rem(int,int)->int',op_modulo_ln,0,line,0)
     call dcl_proc(parser,'int8(int)->int8',op_i8_ln,0,line,0)
     call dcl_proc(parser,'int16(int)->int16',op_i16_ln,0,line,0)
     call dcl_proc(parser,'int32(int)->int32',op_i32_ln,0,line,0)
@@ -202,7 +254,7 @@ contains
     call dcl_proc(parser,'real(lint)->real',op_double_offset,0,line,0)
     call dcl_uproc(parser,'lint(x:lint)=x',line)
     call dcl_proc(parser,'abs(lint)->lint',op_abs_offset,0,line,0)
-    call dcl_proc(parser,'!(lint)->lint',op_bnot_offset,0,line,0)
+    call dcl_proc(parser,'~(lint)->lint',op_bnot_offset,0,line,0)
     call dcl_proc(parser,'&(lint,lint)->lint',op_band_offset,0,line,0)
     call dcl_proc(parser,'|(lint,lint)->lint',op_bor_offset,0,line,0)
     call dcl_proc(parser,'xor(lint,lint)->lint',op_bxor_offset,0,line,0)
@@ -247,7 +299,7 @@ contains
     call dcl_proc(parser,'real(int8)->real',op_double_i8,0,line,0)
     call dcl_uproc(parser,'int8(x:int8)=x',line)
     call dcl_proc(parser,'abs(int8)->int8',op_abs_i8,0,line,0)
-    call dcl_proc(parser,'!(int8)->int8',op_bnot_i8,0,line,0)
+    call dcl_proc(parser,'~(int8)->int8',op_bnot_i8,0,line,0)
     call dcl_proc(parser,'&(int8,int8)->int8',op_band_i8,0,line,0)
     call dcl_proc(parser,'|(int8,int8)->int8',op_bor_i8,0,line,0)
     call dcl_proc(parser,'xor(int8,int8)->int8',op_bxor_i8,0,line,0)
@@ -292,7 +344,7 @@ contains
     call dcl_proc(parser,'real(int16)->real',op_double_i16,0,line,0)
     call dcl_uproc(parser,'int16(x:int16)=x',line)
     call dcl_proc(parser,'abs(int16)->int16',op_abs_i16,0,line,0)
-    call dcl_proc(parser,'!(int16)->int16',op_bnot_i16,0,line,0)
+    call dcl_proc(parser,'~(int16)->int16',op_bnot_i16,0,line,0)
     call dcl_proc(parser,'&(int16,int16)->int16',op_band_i16,0,line,0)
     call dcl_proc(parser,'|(int16,int16)->int16',op_bor_i16,0,line,0)
     call dcl_proc(parser,'xor(int16,int16)->int16',op_bxor_i16,0,line,0)
@@ -337,7 +389,7 @@ contains
     call dcl_proc(parser,'real(int32)->real',op_double_i32,0,line,0)
     call dcl_uproc(parser,'int32(x:int32)=x',line)
     call dcl_proc(parser,'abs(int32)->int32',op_abs_i32,0,line,0)
-    call dcl_proc(parser,'!(int32)->int32',op_bnot_i32,0,line,0)
+    call dcl_proc(parser,'~(int32)->int32',op_bnot_i32,0,line,0)
     call dcl_proc(parser,'&(int32,int32)->int32',op_band_i32,0,line,0)
     call dcl_proc(parser,'|(int32,int32)->int32',op_bor_i32,0,line,0)
     call dcl_proc(parser,'xor(int32,int32)->int32',op_bxor_i32,0,line,0)
@@ -383,7 +435,7 @@ contains
     call dcl_proc(parser,'real(int64)->real',op_double_i64,0,line,0)
     call dcl_uproc(parser,'int64(x:int64)=x',line)
     call dcl_proc(parser,'abs(int64)->int64',op_abs_i64,0,line,0)
-    call dcl_proc(parser,'!(int64)->int64',op_bnot_i64,0,line,0)
+    call dcl_proc(parser,'~(int64)->int64',op_bnot_i64,0,line,0)
     call dcl_proc(parser,'&(int64,int64)->int64',op_band_i64,0,line,0)
     call dcl_proc(parser,'|(int64,int64)->int64',op_bor_i64,0,line,0)
     call dcl_proc(parser,'xor(int64,int64)->int64',op_bxor_i64,0,line,0)
@@ -660,6 +712,13 @@ contains
     call dcl_uproc(parser,'balance(x:_to_cpx,y:cpx)=cpx(x),y',line)
 
     call dcl_uproc(parser,&
+         'div(x:any_int,y:any_int)=if(sz=>r,-1-r)'//&
+         'where r=if(sz=>x,abs(x)-1)/if(sz=>y,abs(y))'//&
+         'where sz=sign(x,y)==x',line)
+    call dcl_uproc(parser,&
+         '_divz(x:any_int,y:any_int)=z '//&
+         '{var z,_=balance(x,y);if(sign(x,y)==x):z=x/y else: z=-1-(abs(x)-1)/abs(y)}',line)
+    call dcl_uproc(parser,&
          'mod(x:real_num,y:real_num)=xx mod yy where xx,yy=balance(x,y)',line)
     call dcl_uproc(parser,&
          '==(x:num,y:num)=xx==yy where xx,yy=balance(x,y)',line)
@@ -680,6 +739,14 @@ contains
     call dcl_uproc(parser,&
          '**(x:num,y:num)=xx**yy where xx,yy=balance(x,y)',line)
     call dcl_uproc(parser,&
+         '&(x:num,y:num)=xx&yy where xx,yy=balance(x,y)',line)
+    call dcl_uproc(parser,&
+         '|(x:num,y:num)=xx|yy where xx,yy=balance(x,y)',line)
+    call dcl_uproc(parser,&
+         'xor(x:num,y:num)=xx xor yy where xx,yy=balance(x,y)',line)
+    call dcl_uproc(parser,&
+         'shift(x:num,y:num)=xx shift yy where xx,yy=balance(x,y)',line)
+    call dcl_uproc(parser,&
          'max(x:num,y:num)=max(xx,yy) where xx,yy=balance(x,y)',line)
     call dcl_uproc(parser,&
          'min(x:num,y:num)=min(xx,yy) where xx,yy=balance(x,y)',line)
@@ -694,37 +761,37 @@ contains
     call dcl_proc(parser,'==(bool,bool)->bool',op_eq_l,0,line,0)
     call dcl_proc(parser,'/=(bool,bool)->bool',op_ne_l,0,line,0)
 
-    ! Compile time bool values
-    call dcl_uproc(parser,'and(x:''false,y:''false)=''false',line)
-    call dcl_uproc(parser,'and(x:''true,y:''false)=''false',line)
-    call dcl_uproc(parser,'and(x:''false,y:''true)=''false',line)
-    call dcl_uproc(parser,'and(x:''true,y:''true)=''true',line)
-    call dcl_uproc(parser,'and(x:''true,y:bool)=y',line)
-    call dcl_uproc(parser,'and(x:''false,y:bool)=''false',line)
-    call dcl_uproc(parser,'and(x:bool,y:''true)=x',line)
-    call dcl_uproc(parser,'and(x:bool,y:''false)=''false',line)
-    call dcl_uproc(parser,'or(x:''false,y:''false)=''false',line)
-    call dcl_uproc(parser,'or(x:''true,y:''false)=''true',line)
-    call dcl_uproc(parser,'or(x:''false,y:''true)=''true',line)
-    call dcl_uproc(parser,'or(x:''true,y:''true)=''true',line)
-    call dcl_uproc(parser,'or(x:''true,y:bool)=''true',line)
-    call dcl_uproc(parser,'or(x:''false,y:bool)=y',line)
-    call dcl_uproc(parser,'or(x:bool,y:''true)=''true',line)
-    call dcl_uproc(parser,'or(x:bool,y:''false)=x',line)
-    call dcl_uproc(parser,'not(x:''true)=''false',line)
-    call dcl_uproc(parser,'not(x:''false)=''true',line)
-    call dcl_uproc(parser,'==(x:''false,y:''false)=''true',line)
-    call dcl_uproc(parser,'==(x:''true,y:''false)=''false',line)
-    call dcl_uproc(parser,'==(x:''false,y:''true)=''false',line)
-    call dcl_uproc(parser,'==(x:''true,y:''true)=''true',line)
-    call dcl_uproc(parser,'==(x:bool,y:''true)=x',line)
-    call dcl_uproc(parser,'==(x:''true,y:bool)=y',line)
-    call dcl_uproc(parser,'/=(x:''false,y:''false)=''false',line)
-    call dcl_uproc(parser,'/=(x:''true,y:''false)=''true',line)
-    call dcl_uproc(parser,'/=(x:''false,y:''true)=''true',line)
-    call dcl_uproc(parser,'/=(x:''true,y:''true)=''false',line)
-    call dcl_uproc(parser,'/=(x:bool,y:''false)=x',line)
-    call dcl_uproc(parser,'/=(x:''false,y:bool)=y',line)
+!!$    ! Compile time bool values
+!!$    call dcl_uproc(parser,'and(x:''false,y:''false)=''false',line)
+!!$    call dcl_uproc(parser,'and(x:''true,y:''false)=''false',line)
+!!$    call dcl_uproc(parser,'and(x:''false,y:''true)=''false',line)
+!!$    call dcl_uproc(parser,'and(x:''true,y:''true)=''true',line)
+!!$    call dcl_uproc(parser,'and(x:''true,y:bool)=y',line)
+!!$    call dcl_uproc(parser,'and(x:''false,y:bool)=''false',line)
+!!$    call dcl_uproc(parser,'and(x:bool,y:''true)=x',line)
+!!$    call dcl_uproc(parser,'and(x:bool,y:''false)=''false',line)
+!!$    call dcl_uproc(parser,'or(x:''false,y:''false)=''false',line)
+!!$    call dcl_uproc(parser,'or(x:''true,y:''false)=''true',line)
+!!$    call dcl_uproc(parser,'or(x:''false,y:''true)=''true',line)
+!!$    call dcl_uproc(parser,'or(x:''true,y:''true)=''true',line)
+!!$    call dcl_uproc(parser,'or(x:''true,y:bool)=''true',line)
+!!$    call dcl_uproc(parser,'or(x:''false,y:bool)=y',line)
+!!$    call dcl_uproc(parser,'or(x:bool,y:''true)=''true',line)
+!!$    call dcl_uproc(parser,'or(x:bool,y:''false)=x',line)
+!!$    call dcl_uproc(parser,'not(x:''true)=''false',line)
+!!$    call dcl_uproc(parser,'not(x:''false)=''true',line)
+!!$    call dcl_uproc(parser,'==(x:''false,y:''false)=''true',line)
+!!$    call dcl_uproc(parser,'==(x:''true,y:''false)=''false',line)
+!!$    call dcl_uproc(parser,'==(x:''false,y:''true)=''false',line)
+!!$    call dcl_uproc(parser,'==(x:''true,y:''true)=''true',line)
+!!$    call dcl_uproc(parser,'==(x:bool,y:''true)=x',line)
+!!$    call dcl_uproc(parser,'==(x:''true,y:bool)=y',line)
+!!$    call dcl_uproc(parser,'/=(x:''false,y:''false)=''false',line)
+!!$    call dcl_uproc(parser,'/=(x:''true,y:''false)=''true',line)
+!!$    call dcl_uproc(parser,'/=(x:''false,y:''true)=''true',line)
+!!$    call dcl_uproc(parser,'/=(x:''true,y:''true)=''false',line)
+!!$    call dcl_uproc(parser,'/=(x:bool,y:''false)=x',line)
+!!$    call dcl_uproc(parser,'/=(x:''false,y:bool)=y',line)
     
     ! Masked types
     call dcl_type(parser,'masked(x) is '//&
@@ -844,13 +911,13 @@ contains
     call dcl_uproc(parser,'indices(x:tuple6d)=[''1,''2,''3,''4,''5,''6]',line)
     call dcl_uproc(parser,'indices(x:tuple7d)=[''1,''2,''3,''4,''5,''6,''7]',line)
        
-    call dcl_uproc(parser,'full_rank(x:tuple1d)=''1',line)
-    call dcl_uproc(parser,'full_rank(x:tuple2d)=''2',line)
-    call dcl_uproc(parser,'full_rank(x:tuple3d)=''3',line)
-    call dcl_uproc(parser,'full_rank(x:tuple4d)=''4',line)
-    call dcl_uproc(parser,'full_rank(x:tuple5d)=''5',line)
-    call dcl_uproc(parser,'full_rank(x:tuple6d)=''6',line)
-    call dcl_uproc(parser,'full_rank(x:tuple7d)=''7',line)
+    call dcl_uproc(parser,'full_rank(x:tuple1d)=1',line)
+    call dcl_uproc(parser,'full_rank(x:tuple2d)=2',line)
+    call dcl_uproc(parser,'full_rank(x:tuple3d)=3',line)
+    call dcl_uproc(parser,'full_rank(x:tuple4d)=4',line)
+    call dcl_uproc(parser,'full_rank(x:tuple5d)=5',line)
+    call dcl_uproc(parser,'full_rank(x:tuple6d)=6',line)
+    call dcl_uproc(parser,'full_rank(x:tuple7d)=7',line)
 
     call dcl_uproc(parser,'rank(x:tuple)=full_rank(x)',line)
     
@@ -1267,6 +1334,12 @@ contains
     ! RANGES AND SEQUENCES
     ! *****************************************************
 
+    ! Not in operator
+    call dcl_uproc(parser,'notin(x,y)=not(x in y)',line)
+
+    ! not inc operator
+    call dcl_uproc(parser,'notinc(x,y)=not(x inc y)',line)
+    
     ! Treat null as empty sequence in some cases
     call dcl_uproc(parser,'in(x,y:null)=''false',line)
     call dcl_uproc(parser,'in(x:null,y:null)=''true',line)
@@ -1321,8 +1394,8 @@ contains
     call dcl_type(parser,'range(t:range_base) is rec {_lo:t,_hi:t,_n:t}',line)
     call dcl_uproc(parser,'..(x:range_base,y:range_base)='//&
          'new range {_lo=xx,_hi=yy,_n=max(0,int(yy-xx)+1)} where xx,yy=balance(x,y)',line)
-    call dcl_uproc(parser,'..(x:fix int,y:fix int)='//&
-         'new range {_lo=x,_hi=y,_n=max(''0,y-x+''1)}',line)
+!!$    call dcl_uproc(parser,'..(x:fix int,y:fix int)='//&
+!!$         'new range {_lo=x,_hi=y,_n=max(''0,y-x+''1)}',line)
     call dcl_uproc(parser,'low(x:range)=x._lo',line)
     call dcl_uproc(parser,'high(x:range)=x._hi',line)
     call dcl_uproc(parser,'step(x:range)=convert(1,x._lo)',line)
@@ -1756,10 +1829,10 @@ contains
     call dcl_uproc(parser,'_act(x,y)=y',line)
     call dcl_uproc(parser,'active_dims(x:iterable_grid,y:tuple)=map_apply($_act,$_sliceit,x,y)',line)
     call dcl_uproc(parser,'active_dims(x:single_point,y)=null',line)
-    call dcl_uproc(parser,'_ar(x:single_point)=''0',line)
-    call dcl_uproc(parser,'_ar(x)=''1',line)
+    call dcl_uproc(parser,'_ar(x:single_point)=0',line)
+    call dcl_uproc(parser,'_ar(x)=1',line)
     call dcl_uproc(parser,'rank(x:iterable_grid)=map_reduce($_ar,$+,x)',line)
-   call dcl_uproc(parser,'element(x:iterable_grid,y:index)'//&
+    call dcl_uproc(parser,'element(x:iterable_grid,y:index)'//&
          '{t=_tup(y);return _ges(head(x),tail(x),head(t),tail(t),''false)}',line)
     call dcl_uproc(parser,'element(x:grid_slice,arg...:grid_slice)'//&
          '{t=_tup(arg...);'//&
@@ -2462,10 +2535,10 @@ contains
          op_array,0,line,proc_needs_type)
     call dcl_proc(parser,'_array(x:any,y:any,z:any,v:''true)->PM__vdim x,y',&
          op_var_array,0,line,proc_needs_type)
-    call dcl_proc(parser,'_array(x:any,y:any,z:any,v:''false,i:''true)->PM__invar_dim x,y',&
-         op_array,0,line,proc_needs_type)
-    call dcl_proc(parser,'_array(x:any,y:any,z:any,v:''false,i:''false)->PM__fix_dim x,y,z',&
-         merge(op_init_farray,op_array,pm_is_compiling),0,line,proc_needs_type)
+!!$    call dcl_proc(parser,'_array(x:any,y:any,z:any,v:''false,i:''true)->PM__invar_dim x,y',&
+!!$         op_array,0,line,proc_needs_type)
+!!$    call dcl_proc(parser,'_array(x:any,y:any,z:any,v:''false,i:''false)->PM__fix_dim x,y,z',&
+!!$         merge(op_init_farray,op_array,pm_is_compiling),0,line,proc_needs_type)
     call dcl_proc(parser,&
          '_redim(x:any^any,y:any)->over x,y',&
          op_redim,0,line,proc_needs_type)
@@ -2593,8 +2666,8 @@ contains
     ! *****************************************
 
     ! Array templates
-    call dcl_type(parser,'array_template(a,d:mshape or dshape,v:fix bool,i:fix bool,f:fix bool)'//&
-         ' is rec {_a:a,_d:d,_s:int,_v:v,_i:i=''false,_f:f=''false}',line)
+    call dcl_type(parser,'array_template(a,d:mshape or dshape,v:fix bool)'//&
+         ' is rec {_a:a,_d:d,_s:int,_v:v}',line)
     call dcl_uproc(parser,&
          'array(a:any,s:dshape)='//&
          'new array_template {_a=a,_d=s,_s=s._size,_v=''false}',line)
@@ -2602,16 +2675,7 @@ contains
          'array(a:any,s:mshape(tuple(range(int))))='//&
          'new array_template {_a=a,_d=s,_s=size(s),_v=''false}',line)
     call dcl_uproc(parser,&
-         'array(a:any,s:fix mshape(tuple(range(int))))='//&
-         'new array_template {_a=a,_d=s,_s=size(s),_v=''false,_f=''true}',line)
-    call dcl_uproc(parser,&
          'array(a:any,s:tuple(range(any_int)))=array(a,shape(s))',line)
-    call dcl_uproc(parser,'dim%(a,d)=array(a,d)',line)
-    call dcl_uproc(parser,'dim%(a,s:invar mshape(tuple(range(int))))='//&
-         'new array_template {_a=a,_d=s,_s=size(s),_v=''false,_i=''true}',line)
-    call dcl_uproc(parser,'dim%(a,sh:invar tuple(range(any_int)))='//&
-         'new array_template {_a=a,_d=s,_s=size(s),_v=''false,_i=''true}'//&
-         'where s=shape(sh)',line)
     
     call dcl_uproc(parser,&
          'varray(a:any,s:mshape or dshape)='//&
@@ -2636,10 +2700,8 @@ contains
     ! Array creation from template
     call dcl_uproc(parser,'PM__dup(a:array_template(,shape,))='//&
          '_array(PM__dup(a._a),a._d,int(a._s),a._v)',line)
-    call dcl_uproc(parser,'PM__dup(a:array_template(,mshape,,,''true))='//&
-         '_array(PM__dup(a._a),a._d,int(a._s),a._v,''false)',line)
-    call dcl_uproc(parser,'PM__dup(a:array_template(,mshape,,''true,''false))='//&
-         '_array(PM__dup(a._a),a._d,int(a._s),a._v,''true)',line)
+    call dcl_uproc(parser,'PM__dup(a:array_template(,shape,''true))='//&
+         '_array(PM__dup(a._a),PM__dup(a._d),PM__dup(int(a._s)),a._v)',line)
     
     call dcl_uproc(parser,'PM__do_dim(a:any,d:mshape)='//&
          '_array(a,d,size(d),''false)',&
@@ -3398,7 +3460,7 @@ contains
     call dcl_uproc(parser,'_cap%(x:contains(indexed),h)<<inline>>=PM__dref(_v1%(x),x,new _here {here=h})',line)
     call dcl_uproc(parser,'_capn%(x,h)<<inline>>=PM__dref(_v1%(x),x,new _here {here=h})',line)
 
-    ! Treat @ variables differently only for limited circumstances in drefs
+    ! Treat ! variables differently only for limited circumstances in drefs
     call dcl_uproc(parser,'_drat(at,tile,t)=''false',line)
     call dcl_uproc(parser,'_drat(at:''true,tile:tuple(range or block_seq),t:indexed and _dr)=''true',line)
     call dcl_type(parser,'_di(n) is indexed_dim(''1,''1,,n) or int',line)
@@ -3421,18 +3483,18 @@ contains
          '  p=index(dims(region.dist),node);'//&
          '  _send_slice(p,a,region.dist[node])}}',line)
     call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,int,_s_ref),at:invar) complete <<always>> {'//&
-         'chan var xx=_v1%(x);_getref_s%(&xx@,^^(x),at);_bcast_shared(&xx);return xx}',line)
+         'chan var xx=_v1%(x);_getref_s%(&xx!,^^(x),at);_bcast_shared(&xx);return xx}',line)
     call dcl_uproc(parser,'_getref_s%(&xx:invar,x:invar,at:invar) PM__node {'//&
          'PM__head_node{_irecv(_v4(x),&xx)};'//&
          '_scatter(x,region);'//&
          '_sync_messages(xx,x)}',line)
     call dcl_uproc(parser,'PM__getref%(x:complete ^*(_comp,,,int,_s_ref),at:invar) complete <<always>>{'//&
-         'chan var xx=_v1%(x);_getref_sc%(&xx@,^^(x),at);_bcast_shared(&xx);return xx}',line)
+         'chan var xx=_v1%(x);_getref_sc%(&xx!,^^(x),at);_bcast_shared(&xx);return xx}',line)
     call dcl_uproc(parser,'_getref_sc%(&xx:invar,x:invar,at:invar) PM__node {'//&
          '_scatter(x,region);PM__head_node{_recv(_v4(x),&xx)};'//&
          '_sync_messages(xx,x)}',line)
     call dcl_uproc(parser,'PM__getref%(x:complete ^*(,^*(,,,,),,,_d_ref),at:invar) complete <<always>> {'//&
-         'chan var a=_v1%(x);_getref_d%(&^(PM__local%(^(&a@))),'//&
+         'chan var a=_v1%(x);_getref_d%(&^(PM__local%(^(&a!))),'//&
          '^^(x),at  <<PM__ignore>>);'//&
          '_bcast_shared(&a);return a}',line)
     call dcl_uproc(parser,'_getref_d%(&a:invar,x:invar,at:invar) PM__node {'//&
@@ -3442,7 +3504,7 @@ contains
          '}',line)
     call dcl_uproc(parser,'PM__getref%(x:complete ^*(,,,,_d_ref),at:invar) complete <<always>> {'//&
          'chan var a=_arb(_v2%(x));'//&
-         '_getref_dc%(&a@,^^(x),at <<PM__ignore>>);_bcast_shared(&a);return a}',line)
+         '_getref_dc%(&a!,^^(x),at <<PM__ignore>>);_bcast_shared(&a);return a}',line)
     call dcl_uproc(parser,'_getref_dc%(&a:invar,x:invar,at:invar) PM__node {'//&
          'PM__head_node{_get_dindex(&^(PM__local(^(&a))),PM__local(_v2(x)),t.2,'//&
          '_local_region(region._tile,subregion(schedule)),region,t.1,_drat(at,region._tile,t.1)) '//&
@@ -4450,7 +4512,7 @@ contains
     call dcl_uproc(parser,'nbr%(x:chan,t:shared disp_index,v:shared){'//&
          ' test "Default and chan values must have same type in ""nbr"""=>same_type(x,v);'//&
          ' j=displace(region._mshape,here,t);'//&
-         ' var y=v;if contains(region._mshape,j) {y=x@[j]};'//&
+         ' var y=v;if contains(region._mshape,j) {y=x![j]};'//&
          ' return y} ',line)
     call dcl_uproc(parser,&
          'nbhd%(x:chan,t:shared disp_sub,v:shared) { '//&
@@ -4458,7 +4520,7 @@ contains
          ' var a=array(v,#t);'//&
          ' foreach invar i in t {'//&
          '   j=displace(region._mshape,here,i);'//&
-         '   if j in region._mshape {a[here]=x@[j]}'//&
+         '   if j in region._mshape {a[here]=x![j]}'//&
          ' };return a}',line)
     
     ! *** Blocked distributions ***
@@ -4985,16 +5047,16 @@ contains
     call dcl_uproc(parser,'PM__get_tilesz(d)=d._tile,d._size',line)
     call dcl_uproc(parser,'PM__get_tilesz(d:mshape)=d,size(d)',line)
     
-    ! Support for @ operator
+    ! Support for ! operator
     if(pm_is_compiling) then
        call dcl_uproc(parser,&
             'PM__makearray%(x:chan) complete <<always>>=_makearray(x,region,size(region))',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:priv)=_makearray(x,region,size(region))'//&
-            ':test "Can only apply ""@"" to a ""chan"" " => ''false',line)
+            ':test "Can only apply ""!"" to a ""chan"" " => ''false',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:invar)=_makearray(x,region,size(region))'//&
-            ':test "Cannot apply ""@"" to a ""shared"" or ""uniform"" value" => ''false',line)
+            ':test "Cannot apply ""!"" to a ""shared"" or ""uniform"" value" => ''false',line)
        call dcl_proc(parser,&
             '_makearray(x:any,y:any,z:any)->PM__invar_dim x,y',&
             op_make_array,0,line,proc_needs_type)
@@ -5003,10 +5065,10 @@ contains
             'PM__makearray%(x:chan) complete <<always>>=_makearray(x,region)',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:priv)=_makearray(x,region)'//&
-            ':test "Can only apply ""@"" to a ""chan"" " => ''false',line)
+            ':test "Can only apply ""!"" to a ""chan"" " => ''false',line)
        call dcl_uproc(parser,&
             'PM__makearray%(x:invar)=_makearray(x,region)'//&
-            ':test "Cannot apply ""@"" to a ""shared"" or ""uniform"" value" => ''false',line)
+            ':test "Cannot apply ""!"" to a ""shared"" or ""uniform"" value" => ''false',line)
        call dcl_proc(parser,&
             '_makearray(x:any,y:any)->PM__dim x,y',&
             op_make_array,0,line,proc_needs_type)
@@ -5082,7 +5144,7 @@ contains
        call dcl_uproc(parser,'PM__do_over%(x:invar schedule(grid))=PM__do_over%(schedule._subtile)',line)
        call dcl_uproc(parser,'PM__do_over%(x:invar grid) complete <<always>>'//&
             '{chan var t=false;'//&
-            ' _in%(x,&^(PM__local(^(&t@))) <<PM__ignore>>);'//&
+            ' _in%(x,&^(PM__local(^(&t!))) <<PM__ignore>>);'//&
             ' return t}',line)
        call dcl_uproc(parser,'PM__do_over%(x:invar tuple(seq or block_seq),h:complete)=h in x',line)
        call dcl_uproc(parser,'_in%(x:invar,&t:invar) shared <<always>>{forall i in x {sync t[i]=true}}',line)
@@ -5260,6 +5322,7 @@ contains
     call dcl_type(parser,'file is struct {_f:sint,_tag:PM__distr_tag}',line)
     call dcl_type(parser,'io_error is rec {_errno:sint,use _iserr:bool}',line)
     call dcl_uproc(parser,'PM__filesys()=new filesystem{}',line)
+   ! call dcl_uproc(parser,'PM__filesys()=0',line)
 
     ! Basic operations
     call dcl_uproc(parser,'open(&filesystem:filesystem,name,'//&
@@ -5627,9 +5690,9 @@ contains
          'chan yy=y;return init / _reduce%($*,yy,init)}',line)
     
     call dcl_uproc(parser,'reduce%(p:invar proc,y:chan,init)='//&
-         '^(p.(init,__reduce_on_node%(p,_reduce_on_node%(p,PM__local(y@) <<PM__ignore>>)<<PM__ignore>>)),uniform)',line)
+         '^(p.(init,__reduce_on_node%(p,_reduce_on_node%(p,PM__local(y!) <<PM__ignore>>)<<PM__ignore>>)),uniform)',line)
     call dcl_uproc(parser,'_reduce%(p:invar proc,y:chan)='//&
-         '^(__reduce_on_node%(p,_reduce_on_node%(p,PM__local(y@) <<PM__ignore>>)<<PM__ignore>>),uniform)',line)
+         '^(__reduce_on_node%(p,_reduce_on_node%(p,PM__local(y!) <<PM__ignore>>)<<PM__ignore>>),uniform)',line)
 
     call dcl_uproc(parser,'_reduce_on_node%(p:invar,y:invar) PM__node=reduce(p,y)',line)
     call dcl_uproc(parser,'__reduce_on_node%(p:invar,y:invar) PM__node=_reduce(p,y)',line)
@@ -5654,40 +5717,87 @@ contains
     call dcl_uproc(parser,'PM__getkey(x:any,y:any)=convert(x,y)',line)
     call dcl_uproc(parser,'PM__getkey(x:null,y:any)=y',line)
 
-    ! Select statement
-    call dcl_uproc(parser,&
-         'PM__checkcase(x,y,arg...) { var e=match_switch_case(x,y); '//&
-         'if not e { e=PM__checkcase(x,arg...) };return e }',line)
+    ! Switch statement
+    call dcl_uproc(parser,'PM__checkcase(x:literal,y:literal)=match_switch_case(x,y)',line)
     call dcl_uproc(parser,'PM__checkcase(x,y)=match_switch_case(x,y)',line)
+    call dcl_uproc(parser,'match_switch_case(x:literal,y:literal)=x==y',line)
+    call dcl_uproc(parser,'match_switch_case(x:fix any,y:fix any)=x==y',line)
     call dcl_uproc(parser,'match_switch_case(x,y)=x==y',line)
     call dcl_uproc(parser,&
          'match_switch_case(x:real_num,y:range(real_num))=x>=y._lo and x<=y._hi',&
          line)
+    call dcl_uproc(parser,&
+         'match_switch_case(x:real_num,y:_crange)=x>=y._lo and x<=y._hi',&
+         line)
+    call dcl_uproc(parser,&
+         'match_switch_case(x:int_literal,y:_crange)=(x>=y._lo and x<=y._hi) as <bool_literal>',&
+         line)
+    call dcl_uproc(parser,&
+         'match_switch_case(x:fix(int),y:_crange)=x>=y._lo and x<=y._hi',&
+         line)
     call dcl_uproc(parser,'match_switch_case(x:<any>,y:<any>)=y inc x',line)
+    call dcl_type(parser,'_crange is rec{_lo,_hi}',line)
+    call dcl_uproc(parser,'PM__caserange(x,y)=x..y',line)
+    call dcl_uproc(parser,'PM__caserange(x:fix(int),y:fix(int))='//&
+         'new _crange{_lo=x,_hi=y}',line)
 
     ! Conditional operators
     call dcl_uproc(parser,&
-         'PM__if(x,y,z) check "Incompatible types in different ""if""branches"=> '//&
+         'PM__if(x,y,z) check "Incompatible types in different ""if"" branches"=> '//&
          'same_type(y,z) { var r=z; if x { r=y };return r }',&
          line)
+!!$    call dcl_uproc(parser,'PM__if(x:bool_literal,y,z)=PM__do_if(x,y,z)'//&
+!!$         'check "Incompatible types in different ""if"" branches"=> '//&
+!!$         'same_type(y,z)',line)
+!!$    call dcl_uproc(parser,&
+!!$         'PM__if(x:bool_literal,y:int_literal,z:int_literal)=PM__do_if(x,y,z)',line)
+!!$    call dcl_uproc(parser,&
+!!$         'PM__if(x:bool_literal,y:real_literal,z:real_literal)=PM__do_if(x,y,z)',line)
+!!$    call dcl_uproc(parser,&
+!!$         'PM__if(x:bool_literal,y:string_literal,z:string_literal)=PM__do_if(x,y,z)',line)
+!!$    call dcl_uproc(parser,&
+!!$         'PM__if(x:bool_literal,y:bool_literal,z:bool_literal)=PM__do_if(x,y,z)',line)
+!!$    call dcl_uproc(parser,&
+!!$         'PM__if(x:bool_literal,y:literal,z:literal)=PM__do_if(x,y,z)'//&
+!!$         'check "Incompatible types in different ""if"" branches"=>''false',line)
+
+!!$    call dcl_uproc(parser,'PM__if(x:fix(bool),y,z)=PM__do_if(x,y,z)',line)
+!!$    call dcl_uproc(parser,'PM__if(x:fix(bool),y:literal,z:literal)=PM__do_if(x,y,z)',line)
+!!$    call dcl_uproc(parser,'PM__if(x:fix(bool),y,z:literal)=PM__do_if(x,y,z)',line)
+!!$    call dcl_uproc(parser,'PM__if(x:fix(bool),y:literal,z)=PM__do_if(x,y,z)',line)
+    
     call dcl_uproc(parser,'PM__if(x:''true,y,z)=y',line)
     call dcl_uproc(parser,'PM__if(x:''false,y,z)=z',line)
-    call dcl_uproc(parser,'PM__if(x,y,arg...)=PM__if(x,y,PM__if(arg...))',line)
+    call dcl_uproc(parser,'PM__if(x:''true,y:literal,z)=y',line)
+    call dcl_uproc(parser,'PM__if(x:''false,y,z:literal)=z',line)
+!!$    call dcl_uproc(parser,'PM__if(x,y,arg...)=PM__if(x,y,PM__if(arg...))',line)
     call dcl_uproc(parser,&
          'PM__switch(w,x,y,z) check "Incompatible types in different ""switch"" branches"=> '//&
          'same_type(y,z) { var r=z; if match(w,x) { r=y };return r }',&
          line)
+    call dcl_uproc(parser,'PM__switch(w:fix(int),x:fix(int),y,z)=PM__if(w==x,y,z)',line)
+    
+    call dcl_uproc(parser,'PM__switch(w:fix(string),x:fix(string),y,z)=PM__if(w==x,y,z)',line)
+    call dcl_uproc(parser,'PM__switch(w:fix(bool),x:fix(bool),y,z)=PM__if(w==x,y,z)',line)
+     
     call dcl_uproc(parser,'PM__switch(w,x,y,arg...)=PM__switch(w,x,y,PM__switch(w,arg...))',line)
  
     ! Assignment
-    call dcl_uproc(parser,'PM__assign_var(&a,b) {PM__assign(&a,b)}',line)
+    call dcl_uproc(parser,&
+         'PM__assign_or_init(a,b)<<inline>>=a {PM__assign_var(&^(a),b)}',line)
+    call dcl_uproc(parser,&
+         'PM__assign_or_init(a:<any>,b)=PM__dup(b as a)',line)
+    call dcl_uproc(parser,&
+         'PM__assign_var(&a,b) {PM__assign(&a,b)}',line)
     call dcl_uproc(parser,&
          'PM__assign(&a:any,b:any) {check_assign_types(a,b);_assign(&a,b)}',line)
-    call dcl_type(parser,'assignment_operator is $_just_assign,$+,$*,$&,$|,$xor,$and,$or,$++,...',line)
+    call dcl_type(parser,&
+         'assignment_operator is $_just_assign,$+,$*,$&,$|,$xor,$and,$or,$++,...',line)
     call dcl_uproc(parser,&
          'PM__assign(&a:any,b:any,c:assignment_operator) { PM__assign(&a,c.(a,b)) }',line)
     call dcl_uproc(parser,&
-         'PM__assign(&a:any,b:any,c:proc) { test "Not a recognised assignment operator"=>''false }',line)
+         'PM__assign(&a:any,b:any,c:proc) { '//&
+         'test "Not a recognised assignment operator"=>''false }',line)
     call dcl_uproc(parser,'check_assign_types(x,y)'//&
          '{test "Type mismatch in assignment"=>same_type(x,y)}',line)
     call dcl_uproc(parser,'_assign(&a,b) {_assign_element(&a,b)}',line)
@@ -5699,6 +5809,11 @@ contains
     ! Other variable operations
     call dcl_proc(parser,'PM__clone(x:any)->=x',op_clone,0,line,0)
     call dcl_uproc(parser,'PM__dup(PM__dup) <<foreach^(PM__dup)>>=PM__clone(PM__dup)',line)
+    call dcl_proc(parser,'PM__dup(x:fix int)->int',op_clone,0,line,0)
+    call dcl_proc(parser,'PM__dup(x:fix real)->real',op_clone,0,line,0)
+    call dcl_proc(parser,'PM__dup(x:fix string)->string',op_clone,0,line,0)
+    call dcl_proc(parser,'PM__dup(x:fix bool)->bool',op_clone,0,line,0)
+ 
     call dcl_proc(parser,'PM__getref(x:any)->=x',op_get_rf,0,line,0)
     call dcl_proc(parser,'same_type(x:any,y:any)->==x,y',&
          op_logical_return,0,line,proc_needs_type)
@@ -5719,6 +5834,7 @@ contains
     ! Type values
     call dcl_proc(parser,'typeof(x:any)->type x',op_make_type_val,0,line,proc_needs_type)
     call dcl_uproc(parser,'is(x,t)=t inc typeof(x)',line)
+    call dcl_uproc(parser,'isnt(x,t)=not(x is t)',line)
     call dcl_uproc(parser,'as(x,t:<any>)...=PM__cast(x,t)',line)
     call dcl_uproc(parser,'as(x,t)=PM__cast(x,typeof(t))',line)
     call dcl_proc(parser,'inc(x:<any>,y:<any>)-> inc x,y',op_logical_return,0,line,proc_needs_type)

@@ -61,14 +61,15 @@ module pm_symbol
   integer,parameter:: sym_query = 17
   integer,parameter:: sym_arrow = 18
   integer,parameter:: sym_pct = 19
-  integer,parameter:: sym_dash = 20
-  integer,parameter:: sym_caret = 21
-  integer,parameter:: sym_dcaret = 22
-  integer,parameter:: sym_dcolon = 23
-  integer,parameter:: sym_define = 24
-  integer,parameter:: sym_cond = 25
-  integer,parameter:: sym_string = 26
-  integer,parameter:: sym_number = 27
+  integer,parameter:: sym_pling = 20
+  integer,parameter:: sym_dash = 21
+  integer,parameter:: sym_caret = 22
+  integer,parameter:: sym_dcaret = 23
+  integer,parameter:: sym_dcolon = 24
+  integer,parameter:: sym_define = 25
+  integer,parameter:: sym_cond = 26
+  integer,parameter:: sym_string = 27
+  integer,parameter:: sym_number = 28
 
   ! Operators
   integer,parameter:: sym1 = sym_number
@@ -97,26 +98,30 @@ module pm_symbol
   integer,parameter:: sym_bar = sym2 + 12
   integer,parameter:: sym_hash= sym2 + 13
   integer,parameter:: sym_amp = sym2 + 14
-  integer,parameter:: sym_pling = sym2 + 15
+  integer,parameter:: sym_tilde = sym2 + 15
 
   ! These keywords and symbols are binary operators
-  integer,parameter:: first_key = sym_pling
+  integer,parameter:: first_key = sym_tilde
   integer,parameter:: sym_in = first_key + 1
-  integer,parameter:: sym_and = first_key + 2
-  integer,parameter:: sym_or = first_key + 3
-  integer,parameter:: sym_xor = first_key + 4
-  integer,parameter:: sym_shift = first_key + 5
-  integer,parameter:: sym_fmt = first_key + 6
-  integer,parameter:: sym_by = first_key + 7
-  integer,parameter:: sym_mod = first_key + 8
-  integer,parameter:: sym_except = first_key + 9
-  integer,parameter:: sym_includes = first_key + 10
-  integer,parameter:: sym_ortho = first_key + 11
-  integer,parameter:: sym_is = first_key + 12
-  integer,parameter:: sym_as = first_key + 13
+  integer,parameter:: sym_not_in = first_key + 2
+  integer,parameter:: sym_and = first_key + 3
+  integer,parameter:: sym_or = first_key + 4
+  integer,parameter:: sym_xor = first_key + 5
+  integer,parameter:: sym_shift = first_key + 6
+  integer,parameter:: sym_fmt = first_key + 7
+  integer,parameter:: sym_by = first_key + 8
+  integer,parameter:: sym_mod = first_key + 9
+  integer,parameter:: sym_div = first_key + 10
+  integer,parameter:: sym_except = first_key + 11
+  integer,parameter:: sym_includes = first_key + 12
+  integer,parameter:: sym_not_includes = first_key + 13
+  integer,parameter:: sym_ortho = first_key + 14
+  integer,parameter:: sym_is = first_key + 15
+  integer,parameter:: sym_is_not = first_key + 16 
+  integer,parameter:: sym_as = first_key + 17
 
   ! Unary operators 
-  integer,parameter:: sym_not = first_key + 14
+  integer,parameter:: sym_not = first_key + 18
   integer,parameter:: last_operator = sym_not
 
   ! Statement / expression general keywords
@@ -138,6 +143,8 @@ module pm_symbol
   integer,parameter:: last_word = last_expr
 
   ! Modes
+  
+  
   integer,parameter:: sym_private  =      last_word + 1
   integer,parameter:: first_mode = sym_private
   integer,parameter:: sym_invar    =      last_word + 2
@@ -246,12 +253,13 @@ module pm_symbol
   integer,parameter:: sym_cond_attr = num_sym + 14
   integer,parameter:: sym_uncond = num_sym + 15
   integer,parameter:: sym_ignore_rules = num_sym + 16
-
+  integer,parameter:: sym_keep_literals = num_sym + 17
+  
   ! filesystem
-  integer,parameter:: sym_filesystem = num_sym + 17
+  integer,parameter:: sym_filesystem = num_sym + 18
   
   ! Symbols used as node types (actual name not really used)
-  integer,parameter:: node0 = num_sym + 17
+  integer,parameter:: node0 = num_sym + 18
   integer,parameter:: sym_iter = node0 + 1
   integer,parameter:: sym_list = node0 + 2
   integer,parameter:: sym_builtin = node0 + 3
@@ -298,9 +306,10 @@ module pm_symbol
   integer,parameter:: sym_get_filesystem = node0 + 44
   integer,parameter:: sym_nested_loop = node0 + 45
   integer,parameter:: sym_assign_list = node0 + 46
+  integer,parameter:: sym_case_range = node0 + 47
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 47
+  integer,parameter:: hook = node0 + 48
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -363,12 +372,13 @@ module pm_symbol
   integer,parameter:: sym_node_for = hook2 + 8 
   integer,parameter:: sym_import_param = hook2 + 9
   integer,parameter:: sym_set_elem = hook2 + 10
-  integer,parameter:: sym_assign_var = hook2 + 11
-  integer,parameter:: sym_vector = hook2 + 12
-  integer,parameter:: sym_matrix = hook2 + 13
-  integer,parameter:: sym_pdup = hook2 + 14
-  integer,parameter:: sym_active = hook2 + 15
-  integer,parameter:: hook3 = hook2 + 15
+  integer,parameter:: sym_assign_or_init = hook2 + 11
+  integer,parameter:: sym_assign_var = hook2 + 12
+  integer,parameter:: sym_vector = hook2 + 13
+  integer,parameter:: sym_matrix = hook2 + 14
+  integer,parameter:: sym_pdup = hook2 + 15
+  integer,parameter:: sym_active = hook2 + 16
+  integer,parameter:: hook3 = hook2 + 16
   
   integer,parameter:: sym_do_dim = hook3 + 1
   integer,parameter:: sym_shape = hook3 + 2
@@ -480,6 +490,7 @@ module pm_symbol
   data sym_names(sym_query)            /'?'/
   data sym_names(sym_arrow)            /'->'/
   data sym_names(sym_pct)              /'%'/
+  data sym_names(sym_pling)            /'!'/
   data sym_names(sym_dash)             /''''/
   data sym_names(sym_caret)            /'^'/
   data sym_names(sym_dcaret)           /'^^'/
@@ -514,9 +525,10 @@ module pm_symbol
   data sym_names(sym_bar)              /'|'/
   data sym_names(sym_hash)             /'#'/
   data sym_names(sym_amp)              /'&'/
-  data sym_names(sym_pling)            /'!'/
+  data sym_names(sym_tilde)            /'~'/
   
   data sym_names(sym_in)               /'in'/
+  data sym_names(sym_not_in)           /'notin'/
   data sym_names(sym_and)              /'and'/
   data sym_names(sym_or)               /'or'/
   data sym_names(sym_xor)              /'xor'/
@@ -524,10 +536,13 @@ module pm_symbol
   data sym_names(sym_fmt)              /'fmt'/
   data sym_names(sym_by)               /'by'/
   data sym_names(sym_mod)              /'mod'/
+  data sym_names(sym_div)              /'div'/
   data sym_names(sym_except)           /'except'/
   data sym_names(sym_includes)         /'inc'/
+  data sym_names(sym_not_includes)     /'notinc'/
   data sym_names(sym_ortho)            /'ortho'/
   data sym_names(sym_is)               /'is'/
+  data sym_names(sym_is_not)           /'isnt'/
   data sym_names(sym_as)               /'as'/
   data sym_names(sym_not)              /'not'/
 
@@ -642,7 +657,7 @@ module pm_symbol
   data sym_names(sym_cond_attr)        /'cond'/
   data sym_names(sym_uncond)           /'uncond'/
   data sym_names(sym_ignore_rules)     /'PM__ignore'/
-
+  data sym_names(sym_keep_literals)    /'keep_literals'/
 
   data sym_names(sym_filesystem)       /'filesystem'/
 
@@ -695,6 +710,7 @@ module pm_symbol
   data sym_names(sym_get_filesystem)   /'PM__filesys'/
   data sym_names(sym_nested_loop)      /'PM__nested_loop'/
   data sym_names(sym_assign_list)      /'<assign-list>'/
+  data sym_names(sym_case_range)       /'PM__caserange'/
   
   ! Misc. symbols referenced by compiler
   
@@ -759,6 +775,7 @@ module pm_symbol
   data sym_names(sym_node_for)         /'node_for'/
   data sym_names(sym_import_param)     /'PM__impparam'/
   data sym_names(sym_set_elem)         /'PM__setaelem'/
+  data sym_names(sym_assign_or_init)   /'PM__assign_or_init'/
   data sym_names(sym_assign_var)       /'PM__assign_var'/
   data sym_names(sym_vector)           /'vector'/
   data sym_names(sym_matrix)           /'matrix'/

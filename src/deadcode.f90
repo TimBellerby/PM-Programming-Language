@@ -170,5 +170,73 @@ contains
             call_noop_flag
     endif
   end subroutine dce_call
+
+
+  recursive subroutine atree_union(a,b,c,nc)
+    integer,dimension(:),intent(in):: a,b
+    integer,dimension(*),intent(out):: c
+    integer,intent(inout):: nc
+    integer:: i,j,k,na,nb,nnc
+    na=countof(a(1))
+    nb=countof(b(1))
+    i=1
+    j=1
+    k=0
+    do while(i<=na.and.j<=nb)
+       if(a(i)==b(j)) then
+          call push(combine(a(i),b(j))
+          i=i+1
+          j=j+1
+          if(a(i)<0) then
+             if(b(j)<0) then
+                k=k+1
+                nnc=nc-k
+                call atree_add(a(i:),b(j:),c(k+1:),nnc)
+                c(k)=-nnc
+                k=k+nnc+1
+                i=i+countof(a(i))
+                j=j+countof(b(j))
+             else
+                i=i+countof(a(i))
+             endif
+          else
+             if(b(j)<0) then
+                j-j+countof(b(j))
+             endif
+          endif
+       elseif(a(i)<b(j)) then
+          call push(a(i))
+          i=i+1
+          if(a(i)<0) call copy(a,i,i+countof(a(i)))
+       else
+          call push(b(i))
+          j=j+1
+          if(b(j)<0) call copy(b,j,j+countof(b(j)))
+       endif
+    enddo
+
+    if(kk==maxcount(a(1))) then
+       
+    else
+       
+    endif
+    
+  contains
+    
+    function combine(a,b) result(c)
+      integer,intent(in):: a,b
+      integer:: c
+      
+    end function combine
+
+    subroutine push(cc)
+      integer,intent(in):: cc
+      k=k+1
+      c(k)=cc
+      if(k>nc) call pm_panic('Program too complex -- deadcode (atree)')
+    end subroutine push
+    
+  end subroutine atree_union
+  
   
 end module pm_deadcode

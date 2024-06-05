@@ -173,8 +173,8 @@ contains
     wcd%true_obj%data%l(wcd%true_obj%offset)=.true.
     wcd%false_obj=pm_new_small(context,pm_logical,1_pm_p)
     wcd%false_obj%data%l(wcd%false_obj%offset)=.false.
-    wcd%true_name=pm_new_value_type(wcd%context,wcd%true_obj)
-    wcd%false_name=pm_new_value_type(wcd%context,wcd%false_obj)
+    wcd%true_name=pm_new_fix_type(wcd%context,wcd%true_obj)
+    wcd%false_name=pm_new_fix_type(wcd%context,wcd%false_obj)
     if(pm_is_compiling) then
        wcd%typeset=pm_set_new(wcd%context,32_pm_ln)
     endif
@@ -1507,7 +1507,7 @@ contains
                   var_slot(wcd,cnode_arg(args,kk)))
           enddo
        endif
-    case(sym_coherent,sym_partial,sym_set_mode,&
+    case(sym_coherent,sym_partial,sym_set_mode,sym_const,sym_var,&
          sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign,sym_assignment)
        continue ! Nothing to do
     case(sym_cast)
@@ -1540,7 +1540,7 @@ contains
           call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
                cnode_arg(args,2),wcd%base,rv,ve)
        endif
-    case(sym_dash,sym_caret,sym_change_mode,sym_var,sym_const)
+    case(sym_dash,sym_caret,sym_change_mode)
        call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
             cnode_arg(args,2),wcd%base,rv,ve)
     case(sym_import_val,sym_import_shared)
@@ -2018,6 +2018,13 @@ contains
           endif
        case(sp_sig_noop)
           continue
+       case(sp_sig_setval)
+          if(.not.pm_is_compiling) then
+             call wc_call(wcd,callnode,op_setref,0,3,1,ve)
+             call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
+             call wc(wcd,&
+                  -pm_max_stack-add_const(wcd,pm_type_val(wcd%context,check_arg_type(wcd,args,rv,1))))
+          endif
        case default
           call wcode_error(wcd,callnode,'System Error!')
           write(*,*) 'IDX=',idx

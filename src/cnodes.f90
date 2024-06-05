@@ -92,24 +92,14 @@ module pm_cnodes
   integer,parameter:: call_sig=cnode_args+2
   integer,parameter:: call_flags=cnode_args+3
   integer,parameter:: call_link=cnode_args+4
-  integer,parameter:: call_nret=cnode_args+5
-  integer,parameter:: call_nkeys=cnode_args+6
-  integer,parameter:: call_index=cnode_args+7
-  integer,parameter:: call_par_depth=cnode_args+8
-  integer,parameter:: call_var=cnode_args+9
-  integer,parameter:: call_amp=cnode_args+10
-  integer,parameter:: call_node_size=11
-
-  ! Flags for call nodes
-  ! (call_is_comm=1.. defined in parser)
-  integer,parameter:: call_is_fixed = 2**10
-  integer,parameter:: call_is_assign_call = 2**11
-  integer,parameter:: call_is_vararg = 2**12
-  integer,parameter:: call_inline_when_compiling = 2**13
-  integer,parameter:: call_dup_result = 2**14
-  integer,parameter:: call_is_cond = 2**15
-  integer,parameter:: call_is_no_touch = 2**16
-  integer,parameter:: call_is_unlabelled = 2**17
+  integer,parameter:: call_back_link=cnode_args+5
+  integer,parameter:: call_nret=cnode_args+6
+  integer,parameter:: call_nkeys=cnode_args+7
+  integer,parameter:: call_index=cnode_args+8
+  integer,parameter:: call_par_depth=cnode_args+9
+  integer,parameter:: call_var=cnode_args+10
+  integer,parameter:: call_amp=cnode_args+11
+  integer,parameter:: call_node_size=12
   
   ! Offsets into var cnodes
   integer,parameter:: var_parent=cnode_args+0
@@ -504,11 +494,15 @@ contains
     type(pm_ptr),intent(in):: rvec,sig_cache,cnode
     integer:: flags
     if(cnode_get_kind(cnode)==cnode_is_builtin) then
-       write(iunit,'(a)') '   Builtin '//&
-            op_names(cnode_get_num(cnode,cnode_args))//&
-            pm_int_as_string(cnode_get_num(cnode,cnode_args+1))//'{'
-       if(.not.pm_fast_isnull(cnode_get(cnode,bi_rcode))) then
-          call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_get(cnode,bi_rcode),4)
+       if(cnode_get_num(cnode,cnode_args)>=0) then
+          write(iunit,'(a)') '   Builtin '//&
+               op_names(cnode_get_num(cnode,cnode_args))//&
+               pm_int_as_string(cnode_get_num(cnode,cnode_args+1))//'{'
+       else
+          write(iunit,'(a)') '   Fold {'
+          if(.not.pm_fast_isnull(cnode_get(cnode,bi_rcode))) then
+             call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_get(cnode,bi_rcode),4)
+          endif
        endif
        write(iunit,'(a)') '   }'
     else

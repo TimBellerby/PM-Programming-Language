@@ -693,6 +693,35 @@ module pm_vmdefs
 
   integer,parameter:: num_op=op_stop_comp
 
+  integer,parameter:: op_add_fold=-1
+  integer,parameter:: op_sub_fold=-2
+  integer,parameter:: op_mult_fold=-3
+  integer,parameter:: op_divide_fold=-4
+  integer,parameter:: op_div_fold=-5
+  integer,parameter:: op_mod_fold=-6
+  integer,parameter:: op_pow_fold=-7
+  integer,parameter:: op_uminus_fold=-8
+  integer,parameter:: op_eq_fold=-9
+  integer,parameter:: op_ne_fold=-10
+  integer,parameter:: op_gt_fold=-11
+  integer,parameter:: op_ge_fold=-12
+  integer,parameter:: op_string_fold=-13
+  integer,parameter:: op_max_fold = -14
+  integer,parameter:: op_min_fold = -15
+  integer,parameter:: op_abs_fold = -16
+  integer,parameter:: op_band_fold = -17
+  integer,parameter:: op_bor_fold = -18
+  integer,parameter:: op_bxor_fold = -19
+  integer,parameter:: op_bshift_fold = -20
+  integer,parameter:: op_bnot_fold = -21
+  integer,parameter:: op_pdiff_fold = -22
+  integer,parameter:: op_sign_fold = -23
+  integer,parameter:: op_modulo_fold = -24
+  integer,parameter:: op_and_fold = -25
+  integer,parameter:: op_or_fold = -26
+  integer,parameter:: op_except_fold = -27
+  integer,parameter:: op_concat_fold = -28
+ 
   integer,dimension(0:num_op):: op_flags
   integer,parameter:: op_is_call=1
   integer,parameter:: op_is_jump=2

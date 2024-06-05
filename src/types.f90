@@ -67,12 +67,12 @@ module pm_types
        pm_type_has_storage
   integer,parameter:: pm_type_new_value=12
   integer,parameter:: pm_type_new_contains=13
-  integer,parameter:: pm_type_new_const=14+pm_type_has_storage
+  integer,parameter:: pm_type_new_fix=14         !+pm_type_has_storage
   integer,parameter:: pm_type_new_dref=15
   integer,parameter:: pm_type_new_par_kind=16
   integer,parameter:: pm_type_new_proc_sig=17
   integer,parameter:: pm_type_new_undef_result=18
-  !integer,parameter:: pm_type_new_interface=19
+  integer,parameter:: pm_type_new_literal=19
   integer,parameter:: pm_type_new_except=20
   integer,parameter:: pm_type_new_param=21+pm_type_has_params
   integer,parameter:: pm_type_new_amp=22
@@ -83,6 +83,8 @@ module pm_types
   integer,parameter:: pm_type_new_enveloped=27
   integer,parameter:: pm_type_new_bottom=28
   integer,parameter:: pm_type_new_includes=29
+  integer,parameter:: pm_type_new_unfixed=30
+  integer,parameter:: pm_type_new_uninitialised=31
 
   ! Type kinds
   integer,parameter:: pm_type_is_basic=0
@@ -99,12 +101,12 @@ module pm_types
   integer,parameter:: pm_type_is_poly=11
   integer,parameter:: pm_type_is_value=12
   integer,parameter:: pm_type_is_contains=13
-  integer,parameter:: pm_type_is_const=14
+  integer,parameter:: pm_type_is_fix=14
   integer,parameter:: pm_type_is_dref=15
   integer,parameter:: pm_type_is_par_kind=16
   integer,parameter:: pm_type_is_proc_sig=17
   integer,parameter:: pm_type_is_undef_result=18
-  !integer,parameter:: pm_type_is_interface=19
+  integer,parameter:: pm_type_is_literal=19
   integer,parameter:: pm_type_is_except=20
   integer,parameter:: pm_type_is_param=21
   integer,parameter:: pm_type_is_amp=22
@@ -115,6 +117,8 @@ module pm_types
   integer,parameter:: pm_type_is_enveloped=27
   integer,parameter:: pm_type_is_bottom=28
   integer,parameter:: pm_type_is_includes=29
+  integer,parameter:: pm_type_is_unfixed=30
+  integer,parameter:: pm_type_is_uninitialised=31
 
   integer,parameter:: pm_type_kind_mask=31
   integer,parameter:: pm_type_max_leaves=255
@@ -481,18 +485,41 @@ contains
   !==========================================
   ! Create new compile time value type
   !==========================================
-  function pm_new_value_type(context,val) result(tno)
+  function pm_new_fix_type(context,val,vindex) result(tno)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: val
+    integer,intent(in),optional:: vindex
+    integer:: tno
+    integer,dimension(3):: args
+    args(1)=pm_type_new_value
+    if(present(vindex)) then
+       args(2)=vindex
+    else
+       args(2)=pm_set_add(context,context%vcache,val)
+    endif
+    args(3)=pm_fast_typeof(val)
+    if(args(3)==pm_string) args(3)=pm_string_type
+    tno=pm_new_basic_type(context,args,val)
+  contains
+    include 'ftypeof.inc'
+  end function pm_new_fix_type
+
+  !==========================================
+  ! Create new compile time value type
+  !==========================================
+  function pm_new_literal_type(context,val) result(tno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: val
     integer:: tno
     integer,dimension(3):: args
-    args(1)=pm_type_new_value
+    args(1)=pm_type_new_literal
     args(2)=pm_set_add(context,context%vcache,val)
     args(3)=pm_fast_typeof(val)
+    if(args(3)==pm_string) args(3)=pm_string_type
     tno=pm_new_basic_type(context,args,val)
   contains
     include 'ftypeof.inc'
-  end function pm_new_value_type
+  end function pm_new_literal_type
 
   !==============================================
   ! Create new compile time name value type
@@ -768,7 +795,6 @@ contains
 
   !===============================================
   ! Strip off non-storage elements of a type
-  ! including one-element structs/recs
   !===============================================
   recursive function pm_type_strip_to_basic(context,typ) result(typ2)
     type(pm_context),pointer:: context
@@ -779,7 +805,9 @@ contains
     tv=pm_type_vect(context,typ)
     kind=pm_tv_kind(tv)
     select case(kind)
-    case(pm_type_is_all,pm_type_is_vect,pm_type_is_enveloped,pm_type_is_param)
+    case(pm_type_is_all,pm_type_is_vect,pm_type_is_enveloped,&
+         pm_type_is_param,&
+         pm_type_is_value,pm_type_is_literal)
        typ2=pm_type_strip_to_basic(context,pm_tv_arg(tv,1))
     case(pm_type_is_user)
        typ2=pm_user_type_body(context,typ)
@@ -1270,7 +1298,7 @@ contains
        endif
     case(pm_type_is_value)
        select case(tk)
-       case(pm_type_is_const)
+       case(pm_type_is_fix)
           ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),mode,einfo,&
                params,base,user,ubase)
           return
@@ -1282,10 +1310,25 @@ contains
                params,base,user,ubase)
           return
        end select
-    case(pm_type_is_const)
-       ok=pm_test_type_includes(context,p,pm_tv_arg(u,1),mode,einfo,&
-            params,base,user,ubase)
-       return
+    case(pm_type_is_literal)
+       if(tk==pm_type_is_unfixed) then
+          ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),mode,einfo,&
+               params,base,user,ubase)
+          return
+       elseif(tk==pm_type_is_literal) then
+          ok=pm_tv_name(t)==pm_tv_name(u)
+          return
+       end if
+    case(pm_type_is_fix,pm_type_is_unfixed)
+       if(tk==uk.or.tk==pm_type_is_fix) then
+          ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),mode,einfo,&
+               params,base,user,ubase)
+          return
+       elseif(tk/=pm_type_is_user) then
+          ok=pm_test_type_includes(context,p,pm_tv_arg(u,1),mode,einfo,&
+               params,base,user,ubase)
+          return
+       endif
     case(pm_type_is_user)
        if(tk/=pm_type_is_user) then
           do i=2,ubase,2
@@ -1381,7 +1424,8 @@ contains
        ok=.true.
        return
     end select
- 
+
+    ! Now do tests that look at 1st type first
     select case(tk)
     case(pm_type_is_basic)
        ok=.false.
@@ -1652,20 +1696,16 @@ contains
                   mode,einfo,params,base,user,ubase)
           endif
        endif
-    case(pm_type_is_value)
-       if(uk/=pm_type_is_value) then
+    case(pm_type_is_value,pm_type_is_literal)
+       ok=.false.
+    case(pm_type_is_fix)
+       ok=.false.
+    case(pm_type_is_unfixed)
+       if(tk==uk) then
+          ok=pm_tv_arg(t,1)==0.or.&
+               pm_tv_arg(t,1)==pm_tv_arg(u,1)
+       else
           ok=.false.
-       else
-          ok=pm_tv_name(t)==pm_tv_name(u)
-       endif
-    case(pm_type_is_const)
-       if(uk/=pm_type_is_const.and.uk/=pm_type_is_value) then
-          ok=pm_test_type_includes(context,pm_tv_arg(t,1),q,&
-               mode,einfo,params,base,user,ubase)
-          if(iand(pm_type_flags(context,q),pm_type_has_storage)/=0) ok=.false.
-       else
-          ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
-               mode,einfo,params,base,user,ubase)
        endif
     case(pm_type_is_enveloped)
        if(uk==pm_type_is_enveloped) then
@@ -1700,7 +1740,7 @@ contains
              params(nt)=pm_type_combine(context,params(nt),q)
           endif
        endif
-    case(pm_type_is_amp,pm_type_is_vect)
+    case(pm_type_is_amp,pm_type_is_vect,pm_type_is_uninitialised)
        ok=tk==uk
        if(ok) ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
             mode,einfo,params,base,user,ubase)
@@ -1869,16 +1909,20 @@ contains
   ! Perform enveloping conversions if possible
   ! Returns -1 if not possible
   !==============================================
-  function pm_type_convert(context,partyp,argtyp,dopoly) result(ctyp)
+  function pm_type_convert(context,partyp,argtyp,doliteral,doproc,dopoly) result(ctyp)
     type(pm_context),pointer:: context
     integer,intent(in):: partyp,argtyp
-    logical,intent(in):: dopoly
+    logical,intent(in):: doliteral,doproc,dopoly
     integer:: ctyp
     integer:: tk,ptyp
     type(pm_ptr):: tv
+    type(pm_type_einfo):: einfo
+    integer:: arr(3)
+!!$    write(*,*) 'Convert',trim(pm_type_as_string(context,partyp)),&
+!!$         '<-',trim(pm_type_as_string(context,argtyp)),doliteral
     ctyp=-1
     ptyp=partyp
-    if(partyp<=0.or.argtyp<=0) then
+    if(partyp<0.or.argtyp<0) then
        return
     endif
     tk=pm_type_kind(context,ptyp)
@@ -1886,7 +1930,23 @@ contains
        ptyp=pm_user_type_body(context,ptyp)
        tk=pm_type_kind(context,ptyp)
     enddo
-    if(ctyp<0.and.tk==pm_type_is_proc) then
+    if(doliteral.and.pm_type_kind(context,argtyp)==pm_type_is_literal) then
+       ctyp=pm_type_arg(context,argtyp,1)
+       if(tk==pm_type_is_fix) then
+          if(pm_type_includes(context,pm_type_arg(context,ptyp,1),ctyp,&
+               pm_type_incl_val,einfo)) then
+             ctyp=pm_new_fix_type(context,&
+                  pm_type_val(context,argtyp),pm_type_name(context,argtyp))
+          endif
+       elseif(tk==pm_type_is_value) then
+          if(pm_type_name(context,ptyp)==pm_type_name(context,argtyp)) then
+             ctyp=ptyp
+          endif
+       elseif(tk==pm_type_is_unfixed) then
+          ctyp=argtyp
+       endif
+    endif
+    if(ctyp<0.and.doproc.and.tk==pm_type_is_proc) then
        ctyp=pm_proc_type_convert(context,ptyp,argtyp)
     endif
     if(ctyp<0.and.dopoly.and.tk==pm_type_is_poly) then
@@ -1916,8 +1976,6 @@ contains
   end function pm_poly_type_convert
   
 
-
- 
   !==========================================
   ! Autoconversion to proc signature type
   ! Returns -1 if not possible
@@ -2396,7 +2454,7 @@ contains
     tk=pm_tv_kind(tv)
     select case(tk)
     case(pm_type_is_basic,pm_type_is_single_name,&
-         pm_type_is_proc,pm_type_is_value,pm_type_is_const,&
+         pm_type_is_proc,pm_type_is_value,pm_type_is_fix,&
          pm_type_is_undef_result,pm_type_is_poly)
        tno2=tno
     case(pm_type_is_user)
@@ -2787,8 +2845,10 @@ contains
     case(pm_type_is_poly)
        if(add_char('*')) return
        call bracket(1,pm_type_is_includes,pm_type_is_all,pm_type_is_any,pm_type_is_except)
-    case(pm_type_is_value)
-       if(add_char('''')) return
+    case(pm_type_is_value,pm_type_is_literal)
+       if(tk==pm_type_is_value) then
+          if(add_char('''')) return
+       endif
        if(pm_tv_name(tv)==0) then
           call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
        else
@@ -2799,15 +2859,28 @@ contains
              else
                 if(add_char('false')) return
              endif
+          elseif(pm_fast_vkind(nv)==pm_string) then
+             str(n:n)='"'
+             call pm_strval(nv,str(n+1:))
+             n=n+pm_fast_esize(nv)+2
+             str(n:n)='"'
+             n=n+1
           else
              str(n:)=pm_number_as_string(context,nv,0_pm_ln)
           endif
           n=len_trim(str)+1
+          str(n:n)='@'
+          n=n+1
+          str(n:)=pm_int_as_string(pm_tv_name(tv))
+          n=len_trim(str)+1
        endif
-    case(pm_type_is_const)
+    case(pm_type_is_fix)
        if(add_char('fix(')) return
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
        if(add_char(')')) return
+    case(pm_type_is_unfixed)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       if(add_char('_literal')) return
     case(pm_type_is_except)
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
        if(add_char(' except ')) return
@@ -2911,6 +2984,9 @@ contains
        if(add_char('<')) return
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
        if(add_char('>')) return
+    case(pm_type_is_uninitialised)
+       if(add_char('UNINIT:')) return
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
     case(pm_type_is_bottom)
        if(add_char(' _ ')) return
     case default
@@ -2922,6 +2998,7 @@ contains
     include 'fvkind.inc'
     include 'fisnull.inc'
     include 'ftiny.inc'
+    include 'fesize.inc'
     
     function add_char(c) result(term)
       character(len=*),intent(in):: c
@@ -3077,7 +3154,7 @@ contains
 
   ! Error message for ambiguous match
   ! (assumes wstack holds results from pm_indirect_include)
-  subroutine typ_ambiguous_match_error(context,pt,at,at2,wstack,wtop)
+  subroutine pm_type_ambiguous_match_error(context,pt,at,at2,wstack,wtop)
     type(pm_context),pointer:: context
     integer,intent(in):: pt,at,at2,wtop
     integer,intent(in),dimension(:):: wstack
@@ -3097,6 +3174,6 @@ contains
          wstack(wtop-1)),2)))
     call more_error(context,'      of type: '//&
          trim(pm_type_as_string(context,wstack(wtop))))
-  end subroutine typ_ambiguous_match_error
+  end subroutine pm_type_ambiguous_match_error
   
 end module pm_types

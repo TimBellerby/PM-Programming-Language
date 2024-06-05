@@ -24,6 +24,7 @@
 ! THE SOFTWARE.
 
 ! Definitions for abstract syntax tree
+! and some more general definition of flag values etc.
 
 module pm_ast
   use pm_sysdep
@@ -57,15 +58,15 @@ module pm_ast
   integer,parameter:: node_args=5
 
   ! Type parse nodes
-  integer,parameter:: typ_name=node_args
-  integer,parameter:: typ_number=node_args+1
-  integer,parameter:: typ_module=node_args+2
-  integer,parameter:: typ_params=node_args+3
-  integer,parameter:: typ_constraints=node_args+4
-  integer,parameter:: typ_link=node_args+5
-  integer,parameter:: typ_ins=node_args+6
-  integer,parameter:: typ_includes=node_args+7
-  integer,parameter:: typ_num_args=8
+  integer,parameter:: type_name=node_args
+  integer,parameter:: type_number=node_args+1
+  integer,parameter:: type_module=node_args+2
+  integer,parameter:: type_params=node_args+3
+  integer,parameter:: type_constraints=node_args+4
+  integer,parameter:: type_link=node_args+5
+  integer,parameter:: type_parents=node_args+6
+  integer,parameter:: type_includes=node_args+7
+  integer,parameter:: type_num_args=8
 
   ! Proc parse nodes
   integer,parameter:: proc_name=node_args
@@ -83,7 +84,7 @@ module pm_ast
 
   ! Alternative final sections for 'proc' parse nodes
 
-  !   - user functions
+  !   - user procs
   integer,parameter:: proc_reduce=node_args+12
   integer,parameter:: proc_check=node_args+13
   integer,parameter:: proc_result=node_args+14
@@ -91,7 +92,7 @@ module pm_ast
   integer,parameter:: proc_code_tree=node_args+16
   integer,parameter:: proc_num_args=17
 
-  !   - built in functions
+  !   - built in procs
   integer,parameter:: proc_retas=node_args+12
   integer,parameter:: proc_opcode=node_args+13
   integer,parameter:: proc_opcode2=node_args+14
@@ -99,24 +100,56 @@ module pm_ast
   integer,parameter:: proc_coded_builtin=node_args+16
   integer,parameter:: sysproc_num_args=17
 
-  ! Values for flags (other values defined in sysdefs)
-  integer,parameter:: proc_is_comm=1
-  integer,parameter:: proc_run_complete=2
-  integer,parameter:: proc_run_local=4
-  integer,parameter:: proc_run_shared=8
-  integer,parameter:: proc_run_always=16
-  integer,parameter:: proc_inline=32
-  integer,parameter:: proc_no_inline=64
-  integer,parameter:: proc_is_open=128
-  integer,parameter:: proc_is_each_proc=256
-  integer,parameter:: proc_is_cond=512
-  integer,parameter:: proc_is_uncond=1024
-  integer,parameter:: proc_is_abstract=2048
+  ! Values for proc flags 
+  integer,parameter:: proc_is_comm=           1
+  integer,parameter:: proc_run_complete=      2
+  integer,parameter:: proc_run_local=         4
+  integer,parameter:: proc_run_shared=        8
+  integer,parameter:: proc_run_always=        16
+  integer,parameter:: proc_inline=            32
+  integer,parameter:: proc_no_inline=         64
+  integer,parameter:: proc_is_open=           128
+  integer,parameter:: proc_is_each_proc=      256
+  integer,parameter:: proc_is_cond=           512
+  integer,parameter:: proc_is_uncond=         1024
+  integer,parameter:: proc_is_abstract=       2048
+  integer,parameter:: proc_is_thru_each =     2**12
+  integer,parameter:: proc_is_empty_each =    2**13
+  integer,parameter:: proc_is_dup_each =      2**14
+  integer,parameter:: proc_is_var =           2**15
+  integer,parameter:: proc_is_generator =     2**16
+  integer,parameter:: proc_needs_type =       2**17
+  integer,parameter:: proc_is_recursive =     2**18
+  integer,parameter:: proc_unfinished =       2**19
+  integer,parameter:: proc_is_impure =        2**20
+  integer,parameter:: proc_is_not_inlinable = 2**21
+  integer,parameter:: proc_has_for =          2**22
+  integer,parameter:: proc_is_not_pure_each = 2**23
+  integer,parameter:: proc_has_vkeys =        2**24
+  integer,parameter:: proc_is_dcomm =         2**25
+  integer,parameter:: proc_is_file =          2**26
+  integer,parameter:: proc_needs_par =        2**27
+  integer,parameter:: proc_prints_out =       2**28
 
-  ! Corresponding flags in proc calls (must be same as for proc_is)
+  ! Proc flags that can be taken as taints
+  integer,parameter:: proc_taints = proc_is_impure &
+       + proc_is_not_inlinable + proc_has_for      &
+       + proc_is_not_pure_each + proc_is_dcomm + proc_is_file   &
+       + proc_needs_par + proc_prints_out
+
+  ! Flags for proc calls
   integer,parameter:: call_is_comm=1
   integer,parameter:: call_ignore_rules=256
-
+  integer,parameter:: call_is_fixed = 2**10
+  integer,parameter:: call_is_assign_call = 2**11
+  integer,parameter:: call_is_vararg = 2**12
+  integer,parameter:: call_inline_when_compiling = 2**13
+  integer,parameter:: call_dup_result = 2**14
+  integer,parameter:: call_is_cond = 2**15
+  integer,parameter:: call_is_no_touch = 2**16
+  integer,parameter:: call_is_unlabelled = 2**17
+  integer,parameter:: call_is_uninitialised = 2**18
+  
 contains
 
   !======================================================

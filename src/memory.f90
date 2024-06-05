@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2016
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -230,6 +230,7 @@ module pm_memory
 
   type(pm_ptr),public:: pm_undef_obj,pm_null_obj,pm_tinyint_obj,pm_name_obj
   type(pm_ptr),public:: pm_typeno_obj,pm_procname_obj,pm_true_obj,pm_false_obj
+  type(pm_ptr),dimension(pm_int:pm_num_vkind),public:: pm_empty_obj
 
 contains
 
@@ -529,30 +530,32 @@ contains
   end subroutine pm_expand
 
   ! Create a new object
-  function pm_new(context,vkind,esize) result(ptr)
+  function pm_new(context,vkind,size) result(ptr)
     type(pm_context),pointer:: context
     integer(pm_p),intent(in):: vkind
-    integer(pm_ln),intent(in):: esize
+    integer(pm_ln),intent(in):: size
     type(pm_ptr):: ptr
     if(pm_debug_level>0) then
        if(vkind<pm_int.or.vkind>pm_usr) &
             call pm_panic('New - bad vkind')
-       if(esize<=0) &
-            call pm_panic('New - non +ve esize')
+       if(size<0) &
+            call pm_panic('New - non +ve size')
     endif
-    if(esize<=pm_large_obj_size) then
-       ptr=pm_new_small(context,vkind,int(esize,pm_p))
+    if(size==0) then
+       ptr=pm_empty_obj(vkind)
+    elseif(size<=pm_large_obj_size) then
+       ptr=pm_new_small(context,vkind,int(size,pm_p))
     else
-       ptr=pm_new_large(context,vkind,esize)
+       ptr=pm_new_large(context,vkind,size)
     endif
   end function pm_new
 
   ! Create multiple new objects
   ! -- assign to locations loc,loc+1,...,loc+n-1 in vect
-  subroutine pm_new_multi(context,vkind,esize,loc,n,vect)
+  subroutine pm_new_multi(context,vkind,size,loc,n,vect)
     type(pm_context),pointer:: context
     integer(pm_p),intent(in):: vkind
-    integer(pm_ln),intent(in):: loc,n,esize
+    integer(pm_ln),intent(in):: loc,n,size
     type(pm_ptr),intent(in):: vect
     integer(pm_ln):: i,j,k,m
     type(pm_ptr):: ptr
@@ -560,10 +563,10 @@ contains
     logical:: is_marked
     context%temp_obj1=vect
     is_marked=marked(vect)
-    if(esize<=pm_large_obj_size) then
+    if(size<=pm_large_obj_size) then
        i=0
        do while(i<n)
-          ptr_p=>context%obj_list(esize,vkind)
+          ptr_p=>context%obj_list(size,vkind)
           ptr=ptr_p
           if(associated(ptr%data)) then
              if(ptr%offset<ptr%data%next_sweep) then
@@ -572,7 +575,7 @@ contains
                    j=loc+i+k
                    vect%data%ptr(vect%offset+j)=ptr
                    if(is_marked) call mark(ptr)
-                   ptr%offset=ptr%offset+int(esize,pm_p)+1_pm_p
+                   ptr%offset=ptr%offset+int(size,pm_p)+1_pm_p
                 enddo
                 i=i+m+1
                 ptr_p=ptr
@@ -581,7 +584,7 @@ contains
           endif
           j=loc+i
           i=i+1_pm_ln
-          ptr=pm_new_small(context,vkind,int(esize,pm_p))
+          ptr=pm_new_small(context,vkind,int(size,pm_p))
           vect%data%ptr(vect%offset+j)=ptr
           if(gc_xtra_debug) write(*,*) 'ALSO ALLOC',ptr%offset
           if(is_marked) call mark(ptr)
@@ -589,7 +592,7 @@ contains
     else
        do i=0,n-1
           j=loc+i
-          ptr=pm_new_large(context,vkind,esize)
+          ptr=pm_new_large(context,vkind,size)
           vect%data%ptr(vect%offset+j)=ptr
           if(is_marked) call mark(ptr)
        enddo
@@ -598,20 +601,20 @@ contains
   end subroutine pm_new_multi
 
   ! Return a new object as a root
-  function pm_new_as_root(context,vkind,esize) result(root)
+  function pm_new_as_root(context,vkind,size) result(root)
     type(pm_context),pointer:: context
     integer(pm_p),intent(in):: vkind
-    integer(pm_ln),intent(in):: esize
+    integer(pm_ln),intent(in):: size
     type(pm_root),pointer:: root
     type(pm_ptr):: ptr
-    ptr=pm_new(context,vkind,esize)
+    ptr=pm_new(context,vkind,size)
     root=>pm_add_root(context,ptr)
   end function pm_new_as_root
 
   ! Create a new object of <= pm_large_obj_size elements
-  function pm_new_small(context,vkind,esize) result(nptr)
+  function pm_new_small(context,vkind,size) result(nptr)
     type(pm_context),pointer:: context
-    integer(pm_p),intent(in):: vkind,esize
+    integer(pm_p),intent(in):: vkind,size
     type(pm_ptr):: nptr
     type(pm_ptr):: ptr
     type(pm_block),pointer:: oldblk
@@ -620,48 +623,49 @@ contains
     logical:: ok
     integer:: i
     
-    if(gc_xtra_debug) write(*,*) 'ALLOCATE>',vkind,esize
+    if(gc_xtra_debug) write(*,*) 'ALLOCATE>',vkind,size
 
     if(pm_debug_level>0) then
        if(vkind<pm_null.or.vkind>pm_usr) &
             call pm_panic('New small - bad vkind')
-       if(esize<=0.or.esize>pm_large_obj_size) &
-            call pm_panic('New small - bad esize')
+       if(size<=0.or.size>pm_large_obj_size) &
+            call pm_panic('New small - bad size')
     endif
 
     ! Get allocation slot for kind and size
     if(pm_debug_level>0) then
-      if(esize<=0) call pm_panic('alloc-esize')
+      if(size<=0) call pm_panic('alloc-size')
     endif	
-    ptr_p=>context%obj_list(esize,vkind)
+    ptr_p=>context%obj_list(size,vkind)
     ptr=ptr_p
 
     if(associated(ptr%data)) then
        if(ptr%offset<ptr%data%next_sweep) then
           ! There is room in current run 
           nptr=ptr
-          ptr_p%offset=ptr%offset+esize
+          ptr_p%offset=ptr%offset+size
           goto 10
        endif
     else
        ! No blocks at all for this slot - allocate one
-       if(context%blocks_allocated>max_blocks) &
-            call pm_gc(context,.false.)
-       ptr%data=>new_block(context,vkind,int(esize,pm_ln))
+       if(context%blocks_allocated>max_blocks) then
+          call pm_gc(context,.false.)
+       endif
+       ptr%data=>new_block(context,vkind,int(size,pm_ln))
        ptr%offset=1
        ptr%data%next=>ptr%data
-       ptr%data%next_sweep=ptr%data%size-esize+2
+       ptr%data%next_sweep=ptr%data%size-size+2
        ptr_p%data=>ptr%data
-       ptr_p%offset=1+esize
+       ptr_p%offset=1+size
        nptr=ptr
        goto 10
     endif
 
     ! Check if GC has run since last use of this slot   
     if(ptr%data%tick<context%tick) then
-       if(gc_xtra_debug) write(*,*) 'RESTART',esize,ptr%data%hash,ptr%offset
+       if(gc_xtra_debug) write(*,*) 'RESTART',size,ptr%data%hash,ptr%offset
        ptr%data%tick=context%tick
-       if(ptr%data%next_sweep/=ptr%data%size-esize+2 ) &
+       if(ptr%data%next_sweep/=ptr%data%size-size+2 ) &
             ptr%offset=ptr%data%next_sweep
     endif
 
@@ -674,7 +678,7 @@ contains
           
           ! Call GC and restart scan from start of this block
           call pm_gc(context,.false.)
-          ptr_p=>context%obj_list(esize,vkind)
+          ptr_p=>context%obj_list(size,vkind)
           if(associated(ptr_p%data)) then
              ptr=ptr_p
              ptr%offset=1
@@ -689,15 +693,15 @@ contains
        
        if(.not.ok) then
           ! All full - allocate new block
-          ptr%data=>new_block(context,vkind,int(esize,pm_ln))
+          ptr%data=>new_block(context,vkind,int(size,pm_ln))
           ptr%offset=1
-          ptr%data%next_sweep=ptr%data%size-esize+2
-          ptr_p=>context%obj_list(esize,vkind)
+          ptr%data%next_sweep=ptr%data%size-size+2
+          ptr_p=>context%obj_list(size,vkind)
           if(associated(ptr_p%data)) then
              ptr%data%next=>ptr_p%data%next
              ptr_p%data%next=>ptr%data
              ptr_p%data=>ptr%data
-             ptr_p%offset=1+esize
+             ptr_p%offset=1+size
           else
              ptr%data%next=>ptr%data
           endif
@@ -713,7 +717,7 @@ contains
     if(gc_xtra_debug) write(*,*) 'NEXT FREE'
     
     ! Find following free location
-    ptr%offset=ptr%offset+esize
+    ptr%offset=ptr%offset+size
     call next_free()
 
     if(.not.ok) then
@@ -729,15 +733,15 @@ contains
     ptr_p=ptr
 
     ! Find extent of run of free locations
-    ptr%offset=ptr%offset+esize
+    ptr%offset=ptr%offset+size
     do 
-       if(ptr%offset+esize>ptr%data%size+1) then
+       if(ptr%offset+size>ptr%data%size+1) then
           exit
        endif
        if(marked(ptr)) exit
        if(gc_xtra_debug) &
             write(0,*) 'FREE',ptr%offset
-       ptr%offset=ptr%offset+esize
+       ptr%offset=ptr%offset+size
     enddo
     ptr%data%next_sweep=ptr%offset
 
@@ -746,15 +750,15 @@ contains
     if(pm_debug_level>3) call pm_verify_heap(context)
 
     if(pm_debug_level>0) then
-       if(mod(nptr%offset-1,esize)/=0&
-            .or.nptr%offset+esize>nptr%data%size+1) then
+       if(mod(nptr%offset-1,size)/=0&
+            .or.nptr%offset+size>nptr%data%size+1) then
            call pm_panic('misaligned allocation')
        endif
     endif
     
     ! Always initialise pointers
     if(vkind>=pm_pointer) &
-         nptr%data%ptr(nptr%offset:nptr%offset+esize-1)=pm_null_obj
+         nptr%data%ptr(nptr%offset:nptr%offset+size-1)=pm_null_obj
  
     if(gc_xtra_debug) write(0,*) 'all',nptr%offset,nptr%data%next_sweep
 
@@ -763,7 +767,7 @@ contains
     ! Find next free location in circular chain of blocks
     subroutine next_free()
       do
-         if(ptr%offset+esize>ptr%data%size+1) then
+         if(ptr%offset+size>ptr%data%size+1) then
             if(ptr%data%next%tick>=context%tick) then
                ! Scanned this block before - no hope
                ok=.false.
@@ -781,30 +785,30 @@ contains
                  ptr%data%ptr(ptr%offset)%offset
          endif
          if(.not.marked(ptr)) exit
-         ptr%offset=ptr%offset+esize
+         ptr%offset=ptr%offset+size
       enddo
     end subroutine next_free
 
   end function pm_new_small
 
   ! Create a new object of >= pm_large_obj_size elements
-  function pm_new_large(context,vkind,esize) result(ptr)
+  function pm_new_large(context,vkind,size) result(ptr)
     type(pm_context),pointer:: context
     integer(pm_p),intent(in):: vkind
-    integer(pm_ln):: esize
+    integer(pm_ln):: size
     type(pm_ptr):: ptr
     type(pm_block),pointer:: blk
 
     if(pm_debug_level>0) then
        if(vkind<pm_null.or.vkind>pm_usr) &
             call pm_panic('New large - bad vkind')
-       if(esize<=0) &
-            call pm_panic('New large -ve esize')
+       if(size<=0) &
+            call pm_panic('New large -ve size')
     endif
 
     if(context%blocks_allocated>max_blocks) &
          call pm_gc(context,.false.)
-    blk=>new_block(context,vkind,esize)
+    blk=>new_block(context,vkind,size)
     blk%next=>context%new_large
     context%new_large=>blk
     if(pm_debug_level>0) then
@@ -813,7 +817,7 @@ contains
     ptr%data=>blk
     ptr%offset=1
     if(vkind>=pm_pointer) &
-         ptr%data%ptr(ptr%offset:ptr%offset+esize-1)=pm_null_obj
+         ptr%data%ptr(ptr%offset:ptr%offset+size-1)=pm_null_obj
   end function pm_new_large
 
   ! Create new string object from FORTRAN string
@@ -1548,6 +1552,10 @@ contains
        pm_false_obj%offset=1
        pm_true_obj%data%l(pm_true_obj%offset)=.true.
        pm_false_obj%data%l(pm_false_obj%offset)=.false.
+       do i=pm_int,pm_num_vkind
+          pm_empty_obj(i)%data=>new_block(context,int(i,pm_p),0_pm_ln)
+          pm_empty_obj(i)%offset=0
+       enddo
     endif
     forall (i=1:pm_large_obj_size, j=pm_int:pm_num_vkind)
        context%obj_list(i,j)%data=>null()
@@ -1658,6 +1666,8 @@ contains
        call pm_panic("Out of memory")
     endif
 
+    if(tsize==0) goto 10
+    
     ! Allocate data area
     select case(vkind)
        case(pm_int)
@@ -1714,7 +1724,8 @@ contains
        call pm_panic("Out of memory")
     endif
 
-    10 continue
+10  continue
+    
     ! Finish initialising block
     blk%magic=1234567
     blk%context=>context

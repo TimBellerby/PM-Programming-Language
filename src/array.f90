@@ -4471,11 +4471,15 @@ contains
     type(pm_reg),pointer:: reg
     reg=>pm_register(context,'make_str',len,off,vec)
     len=pm_new(context,pm_long,esize+1)
-    len%data%ln(len%offset:len%offset+esize)=pm_fast_esize(val)
+    len%data%ln(len%offset:len%offset+esize)=pm_fast_esize(val)+1
     off=pm_new(context,pm_long,esize+1)
     off%data%ln(off%offset:off%offset+esize)=0
     vec=pm_new(context,pm_pointer,esize+1)
-    vec%data%ptr(vec%offset:vec%offset+esize)=val
+    if(pm_fast_esize(val)<0) then
+       vec%data%ptr(vec%offset:vec%offset+esize)=pm_fast_newnc(context,pm_string,1)
+    else
+       vec%data%ptr(vec%offset:vec%offset+esize)=val
+    endif
     str=make_array(context,pm_array_type,int(pm_string_type),vec,len,len,off)
     call pm_delete_register(context,reg)
   contains

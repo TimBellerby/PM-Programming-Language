@@ -218,7 +218,7 @@ contains
     endif
     if(pm_opts%out_sysmod) write(45,'(I4,A7,A)') line,'type:',trim(def)
     line=line+1
-    if(type_decl(parser)) then
+    if(typ_decl(parser)) then
        write(*,*) def
        call pm_panic('bad intrinsic type')
     endif
@@ -445,6 +445,8 @@ contains
        else
           sym=sym_pling
        endif
+    case('~')
+       sym=sym_tilde
     case('/')
        if(peekchar()=='=') then
           c=getchar()
@@ -557,9 +559,13 @@ contains
              exit
           endif
        enddo outer
-       n=n+1
-       buffer(n:n)='"'
-       val=pm_new_string(parser%context,buffer(1:n))
+!!$       n=n+1
+!!$       buffer(n:n)='"'
+       if(n==0) then
+          val=pm_empty_obj(pm_string)
+       else
+          val=pm_new_string(parser%context,buffer(1:n))
+       endif
        sym=sym_string
        parser%lexval=val
     case('''')
@@ -1333,7 +1339,7 @@ contains
     logical:: iserr
     integer:: sym,line,pos
     iserr=.true.
-    if(parser%sym==sym_at) then
+    if(parser%sym==sym_pling) then
        call scan(parser)
        call make_node(parser,sym_at,1)
     endif
@@ -1643,12 +1649,32 @@ contains
     type(parse_state),intent(inout):: parser
     logical,intent(in):: checkqual
     logical:: iserr
-    integer:: m,name,sym,base,line,pos
+    integer:: i,m,name,sym,base,line,pos
     logical:: atstart,dot_call
     iserr=.true.
     sym=parser%sym
     select case(sym)
-    case(sym_if,sym_switch)
+    case(sym_if)
+       call scan(parser)
+       if(expect(parser,sym_open)) return
+       if(expr(parser)) return
+       if(expect(parser,sym_cond)) return
+       if(expr(parser)) return
+       if(expect(parser,sym_comma)) return
+       m=1
+       do
+          if(expr(parser)) return
+          if(parser%sym/=sym_cond) exit
+          call scan(parser)
+          if(expr(parser)) return
+          m=m+1
+          if(expect(parser,sym_comma)) return
+       enddo
+       if(expect(parser,sym_close)) return
+       do i=1,m
+          call make_node(parser,sym_if_expr,3)
+       enddo
+    case(sym_switch)
        call scan(parser)
        if(expect(parser,sym_open)) return
        if(expr(parser)) return
@@ -1672,7 +1698,7 @@ contains
           if(expect(parser,sym_comma)) return
        enddo
        if(expect(parser,sym_close)) return
-       call make_node(parser,merge(sym_if_expr,sym_switch_expr,sym==sym_if),m)
+       call make_node(parser,sym_switch_expr,m)
     case(sym_coherent,sym_mirrored,sym_shared)
        call scan(parser)
        if(expect(parser,sym_open)) return
@@ -1758,7 +1784,8 @@ contains
        call make_node(parser,sym_type_val,1)
     case(sym_dash)
        call scan(parser)
-       if(parser%sym==sym_number) then
+       select case(parser%sym)
+       case(sym_number)
           if(pm_fast_vkind(parser%lexval)/=pm_long) then
              call parse_error(parser,&
                   '"''" cannot precede non-default integer constant')
@@ -1766,30 +1793,34 @@ contains
           call push_val(parser,parser%lexval)
           call scan(parser)
           call make_node(parser,sym_dash,1)
-       elseif(parser%sym==sym_true.or.&
-            parser%sym==sym_false) then
+       case(sym_string)
+          call push_val(parser,parser%lexval)
+          call scan(parser)
+          call make_node(parser,sym_dash,1)
+       case(sym_true,sym_false)
           call push_sym_val(parser,parser%sym)
           call scan(parser)
           call make_node(parser,sym_dash,1)
-       elseif(parser%sym==sym_open) then
+       case(sym_open)
           call scan(parser)
           if(expr(parser)) return
           if(expect(parser,sym_close)) return
           call make_node(parser,sym_fix,1)
-       elseif(parser%sym==sym_open_square) then
+       case(sym_open_square)
           call push_sym_val(parser,sym_tuple)
           if(subscript(parser)) return
           call simple_call(parser)
           call make_node(parser,sym_fix,1)
-       elseif(parser%sym>num_sym) then
-          call push_sym_val(parser,parser%sym)
-          call scan(parser)
-          call make_node(parser,sym_name,1)
-          call make_node(parser,sym_fix,1)
-       else
-          call parse_error(parser,'"''" must be followed by constant value')
-          return
-       endif
+       case default
+          if(parser%sym>num_sym) then
+             call push_val(parser,pm_name_val(parser%context,parser%sym))
+             call make_node(parser,sym_dash,1)
+             call scan(parser)
+          else
+             call parse_error(parser,'"''" must be followed by constant value')
+             return
+          endif
+       end select
     case(sym_null)
        if(parser%sym==sym_open) then
           call scan(parser)
@@ -1966,8 +1997,8 @@ contains
        if(unary(priority_uminus,sym_plus)) return
     case(sym_mult)
        if(unary(priority_uminus,sym_ustar)) return
-    case(sym_pling)
-       if(unary(priority_uminus,sym_pling)) return
+    case(sym_tilde)
+       if(unary(priority_uminus,sym_tilde)) return
     case(sym_hash)
        if(unary(priority_uhash,sym_uhash)) return
     case(sym_not)
@@ -2002,10 +2033,10 @@ contains
           if(binary(priority_and)) return
        case(sym_eq,sym_ne)
           if(binary_none(priority_eq)) return
-       case(sym_gt,sym_ge,sym_lt,sym_le,sym_in,&
-            sym_includes,sym_is)
+       case(sym_gt,sym_ge,sym_lt,sym_le,sym_in,sym_not_in,&
+            sym_includes,sym_not_includes,sym_is)
           if(binary_none(priority_gt)) return
-       case(sym_mod)
+       case(sym_mod,sym_div)
           if(binary(priority_mod)) return
        case(sym_plus,sym_minus)
           if(binary(priority_add)) return
@@ -2096,10 +2127,11 @@ contains
   !======================================================
   ! Comma separated list of expr
   !======================================================
-  recursive function exprlist(parser,length,nolist) result(iserr)
+  recursive function exprlist(parser,length,nolist,sym) result(iserr)
     type(parse_state),intent(inout):: parser
     integer,intent(out),optional:: length
     logical,intent(in),optional:: nolist
+    integer,intent(in),optional:: sym
     logical:: iserr
     integer:: n
     iserr=.true.
@@ -2110,8 +2142,13 @@ contains
        if(parser%sym/=sym_comma) exit
        call scan(parser)
     enddo
-    if(.not.present(nolist)) &
-         call make_node(parser,sym_list,n)
+    if(.not.present(nolist)) then
+       if(present(sym)) then
+          call make_node(parser,sym,n)
+       else
+          call make_node(parser,sym_list,n)
+       end if
+    end if
     if(present(length)) length=n
     iserr=.false.
   end function exprlist
@@ -2414,11 +2451,12 @@ contains
   !======================================================
   ! Extended expression list ( expr, expr... subexpr)
   !======================================================
-  subroutine xexprlist(parser,length)
+  subroutine xexprlist(parser,length,sym)
     type(parse_state),intent(inout):: parser
     integer,intent(out),optional:: length
+    integer,intent(in),optional:: sym
     integer:: m
-    if(exprlist(parser,m)) return
+    if(exprlist(parser,m,sym=sym)) return
     if(present(length)) length=m
     if(subexpr(parser)) return
   contains
@@ -2613,18 +2651,19 @@ contains
     endif
     call make_node(parser,sym,n+1)
     if(ne==n) then
-       call parse_error(parser,'A "'//trim(sym_names(sym))//'" statement must define at least one object')
+       call parse_error(parser,&
+            'A "'//trim(sym_names(sym))//'" statement must define at least one object')
     endif
     if(parser%sym==sym_define) then
        call scan(parser)
        if(rhs(parser,n)) return
        call make_node(parser,sym_define,2)
        if(subexpr(parser)) return
-    elseif(present(moded_stmt).or..true.) then
+    elseif(present(moded_stmt)) then
        call parse_error(parser,'Must include an initialising expression in a "'//&
-            sym_names(sym)//' statement')
+            sym_names(moded_stmt)//' statement')
     elseif(nu+ne>0) then
-       call parse_error(parser,'Cannot have "_" or "(...)" in unitialised '//&
+       call parse_error(parser,'Cannot have "_" in unitialised '//&
             trim(sym_names(sym))//' declaration')
     endif
     iserr=.false.
@@ -2677,7 +2716,7 @@ contains
     n=0
     do while(parser%sym==sym_case)
        call scan(parser)
-       call xexprlist(parser)
+       call xexprlist(parser,sym=sym_case)
        if(expect(parser,sym_colon)) return
        call stmt_list(parser)
        n=n+2
@@ -3300,7 +3339,7 @@ contains
       iserr=.false.
     end function assn_list
 
-    ! sync name [ qual ] := expr
+    ! sync name [ qual ] = expr
     function sync_assign() result(iserr)
       logical:: iserr
       iserr=.true.
@@ -3746,7 +3785,7 @@ contains
     elseif(parser%sym==sym_fix) then
        call scan(parser)
        if(typunary(parser)) return
-       call make_node(parser,sym_const,1)
+       call make_node(parser,sym_fix,1)
     else
        if(typval(parser)) return
     endif
@@ -3867,10 +3906,19 @@ contains
        call make_node(parser,sym_pm_dref,m+1)
     case(sym_dcaret)
        call scan(parser)
-       if(expect(parser,sym_open)) return
-       if(typ(parser)) return
-       if(expect(parser,sym_close)) return
-       call make_node(parser,sym_dcaret,1)
+       if(parser%sym==sym_caret) then
+          call scan(parser)
+          if(typval(parser)) return
+          call make_node(parser,sym_const,1)
+       elseif(parser%sym==sym_dcaret) then
+          call scan(parser)
+          call make_node(parser,sym_assign_or_init,0)
+       else
+          if(expect(parser,sym_open)) return
+          if(typ(parser)) return
+          if(expect(parser,sym_close)) return
+          call make_node(parser,sym_dcaret,1)
+       endif
     case(sym_underscore)
        call scan(parser)
        call make_node(parser,sym_underscore,0)
@@ -4216,7 +4264,7 @@ contains
           call scan(parser)
           if(expect(parser,sym_dotdotdot)) return
           call push_sym_val(parser,sym_arg)
-          if(arg_type_with_mode(iscomm)) return
+          if(arg_typ_with_mode(iscomm)) return
           call make_node(parser,sym_dotdotdot,m*2+2)
           exit
        else if(parser%sym==sym_amp) then
@@ -4228,7 +4276,7 @@ contains
           endif
           m=m+1
           call push_sym(parser,m)
-          if(arg_type_with_mode(iscomm)) return
+          if(arg_typ_with_mode(iscomm)) return
        else if(parser%sym==sym_key) then
           call make_node(parser,sym_list,m*2)
           call push_back(parser,sym_comma)
@@ -4249,7 +4297,7 @@ contains
           else
              call parse_error(parser,'Expected argument')
           endif
-          if(arg_type_with_mode(iscomm)) return
+          if(arg_typ_with_mode(iscomm)) return
           if(parser%sym==sym_define) then
              parser%temp=pop_val(parser)
              call drop_val(parser)
@@ -4283,7 +4331,7 @@ contains
           else
              if(expect_name(parser, &
                   'optional argument name')) return
-             if(arg_type_with_mode(iscomm)) return
+             if(arg_typ_with_mode(iscomm)) return
              if(expect(parser,sym_define)) return
              if(expr(parser)) return
              n=n+1
@@ -4311,7 +4359,7 @@ contains
     return
   contains
 
-    function arg_type_with_mode(iscomm) result(iserr)
+    function arg_typ_with_mode(iscomm) result(iserr)
       logical,intent(in):: iscomm
       logical:: iserr
       iserr=.true.
@@ -4322,7 +4370,7 @@ contains
          call push_null_val(parser)
       endif
       iserr=.false.
-    end function arg_type_with_mode
+    end function arg_typ_with_mode
 
   end function param_list
 
@@ -4421,8 +4469,11 @@ contains
        case(sym_no_inline)
           call set_flags(proc_no_inline)
           call scan(parser)
-        case(sym_ignore_rules)
+       case(sym_ignore_rules)
           call set_flags(call_ignore_rules)
+          call scan(parser)
+       case(sym_keep_literals)
+          call set_flags(call_is_fixed)
           call scan(parser)
        end select
        if(parser%sym/=sym_comma) exit
@@ -4844,7 +4895,7 @@ contains
           call make_node(parser,sym,1)
        case(sym_pct,sym_define,sym_dot,sym_query,sym_amp,&
             sym_hash,sym_caret,sym_dcaret,sym_d1:sym_d7,sym_invar,sym_shared,&
-            sym_type)
+            sym_type,sym_tilde)
           ! These return N types based on types of a
           ! list of N expressions
           call scan(parser)
@@ -4973,7 +5024,7 @@ contains
   !======================================================
   ! Type declaration
   !======================================================
-  function type_decl(parser) result(iserr)
+  function typ_decl(parser) result(iserr)
     type(parse_state):: parser
     logical:: iserr
     integer:: sym,m,n,name,basename,namein,base,nextra
@@ -4983,7 +5034,7 @@ contains
     integer:: sbase,svbase,pname
     sbase=parser%top
     svbase=parser%vtop
-    reg=>pm_register(parser%context,'type_decl',ptr)
+    reg=>pm_register(parser%context,'typ_decl',ptr)
     iserr=.true.
     nextra=0
     sym=sym_includes
@@ -4998,7 +5049,7 @@ contains
     call push_val(parser,parser%modl) ! module
 
     ! Type parameters
-    if(type_params(parser,m)) goto 999   
+    if(typ_params(parser,m)) goto 999   
     params=top_val(parser)
 
     ! <: typelist
@@ -5016,7 +5067,7 @@ contains
     call push_val(parser,link)
 
     ! [ : typelist ]
-    if(type_inclusions(parser,name)) goto 999
+    if(typ_inclusions(parser,name)) goto 999
 
     ! Body of declaration, either :
     !    struct or rec
@@ -5061,13 +5112,13 @@ contains
        call push_null_val(parser)
     endif
 10  continue
-    call make_node(parser,sym,typ_num_args+nextra)
+    call make_node(parser,sym,type_num_args+nextra)
     if(debug_parser_extra) then
        write(*,*) 'TYPEDECL>----------------'
        call dump_parse_tree(parser%context,6,top_val(parser),2)
        write(*,*) 'END TYPEDECL-------------'
     endif
-    call add_type_decl(parser,name,ptr)
+    call add_typ_decl(parser,name,ptr)
     iserr=.false.
 999 continue
     parser%top=sbase
@@ -5077,12 +5128,12 @@ contains
 
     include 'fisnull.inc'
 
-  end function type_decl
+  end function typ_decl
 
   !======================================================
   ! Parameters to a type declaration
   !======================================================
-  function type_params(parser,m) result(iserr)
+  function typ_params(parser,m) result(iserr)
     type(parse_state):: parser
     integer,intent(out):: m
     logical:: iserr
@@ -5109,13 +5160,13 @@ contains
        call push_null_val(parser)
     endif
     iserr=.false.
-  end function type_params
+  end function typ_params
 
 
   !======================================================
   ! : typelist
   !======================================================
-  function type_inclusions(parser,name) result(iserr)
+  function typ_inclusions(parser,name) result(iserr)
     type(parse_state):: parser
     integer,intent(in):: name
     logical:: iserr
@@ -5130,7 +5181,7 @@ contains
           if(check_name(parser,namein)) then
              ! An in declaration creates an entry in the
              ! named parent type
-             call add_typein_decl(parser,namein,name)
+             call add_typ_in_decl(parser,namein,name)
           else
              call parse_error(parser,'Expecting type name')
              return
@@ -5148,13 +5199,13 @@ contains
     iserr=.false.
   contains
     include 'fisnull.inc'
-  end function type_inclusions
+  end function typ_inclusions
 
   !======================================================
   ! Add a declaration that type 'namein' is
   ! included in type 'name'
   !======================================================
-  subroutine add_typein_decl(parser,namein,name)
+  subroutine add_typ_in_decl(parser,namein,name)
     type(parse_state):: parser
     integer,intent(in):: namein,name
     type(pm_ptr):: ptrin
@@ -5168,15 +5219,15 @@ contains
     call push_sym_val(parser,name)
     call make_node(parser,sym_type,1)
     call make_node(parser,sym_in,2)
-    call add_type_decl(parser,namein,ptrin)
+    call add_typ_decl(parser,namein,ptrin)
   contains
     include 'fisnull.inc'
-  end subroutine add_typein_decl
+  end subroutine add_typ_in_decl
 
   !======================================================
   ! Add type declaration on top of vstack under name nam
   !======================================================
-  subroutine add_type_decl(parser,nam,p)
+  subroutine add_typ_decl(parser,nam,p)
     type(parse_state):: parser
     integer,intent(in):: nam
     type(pm_ptr),intent(in):: p
@@ -5204,7 +5255,7 @@ contains
     endif
   contains
     include 'fisnull.inc'
-  end subroutine add_type_decl
+  end subroutine add_typ_decl
 
   !======================================================
   ! type .. is unique
@@ -5453,7 +5504,7 @@ contains
           endif
           if(proc_decl(parser)) goto 999
        case(sym_type)
-          if(type_decl(parser)) goto 999
+          if(typ_decl(parser)) goto 999
        case(sym_param)
           if(param_decl(parser)) goto 999
        case(sym_test)

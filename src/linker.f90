@@ -200,7 +200,7 @@ contains
        else
           call pm_ptr_assign(context,&
                first,&
-               int(typ_link,pm_ln),&
+               int(type_link,pm_ln),&
                v2%data%ptr(v2%offset+node_args+1))
        endif
        call pm_ptr_assign(context,v1,int(node_args+2,pm_ln),&
