@@ -3221,7 +3221,8 @@ contains
              if(subexpr(parser)) goto 999
           endif
        case(sym_var,sym_const)
-          if(assn_list()) goto 999
+          if(var_stmt(parser)) goto 999
+          if(subexpr(parser)) goto 999
        case(sym_coherent,sym_chan,sym_mirrored,sym_shared)
           call scan(parser)
           if(mode_stmt(parser,sym)) goto 999
@@ -3284,7 +3285,8 @@ contains
                 if(subexpr(parser)) goto 999
              else
                 call push_back_name(parser,name)
-                if(assn_list()) goto 999
+                if(assn_or_call(parser,.true.,.true.,.true.)) goto 999
+                if(subexpr(parser)) goto 999
             endif
           else
             if(parser%sym>0.and.parser%sym/=sym_close_brace&
@@ -3317,27 +3319,6 @@ contains
     call make_node(parser,sym_list,k)
 
   contains
-
-    ! assignment { ',' assignment }
-    function assn_list() result(iserr)
-      logical:: iserr
-      integer:: n
-      iserr=.true.
-      n=0
-      do
-         if(parser%sym==sym_var.or.parser%sym==sym_const) then
-            if(var_stmt(parser)) return
-         else
-            if(assn_or_call(parser,.true.,.true.,.true.)) return
-         endif
-         n=n+1
-         if(parser%sym/=sym_comma) exit
-         call scan(parser)
-      enddo
-      if(n>1) call make_node(parser,sym_assign_list,n)
-      if(subexpr(parser)) return
-      iserr=.false.
-    end function assn_list
 
     ! sync name [ qual ] = expr
     function sync_assign() result(iserr)

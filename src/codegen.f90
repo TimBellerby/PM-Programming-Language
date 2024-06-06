@@ -1145,6 +1145,8 @@ contains
     type(pm_ptr):: cblock2,vlist,v,var
     integer:: save_par_state
 
+    j=push_if_scope(coder)
+    
     if(pm_fast_isnull(node_arg(node,2))) then
        flags=var_is_shadowed+var_is_var
        call trav_expr(coder,cblock,node,node_arg(node,1))
@@ -1165,6 +1167,7 @@ contains
     var=top_code(coder)
     start=coder%index
     call swap_code(coder)
+    coder%if_scope=j
     call trav_open_stmt_list(coder,cblock2,node,node_arg(node,3))
     if(cnode_flags_set(var,var_flags,var_is_changed)) then
        call make_temp_var(coder,cblock2,node)
@@ -1188,9 +1191,11 @@ contains
     v%data%i(v%offset)=start
     v%data%i(v%offset+1)=finish
     call make_const(coder,cblock,node,coder%temp)
-    call make_sp_call(coder,cblock,node,sym_any,3,1)
+    n=get_if_scope(coder)
+    call make_sp_call(coder,cblock,node,sym_any,3+n,1)
     call drop_code(coder)
     call hide_vars(coder,vb,vb)
+    call pop_if_scope(coder)
     coder%par_state=save_par_state
   contains
     include 'fisnull.inc'
@@ -5160,7 +5165,6 @@ contains
 888 continue
     coder%wtop=coder%wtop-nargs-1
     coder%wstack(coder%wtop)=0
-
     
   contains
     

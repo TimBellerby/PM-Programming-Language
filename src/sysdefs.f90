@@ -5790,7 +5790,7 @@ contains
     call dcl_uproc(parser,&
          'PM__assign_var(&a,b) {PM__assign(&a,b)}',line)
     call dcl_uproc(parser,&
-         'PM__assign(&a:any,b:any) {check_assign_types(a,b);_assign(&a,b)}',line)
+         'PM__assign(&a:any,b:any) {_assign(&a,c) where c=b as a}',line)
     call dcl_type(parser,&
          'assignment_operator is $_just_assign,$+,$*,$&,$|,$xor,$and,$or,$++,...',line)
     call dcl_uproc(parser,&

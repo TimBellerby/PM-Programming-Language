@@ -1295,117 +1295,9 @@ contains
           call combine_types(cnode_arg(args,1),&
                pm_new_type_type(coder%context,tno))
        case(sym_any)
-          list2=cnode_arg(args,4)
-          list2=cnode_arg(list2,1)
-          slot=list2%data%i(list2%offset)
-          slot2=list2%data%i(list2%offset+1)
-          tno=pm_type_strip_mode_and_cond(coder%context,arg_type(3),mode,cond)
-          t=check_poly(coder,tno)
-          if(tno/=error_type.and..not.pm_fast_isnull(t)) then
-             n=pm_set_size(coder%context,t)
-             do i=1,n
-                list=pm_set_key(coder%context,t,int(i,pm_ln))
-                tno=list%data%i(list%offset)
-                coder%stack(base+slot:base+slot2)=undefined
-                coder%stack(get_slot(1))=&
-                     pm_type_add_mode(coder%context,tno,mode,cond)
-                call prc_cblock(coder,cnode_arg(args,2),base)
-                call code_int_vec(coder,coder%stack,base+slot,base+slot2)
-             enddo
-             call make_code(coder,pm_null_obj,cnode_is_any_sig,n)
-             list=pop_code(coder)
-             if(.not.coder%incomplete) then
-                key(1)=pm_dict_size(coder%context,coder%proc_cache)
-                k=pm_idict_add(coder%context,coder%proc_cache,&
-                     key,1,list)
-                call set_call_sig(int(k))
-             endif
-          else
-             coder%stack(base+slot:base+slot2)=undefined
-             call set_arg_to_error_type(1)
-             call prc_cblock(coder,cnode_arg(args,2),base)
-          endif
+          call prc_any(nargs)
        case(sym_each_proc)  ! this controls body for proc.. each()
-          t=cnode_arg(args,nret+4)
-          t=cnode_arg(t,1)
-          slot=t%data%i(t%offset)
-          slot2=t%data%i(t%offset+1)
-          tno=arg_type(nret+5)
-          if(tno<=0) then
-             do i=1,nret
-                call set_arg_to_error_type(i)
-             enddo
-             return
-          endif
-          t=pm_type_vect(coder%context,tno)
-          tno2=pm_tv_kind(t)
-          flags=iand(pm_tv_flags(t),pm_type_has_embedded)
-          name=pm_tv_name(t)
-          n=nargs-4
-          if(tno2==pm_type_is_struct.or.tno2==pm_type_is_rec) then
-             do i=nret+7,nargs-1,2
-                tno=arg_type(i)
-                t2=pm_type_vect(coder%context,tno)
-                if(pm_tv_kind(t2)/=tno2) then
-                   if(coder%num_errors==0) &
-                      call infer_error_with_trace(coder,callnode,&
-                      '"proc <<each>>" arguments cannot mix "struct" and "rec"')
-                endif
-                if(pm_tv_name(t2)/=name) then
-                   if(coder%num_errors==0) &
-                        call infer_error_with_trace(coder,callnode,&
-                        '"proc <<each>>" arguments must have the same "struct" or "rec" name')
-                endif
-             enddo
-             n=pm_tv_numargs(t)
-             if(nret>0) then
-                call check_wstack(coder,nret*(n+2))
-                tbase=coder%wtop
-                coder%wtop=coder%wtop+nret*(n+2)
-                do i=1,nret
-                   coder%wstack(tbase+(i-1)*(n+2)+1)=ior(tno2,flags)
-                   coder%wstack(tbase+(i-1)*(n+2)+2)=name
-                enddo
-             endif
-             do i=1,n
-                do j=nret+5,nargs-1,2
-                   tno=arg_type(j)
-                   t2=pm_type_vect(coder%context,tno)
-                   tno=pm_tv_arg(t2,i)
-                   coder%stack(get_slot(j+1))=tno
-                enddo
-                call prc_cblock(coder,cnode_arg(args,nret+3),base)
-                do j=1,nret
-                   coder%wstack(tbase+(j-1)*(n+2)+i+2)=arg_type(nargs+j)
-                enddo
-                call code_int_vec(coder,coder%stack,base+slot,base+slot2)
-             enddo
-             call make_code(coder,pm_null_obj,cnode_is_any_sig,n)
-             list=pop_code(coder)
-             key(1)=pm_dict_size(coder%context,coder%proc_cache)
-             k=pm_idict_add(coder%context,coder%proc_cache,&
-                  key,1,list)
-             slot=cnode_get_num(callnode,call_index)
-             coder%stack(base+slot)=k
-             tno3=pm_type_from_recorded_name(coder%context,name)
-             do i=nret,1,-1
-                call make_type_if_possible(coder,n+2)
-                if(.not.pm_type_includes(coder%context,tno3,tno2,pm_type_incl_val,einfo)) then
-                   call infer_error(coder,args,&
-                        '"'//trim(sym_names(tno2))//&
-                        '" initial expression has wrong type for: ',&
-                        pm_fast_name(coder%context,name))
-                   call pm_type_error(coder%context,einfo)
-                   call infer_trace(coder)
-                endif
-                coder%stack(get_slot(i))=pop_word(coder)
-             enddo
-             call prc_cblock(coder,cnode_arg(args,nret+1),base)
-          else
-             call prc_cblock(coder,cnode_arg(args,nret+2),base)
-             slot=cnode_get_num(callnode,call_index)
-             coder%stack(base+slot)=0
-          endif
+          call prc_each_proc
        case(sym_test)
           call prc_cblock(coder,cnode_arg(args,1),base)
        case(sym_check)
@@ -1607,7 +1499,142 @@ contains
          call prc_cblock(coder,cnode_arg(args,3),base)
       endif
     end subroutine prc_if
-    
+
+    subroutine prc_any(nargs)
+      integer,intent(in):: nargs
+      integer,dimension(5:nargs+1):: init_args,final_args
+      integer:: i,j,slot,slot2
+      type(pm_ptr):: list,list2
+      list2=cnode_arg(args,4)
+      list2=cnode_arg(list2,1)
+      slot=list2%data%i(list2%offset)
+      slot2=list2%data%i(list2%offset+1)
+      tno=pm_type_strip_mode_and_cond(coder%context,arg_type(3),mode,cond)
+      t=check_poly(coder,tno)
+      if(tno/=error_type.and..not.pm_fast_isnull(t)) then
+         n=pm_set_size(coder%context,t)
+         do j=5,nargs+1
+            init_args(j)=arg_type_with_mode(j)
+         end do
+         do i=1,n
+            do j=5,nargs+1
+               call set_arg_to_type(j,init_args(j))
+            end do
+            list=pm_set_key(coder%context,t,int(i,pm_ln))
+            tno=list%data%i(list%offset)
+            coder%stack(base+slot:base+slot2)=undefined
+            coder%stack(get_slot(1))=&
+                 pm_type_add_mode(coder%context,tno,mode,cond)
+            call prc_cblock(coder,cnode_arg(args,2),base)
+            call code_int_vec(coder,coder%stack,base+slot,base+slot2)
+            
+            if(i>1) then
+               do j=5,nargs+1
+                  call combine_arg_types(j,final_args(j),no_init=.true.)
+               end do
+            endif
+            do j=5,nargs+1
+               final_args(j)=arg_type_with_mode(j)
+            end do
+         enddo
+         call make_code(coder,pm_null_obj,cnode_is_any_sig,n)
+         list=pop_code(coder)
+         if(.not.coder%incomplete) then
+            key(1)=pm_dict_size(coder%context,coder%proc_cache)
+            k=pm_idict_add(coder%context,coder%proc_cache,&
+                 key,1,list)
+            call set_call_sig(int(k))
+         endif
+      else
+         coder%stack(base+slot:base+slot2)=undefined
+         call set_arg_to_error_type(1)
+         call prc_cblock(coder,cnode_arg(args,2),base)
+      endif
+    end subroutine prc_any
+
+    subroutine prc_each_proc
+      t=cnode_arg(args,nret+4)
+      t=cnode_arg(t,1)
+      slot=t%data%i(t%offset)
+      slot2=t%data%i(t%offset+1)
+      tno=arg_type(nret+5)
+      if(tno<=0) then
+         do i=1,nret
+            call set_arg_to_error_type(i)
+         enddo
+         return
+      endif
+      t=pm_type_vect(coder%context,tno)
+      tno2=pm_tv_kind(t)
+      flags=iand(pm_tv_flags(t),pm_type_has_embedded)
+      name=pm_tv_name(t)
+      n=nargs-4
+      if(tno2==pm_type_is_struct.or.tno2==pm_type_is_rec) then
+         do i=nret+7,nargs-1,2
+            tno=arg_type(i)
+            t2=pm_type_vect(coder%context,tno)
+            if(pm_tv_kind(t2)/=tno2) then
+               if(coder%num_errors==0) &
+                    call infer_error_with_trace(coder,callnode,&
+                    '"proc <<each>>" arguments cannot mix "struct" and "rec"')
+            endif
+            if(pm_tv_name(t2)/=name) then
+               if(coder%num_errors==0) &
+                    call infer_error_with_trace(coder,callnode,&
+                    '"proc <<each>>" arguments must have the same "struct" or "rec" name')
+            endif
+         enddo
+         n=pm_tv_numargs(t)
+         if(nret>0) then
+            call check_wstack(coder,nret*(n+2))
+            tbase=coder%wtop
+            coder%wtop=coder%wtop+nret*(n+2)
+            do i=1,nret
+               coder%wstack(tbase+(i-1)*(n+2)+1)=ior(tno2,flags)
+               coder%wstack(tbase+(i-1)*(n+2)+2)=name
+            enddo
+         endif
+         do i=1,n
+            do j=nret+5,nargs-1,2
+               tno=arg_type(j)
+               t2=pm_type_vect(coder%context,tno)
+               tno=pm_tv_arg(t2,i)
+               coder%stack(get_slot(j+1))=tno
+            enddo
+            call prc_cblock(coder,cnode_arg(args,nret+3),base)
+            do j=1,nret
+               coder%wstack(tbase+(j-1)*(n+2)+i+2)=arg_type(nargs+j)
+            enddo
+            call code_int_vec(coder,coder%stack,base+slot,base+slot2)
+         enddo
+         call make_code(coder,pm_null_obj,cnode_is_any_sig,n)
+         list=pop_code(coder)
+         key(1)=pm_dict_size(coder%context,coder%proc_cache)
+         k=pm_idict_add(coder%context,coder%proc_cache,&
+              key,1,list)
+         slot=cnode_get_num(callnode,call_index)
+         coder%stack(base+slot)=k
+         tno3=pm_type_from_recorded_name(coder%context,name)
+         do i=nret,1,-1
+            call make_type_if_possible(coder,n+2)
+            if(.not.pm_type_includes(coder%context,tno3,tno2,pm_type_incl_val,einfo)) then
+               call infer_error(coder,args,&
+                    '"'//trim(sym_names(tno2))//&
+                    '" initial expression has wrong type for: ',&
+                    pm_fast_name(coder%context,name))
+               call pm_type_error(coder%context,einfo)
+               call infer_trace(coder)
+            endif
+            coder%stack(get_slot(i))=pop_word(coder)
+         enddo
+         call prc_cblock(coder,cnode_arg(args,nret+1),base)
+      else
+         call prc_cblock(coder,cnode_arg(args,nret+2),base)
+         slot=cnode_get_num(callnode,call_index)
+         coder%stack(base+slot)=0
+      endif
+    end subroutine prc_each_proc
+
     !===================================================================
     ! Push argument types with modes for all arguments
     !==================================================================
