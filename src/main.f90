@@ -37,7 +37,6 @@ program pm
   use pm_linker
   use pm_codegen
   use pm_infer
-  use pm_sysdefs
   use pm_wcode
   use pm_optimise
   use pm_backend
@@ -123,7 +122,24 @@ contains
     
     ! Parse sytem module
     call init_parser(parser,context)
-    call sysdefs(parser)
+
+    call dcl_module(parser,'PM__system')
+    parser%sysmodl=parser%modl
+
+    call pm_module_filename('lib.sys.pm',str2)
+    call pm_open_file(pm_comp_file_unit,str2,ok)
+    if(.not.ok) then
+       if(pm_main_process) then
+          write(*,*) 'Cannot open system module: '//trim(str2)
+       endif
+       call pm_stop('Compilation terminated')
+    endif
+    !write(*,*) 'Parsing',trim(str)
+    call parse_file_on_unit(parser,pm_comp_file_unit,.false.)
+    close(pm_comp_file_unit)
+    
+!!$    
+!!$    call sysdefs(parser)
     call pm_gc(context,.false.)
     if(pm_opts%out_debug_files) then
        open(unit=9,file='sysmod.dmp')
@@ -271,13 +287,13 @@ contains
     integer:: i
     logical:: save_variants,save_elems,save_members
     if(pm_debug_level>1) write(*,*) 'TYPE INFERENCE>>'
-    call prc_prog(coder)
+    call inf_prog(coder)
 
     if(pm_opts%out_typelist) then
        write(*,*) 'TOTAL TYPES::',pm_dict_size(context,context%tcache)
     endif
 
-    if(pm_opts%out_typelist) then
+    if(pm_opts%out_typelist.and..false.) then
        open(unit=4,file='types.out')
        save_members=pm_opts%show_members
        save_elems=pm_opts%show_elems

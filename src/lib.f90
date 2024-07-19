@@ -80,7 +80,7 @@ contains
       caret=' '
       caret(n:n)='!'
       if(pm_opts%colour) then
-         write(*,'(3X,A,A67,A)') pm_error_start,caret,pm_error_end
+         write(*,'(3X,A,A67,A)') pm_opts%error_start,caret,pm_error_end
       else
          write(*,'(3X,A67)') caret
       endif
@@ -103,11 +103,10 @@ contains
    !if(.not.pm_main_process) call pm_panic('pm_get_source_line - not main process')
    iserr=.true.
    if(modl_name==sym_pm_system) then
-      if(.not.pm_opts%out_sysmod) goto 20
-      open(unit=3,file='sysmod.out',status='OLD',err=20)
-      do
-         read(3,'(I4,A7,A)',err=20,end=20) i,lbuffer,buffer
-         if(i==lineno) exit
+      call pm_module_filename('lib.sys.pm',buffer)
+      open(unit=3,file=buffer,status='OLD',err=20)
+      do i=1,lineno
+         read(3,'(A1024)',err=20,end=20) buffer
       enddo
       close(3)
    else
@@ -141,7 +140,7 @@ contains
     type(pm_ptr),intent(in):: v
     integer(pm_ln),intent(in):: j
     character(len=82):: str
-    str=''
+    str='***'
     select case(pm_fast_vkind(v))
     case(pm_tiny_int)
        write(str,'(i40)') v%offset
@@ -237,6 +236,8 @@ contains
        call fix(str(41:))
        str=trim(adjustl(str(1:40)))//trim(adjustl(str(41:80)))//'i_cpx256'
        return
+    case default
+       str='????'//trim(pm_int_as_string(pm_fast_vkind(v)))//'????'
     end select
     str=adjustl(str)
   contains

@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2020
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -123,7 +123,7 @@ module pm_vmdefs
   integer,parameter:: op_iota = op_misc2 + 9
   integer,parameter:: op_indices = op_misc2 + 10
   integer,parameter:: op_get_key = op_misc2 + 11
-  integer,parameter:: op_get_key2 = op_misc2 + 12
+  integer,parameter:: op_present = op_misc2 + 12
   integer,parameter:: op_export_array = op_misc2 + 13
   integer,parameter:: op_miss_arg = op_misc2 + 14
   integer,parameter:: op_default = op_misc2 + 15
@@ -721,6 +721,9 @@ module pm_vmdefs
   integer,parameter:: op_or_fold = -26
   integer,parameter:: op_except_fold = -27
   integer,parameter:: op_concat_fold = -28
+  integer,parameter:: op_num_elems_fold = -29
+  integer,parameter:: op_type_include_fold = -30
+  integer,parameter:: min_op=op_type_include_fold
  
   integer,dimension(0:num_op):: op_flags
   integer,parameter:: op_is_call=1
@@ -826,7 +829,7 @@ module pm_vmdefs
   data op_flags(op_iota)            /0/
   data op_flags(op_indices)         /0/
   data op_flags(op_get_key)         /0/
-  data op_flags(op_get_key2)        /0/
+  data op_flags(op_present)         /0/
   data op_flags(op_export_array)    /0/
   data op_flags(op_miss_arg)        /0/
   data op_flags(op_default)         /0/
@@ -1049,6 +1052,7 @@ module pm_vmdefs
   data op_flags(op_i16_offset)       /op_is_arith/
   data op_flags(op_i32_offset)       /op_is_arith/
   data op_flags(op_i64_offset)       /op_is_arith/
+  data op_flags(op_long_offset)      /op_is_arith/
 
   data op_flags(op_add_i8)           /op_is_arith/
   data op_flags(op_sub_i8)           /op_is_arith/
@@ -1449,7 +1453,7 @@ contains
   subroutine set_op_names
     integer:: i
     if(allocated(op_names)) return
-    allocate(op_names(0:num_op+1))
+    allocate(op_names(min_op:num_op+1))
     op_names='??'
     op_names(op_call)='call'
     op_names(op_comm_call)='comm_call'
@@ -1526,7 +1530,7 @@ contains
     op_names(op_iota)='iota'
     op_names(op_indices)='indices'
     op_names(op_get_key)='get_key'
-    op_names(op_get_key2)='get_key2'
+    op_names(op_present)='present'
     op_names(op_export_array)='export_array'
     op_names(op_miss_arg)='miss_arg'
     op_names(op_default)='default'
@@ -1578,8 +1582,8 @@ contains
     op_names(op_push_node_back)='push_node_back'
     op_names(op_sys_node)='sys_node'
     op_names(op_sys_nnode)='sys_nnode'
-    op_names(op_this_node)='this_node'
-    op_names(op_this_nnode)='sys_nnode'
+!!$    op_names(op_this_node)='this_node'
+!!$    op_names(op_this_nnode)='sys_nnode'
     op_names(op_reduce_ve)='reduce_ve'
     op_names(op_start_loop_sync)='start_loop_sync'
     op_names(op_broadcast_val)='broadcast_val'
@@ -1749,6 +1753,7 @@ contains
     op_names(op_i16_offset)='i16_offset'
     op_names(op_i32_offset)='i32_offset'
     op_names(op_i64_offset)='i64_offset'
+    op_names(op_long_offset)='long_offset'
 
     op_names(op_add_i8)='add_i8'
     op_names(op_sub_i8)='sub_i8'
@@ -1885,8 +1890,8 @@ contains
     op_names(op_i8_i64)='i8_i64'
     op_names(op_i16_i64)='i16_i64'
     op_names(op_i32_i64)='i32_i64'
-    op_names(op_offset_i8)='offset_i64'
-    op_names(op_long_i8)='long_i64'
+    op_names(op_offset_i64)='offset_i64'
+    op_names(op_long_i64)='long_i64'
 
     op_names(op_add_r)='add_r'
     op_names(op_sub_r)='sub_r'
@@ -2064,6 +2069,37 @@ contains
     op_names(op_sync)='sync'
     op_names(op_init_var)='init_var'
 
+    op_names(op_add_fold)='add_fold'
+    op_names(op_sub_fold)='sub_fold'
+    op_names(op_mult_fold)='mult_fold'
+    op_names(op_divide_fold)='divide_fold'
+    op_names(op_div_fold)='div_fold'
+    op_names(op_mod_fold)='mod_fold'
+    op_names(op_pow_fold)='pow_fold'
+    op_names(op_uminus_fold)='uminus_fold'
+    op_names(op_eq_fold)='eq_fold'
+    op_names(op_ne_fold)='ne_fold'
+    op_names(op_gt_fold)='gt_fold'
+    op_names(op_ge_fold)='ge_fold'
+    op_names(op_string_fold)='string_fold'
+    op_names(op_max_fold)='max_fold'
+    op_names(op_min_fold)='min_fold'
+    op_names(op_abs_fold)='abs_fold'
+    op_names(op_band_fold)='band_fold'
+    op_names(op_bor_fold)='bor_fold'
+    op_names(op_bxor_fold)='bxor_fold'
+    op_names(op_bshift_fold)='bshift_fold'
+    op_names(op_bnot_fold)='bnot_fold'
+    op_names(op_pdiff_fold)='pdiff_fold'
+    op_names(op_sign_fold)='sign_fold'
+    op_names(op_modulo_fold)='modulo_fold'
+    op_names(op_and_fold)='and_fold'
+    op_names(op_or_fold)='or_fold'
+    op_names(op_except_fold)='except_fold'
+    op_names(op_concat_fold)='concat_fold'
+    op_names(op_num_elems_fold)='num_elems_fold'
+    op_names(op_type_include_fold)='type_include_fold'
+     
 !!$    do i=op_call,op_comm_loop_par
 !!$       if(op_names(i)=='??')then
 !!$          write(*,*) 'MISSING OP NAME>>>>',i,'after',op_names(i-1)

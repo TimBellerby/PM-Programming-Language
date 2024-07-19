@@ -36,7 +36,6 @@ module pm_backend
   use pm_symbol
   use pm_types
   use pm_vmdefs
-  use pm_sysdefs
   use pm_array
   use pm_parlib
   implicit none
@@ -1189,20 +1188,18 @@ contains
        v=alloc_arg(pm_logical,2)
        v%data%l(v%offset:v%offset+esize)=opcode2/=0
     case(op_get_key)
-       v=stack%data%ptr(stack%offset+opcode2)
-       call set_arg(2,v)
-       w=alloc_arg(pm_logical,3)
-       if(pm_fast_vkind(v)==pm_tiny_int) then
-          w%data%l(w%offset:w%offset+esize)=.false.
-          call set_arg(2,arg(4))
+       if(pm_fast_vkind(arg(4))==pm_tiny_int) then
+          call set_arg(2,arg(1))
        else
-          w%data%l(w%offset:w%offset+esize)=.true. 
+          call set_arg(3,arg(4))
+          ve=pm_fast_newnc(context,pm_long,1)
+          call set_arg(2,make_new_ve(ve,arg(1)))
        endif
-   case(op_get_key2)
-       v=stack%data%ptr(stack%offset+opcode2)
-       call set_arg(2,v)
-    case(op_default)
-       v=alloc_arg(int(opcode2,pm_p),2)
+    case(op_present)
+      v=alloc_arg(pm_logical,2)
+      v%data%l(v%offset:v%offset+esize)=pm_fast_vkind(arg(3))/=pm_tiny_int
+   case(op_default)
+      if(.not.ve_is_empty(ve)) call set_arg(2,arg(3))
     case(op_miss_arg)
        arg(2)%data%ptr(arg(2)%offset)=empty_vector
     case(op_print)
@@ -2461,6 +2458,10 @@ contains
        endif
     case(op_add_ln)
        esize=pm_fast_esize(arg(3))
+       if(esize/=pm_fast_esize(arg(4))) then
+          write(*,*) 'Internal error: import mismatch in op_add_ln'
+          goto 999
+       endif
        v=alloc_arg(pm_long,2)
        !if(pm_fast_vkind(arg(3))/=pm_long.or.pm_fast_vkind(arg(4))/=pm_long) goto 999
        if(pm_fast_vkind(ve)==pm_logical.and.pm_mask_longadd) then
@@ -10462,7 +10463,7 @@ contains
        call mesg_q_flush()
     endif
     if(pm_opts%colour) then
-       call mesg_q_mess(pm_error_start//'Runtime error: '//pm_error_end//trim(errmesg))
+       call mesg_q_mess(pm_opts%error_start//'Runtime error: '//pm_error_end//trim(errmesg))
     else
        call mesg_q_mess('Runtime error: '//trim(errmesg))
     endif

@@ -40,7 +40,7 @@ module pm_parser
   implicit none
 
   ! Print out lots of parser debugging info
-  logical,parameter:: debug_parser=.false.
+  logical,parameter:: debug_parser=.true.
   logical,parameter:: debug_parser_extra=.false.
 
   ! Check if memory manager attempts to reuse a node
@@ -67,6 +67,7 @@ module pm_parser
      type(pm_ptr),dimension(max_parse_stack):: vstack
      integer,dimension(max_parse_stack):: vline,vchar
      integer:: vtop
+     type(pm_ptr):: op_names
      integer:: error_count
      type(pm_reg),pointer:: reg
   end type parse_state
@@ -86,6 +87,7 @@ contains
     type(pm_context),pointer:: context
     integer:: i
     type(pm_ptr)::val
+    logical:: ok
     parser%context=>context
     parser%line(1)=' '
     parser%line(2)=' '
@@ -105,7 +107,7 @@ contains
     parser%reg=>pm_register(context,'parser',&
          parser%modl,parser%modls,parser%modl_dict,&
          parser%temp,parser%sysmodl,parser%lexval, &
-         parser%visibility,&
+         parser%visibility,parser%op_names,&
          array=parser%vstack, &
          array_size=parser%vtop)
     parser%modl_dict=pm_dict_new(context,128_pm_ln)
@@ -113,6 +115,17 @@ contains
     parser%modls=pm_null_obj
     parser%visibility=pm_set_new(context,128_pm_ln)
     parser%vtop=0
+    parser%op_names=pm_dict_new(context,int(num_op-min_op+1,pm_ln))
+    ! Create dictionary of operator names (for PM__intrinsic)
+    do i=min_op,num_op
+!!$       write(*,*) '@>>',op_names(i),'{',op_names(op_offset_i8),'}',op_long_i8,op_long_i64
+       call pm_dict_set(parser%context,parser%op_names,&
+            pm_new_string(parser%context,trim(op_names(i))),&
+            pm_fast_tinyint(parser%context,i),&
+            .true.,.false.,ok)
+    enddo
+  contains
+    include 'ftiny.inc'
   end subroutine init_parser
 
   !======================================================
@@ -175,6 +188,7 @@ contains
     if(builtin(parser,opcode,opcode2,pm_null_obj,flags)) then
        call pm_panic('bad intrinsic module')
     endif
+    if(flags/=0) write(*,*) 'FLAGS=',flags
   end subroutine dcl_proc
 
   !======================================================
@@ -408,10 +422,10 @@ contains
     case('(')
        if(peekchar()=='.') then
           c=getchar()
-          sym=sym_open_square
-       elseif(peekchar()=='%') then
-          c=getchar()
           sym=sym_open_brace
+       elseif(peekchar()=='/') then
+          c=getchar()
+          sym=sym_open_square
        else
           sym=sym_open
        endif
@@ -428,6 +442,9 @@ contains
        if(peekchar()=='>') then
           c=getchar()
           sym=sym_arrow
+       elseif(peekchar()==':') then
+          c=getchar()
+          sym=sym_tilde
        else
           sym=sym_minus
        endif
@@ -445,8 +462,6 @@ contains
        else
           sym=sym_pling
        endif
-    case('~')
-       sym=sym_tilde
     case('/')
        if(peekchar()=='=') then
           c=getchar()
@@ -454,6 +469,9 @@ contains
        elseif(peekchar()==':') then
           c=getchar()
           sym=sym_bar
+       elseif(peekchar()==')') then
+          c=getchar()
+          sym=sym_close_square
        else
           sym=sym_divide
        endif
@@ -505,9 +523,6 @@ contains
        elseif(peekchar()==':') then
           c=getchar()
           sym=sym_hash
-       elseif(peekchar()==')') then
-          c=getchar()
-          sym=sym_close_brace
        else
           sym=sym_pct
        endif
@@ -525,7 +540,7 @@ contains
           sym=sym_d1+iachar(c)-iachar('1')
        elseif(peekchar()==')') then
           c=getchar()
-          sym=sym_close_square
+          sym=sym_close_brace
        else
           sym=sym_dot
        endif
@@ -575,7 +590,12 @@ contains
           sym=sym_dash
        endif
     case('&')
-       sym=sym_amp
+       if(peekchar()=='&') then
+          c=getchar()
+          sym=sym_damp
+       else
+          sym=sym_amp
+       endif
     case('$')
        if(peekchar()=='$') then
           c=getchar()
@@ -588,13 +608,13 @@ contains
        ! local character sets and/or keyboards
        ! Alternatives are available
        ! *********************************************
-    case('[')                 ! Alternative (.
+    case('[')                 ! Alternative (/
        sym=sym_open_square
-    case(']')                 ! Alternative .)
+    case(']')                 ! Alternative /)
        sym=sym_close_square
-    case('{')                 ! Alternative (%
+    case('{')                 ! Alternative (.
        sym=sym_open_brace     
-    case('}')                 ! Alternative %)
+    case('}')                 ! Alternative .)
        sym=sym_close_brace    
     case('|')                 ! Alternative /:
        sym=sym_bar            
@@ -602,6 +622,8 @@ contains
        sym=sym_at      
     case('#')                 ! Alternative %:
        sym=sym_hash
+    case('~')                 ! Alternative -:
+       sym=sym_tilde
     case('^')                 ! Only used for internal system purposes
        if(.not.(parser%modl==parser%sysmodl)) then
           call parse_error(parser,'Error: Unexpected character "'//c//'"')
@@ -1160,10 +1182,11 @@ contains
   !======================================================
   subroutine simple_call(parser)
     type(parse_state),intent(inout):: parser
-    call push_null_val(parser)      ! keys
     call push_null_val(parser)      ! amps
+    call push_null_val(parser)      ! keys
+    call push_null_val(parser)      ! key names
     call push_num_val(parser,0)     ! flags
-    call make_node(parser,sym_open,5)    
+    call make_node(parser,sym_open,6)    
   end subroutine simple_call
 
   !======================================================
@@ -1201,6 +1224,7 @@ contains
     else
        flags=0
     endif
+    
     if(flags/=0) then
        call push_sym_val(parser,sym_region)
        call make_node(parser,sym_name,1)
@@ -1210,15 +1234,14 @@ contains
        call make_node(parser,sym_name,1)
        m=3
     endif
+
     if(present(object)) then
        call push_val(parser,object)
        m=m+1
     endif
-    if(parser%sym/=sym_open) then
-       if(expect(parser,sym_open)) return
-    else
-       call scan(parser)
-    endif
+
+    if(expect(parser,sym_open)) return
+    
     ! Call attributes but no arguments
     if(parser%sym==sym_open_attr) then
        if(proc_call_attr(parser,.true.,flags)) return
@@ -1226,51 +1249,51 @@ contains
           if(expect(parser,sym_close)) return
        endif
     endif
+
+    ! Call with no arguments
     if(parser%sym==sym_close) then
-       if(m==0) then
-          call push_null_val(parser)
-       else
-          call make_node(parser,sym_list,m)
-       endif                           ! args
-       call push_null_val(parser)      ! keys
-       call push_null_val(parser)      ! amps
-       call push_num_val(parser,flags) ! flags
-       call make_node_at(parser,sym_open,5,line,pos)
+       call make_node(parser,sym_list,m)  ! args
+       call push_null_val(parser)         ! amps
+       call push_null_val(parser)         ! keys
+       call push_null_val(parser)         ! key names
+       call push_num_val(parser,flags)    ! flags
+       call make_node_at(parser,sym_open,6,line,pos)
        call scan(parser)
        iserr=.false.
        return
     endif
+
+    ! Positional argument
     do 
        if(parser%sym==sym_amp) then
           call scan(parser)
-          if(parser%sym==sym_amp) then
-             call scan(parser)
-             if(valref(parser)) return
-          else
-             if(valref(parser)) return
-             call make_node(parser,sym_amp,1)
-          endif
+          if(valref(parser)) return
           m=m+1
           call push_sym(parser,m)
-       elseif(parser%sym==sym_key) then
-          call make_node(parser,sym_list,m)
-          exit
        else if(parser%sym==sym_arg) then
-          call scan(parser)
-          if(parser%sym==sym_dotdotdot) then
-             call push_sym_val(parser,sym_arg)
-             call make_node(parser,sym_arg,1)
-             call make_node(parser,sym_dotdotdot,m+1)
-             call scan(parser)
-             exit
+          call push_sym_val(parser,sym_arg)
+          call make_node(parser,sym_arg,1)
+          call make_node(parser,sym_dotdotdot,m+1)
+          if(parser%top>base) then
+             call name_vector(parser,base)
           else
-             call push_back(parser,sym_arg)
+             call push_null_val(parser)
           endif
+          base=parser%top
+          call scan(parser)
+          if(expect(parser,sym_dotdotdot)) return
+          exit
        else
           if(check_name(parser,sym)) then
              if(parser%sym==sym_define) then
                 call make_node(parser,sym_list,m)
-                call push_name_val(parser,sym)
+                if(parser%top>base) then
+                   call name_vector(parser,base)
+                else
+                   call push_null_val(parser)
+                endif
+                base=parser%top
+                call push_sym(parser,sym)
                 call scan(parser)
                 if(expr(parser)) return
                 n=1
@@ -1284,46 +1307,56 @@ contains
        endif
        if(parser%sym/=sym_comma) then
           call make_node(parser,sym_list,m)
+          if(parser%top>base) then
+             call name_vector(parser,base)
+          else
+             call push_null_val(parser)
+          endif
           exit
        endif
        call scan(parser)
     enddo
+
+    ! Remaining keyword arguments
     do while(parser%sym==sym_comma)
        call scan(parser)
-       if(parser%sym==sym_key) exit
-       if(expect_name(parser,&
-            'optional argument name')) return
+       if(check_name(parser,sym)) then
+          call push_sym(parser,sym)
+       else
+          if(expect_name(parser,&
+               'keyword argument name')) return
+       endif
        if(expect(parser,sym_define,&
-            'optional argument "="')) return
+            'keyword argument "="')) return
        if(expr(parser)) return
        n=n+1
     enddo
-    if(parser%sym==sym_key) then
-       call scan(parser)
-       if(expect(parser,sym_dotdotdot)) return
-       call make_node(parser,sym_dotdotdot,n*2)
-    else if(n>0) then
-       call make_node(parser,sym_list,n*2)
+
+    ! List of keyword expressions
+    if(n>0) then
+       call make_node(parser,sym_list,n)
     else
        call push_null_val(parser)
     endif
- 
+
+    ! Vector of keyword names
     if(parser%top>base) then
        call name_vector(parser,base)
     else
        call push_null_val(parser)
     endif
-
+    
     ! Call attributes if present
     if(parser%sym==sym_open_attr) then
        if(proc_call_attr(parser,.true.,flags)) return
     endif
     
     call push_num_val(parser,flags)
-    call make_node_at(parser,sym_open,5,line,pos)
+    call make_node_at(parser,sym_open,6,line,pos)
+    
     if(m+n>pm_max_args) then
        call parse_error(parser,&
-            'Too many arguments to proc call - maximum is:'//pm_maxargs_str)
+            'Too many arguments to proc call - maximum is:'//trim(pm_int_as_string(pm_max_args)))
     endif
     if(expect(parser,sym_close)) return
     iserr=.false.
@@ -1745,8 +1778,10 @@ contains
        if(struct_gen(parser)) return
     case(sym_present)
        call scan(parser)
+       if(expect(parser,sym_open)) return
        if(expect_name(parser)) return
        call make_node(parser,sym_present,1)
+       if(expect(parser,sym_close)) return
     case(sym_number,sym_string)
        call push_val(parser,parser%lexval)
        call make_node(parser,sym,1)
@@ -1782,45 +1817,19 @@ contains
        if(typ(parser)) return
        if(expect(parser,sym_gt)) return
        call make_node(parser,sym_type_val,1)
-    case(sym_dash)
+    case(sym_fix)
        call scan(parser)
-       select case(parser%sym)
-       case(sym_number)
-          if(pm_fast_vkind(parser%lexval)/=pm_long) then
-             call parse_error(parser,&
-                  '"''" cannot precede non-default integer constant')
-          endif
-          call push_val(parser,parser%lexval)
-          call scan(parser)
-          call make_node(parser,sym_dash,1)
-       case(sym_string)
-          call push_val(parser,parser%lexval)
-          call scan(parser)
-          call make_node(parser,sym_dash,1)
-       case(sym_true,sym_false)
-          call push_sym_val(parser,parser%sym)
-          call scan(parser)
-          call make_node(parser,sym_dash,1)
-       case(sym_open)
-          call scan(parser)
-          if(expr(parser)) return
-          if(expect(parser,sym_close)) return
-          call make_node(parser,sym_fix,1)
-       case(sym_open_square)
+       if(parser%sym==sym_open_square) then
           call push_sym_val(parser,sym_tuple)
           if(subscript(parser)) return
           call simple_call(parser)
           call make_node(parser,sym_fix,1)
-       case default
-          if(parser%sym>num_sym) then
-             call push_val(parser,pm_name_val(parser%context,parser%sym))
-             call make_node(parser,sym_dash,1)
-             call scan(parser)
-          else
-             call parse_error(parser,'"''" must be followed by constant value')
-             return
-          endif
-       end select
+       else
+          if(expect(parser,sym_open)) return
+          if(expr(parser)) return
+          if(expect(parser,sym_close)) return
+          call make_node(parser,sym_fix,1)
+       endif
     case(sym_null)
        if(parser%sym==sym_open) then
           call scan(parser)
@@ -1954,7 +1963,20 @@ contains
   recursive function expr(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
-    iserr=expr1(parser,100)
+    integer:: n
+    iserr=.true.
+    n=0
+    do
+       if(expr1(parser,100)) return
+       n=n+1
+       if(parser%sym==sym_damp) then
+          call scan(parser)
+       else
+          exit
+       endif
+    enddo
+    if(n>1) call make_node(parser,sym_damp,n)
+    iserr=.false.
   end function expr
     
   recursive function expr1(parser,priority) result(iserr)
@@ -2215,7 +2237,7 @@ contains
     type(parse_state),intent(inout):: parser
     logical,intent(in):: call_ok,assign_ok,define_ok
     logical:: iserr
-    integer:: n,nu,name
+    integer:: n,nu,name,m
     logical:: dotcall,must_be_assignment
     iserr=.true.
     n=0
@@ -2230,44 +2252,55 @@ contains
           nu=nu+1
           n=n+1
        else
-          if(expect_name(parser)) return
+          m=0
           n=n+1
-          select case(parser%sym)
-          case(sym_open,sym_pct)
-             if(n>1.or.nu>0.or..not.call_ok) then
-                call parse_error(parser,&
-                     'Unexpected symbol in what seems to be a left hand side expression')
-                return
-             endif
-             if(arglist(parser)) return
-             call make_node(parser,sym_do,1)
-             if(parser%sym==sym_comma) then
-                call parse_error(parser,'Cannot follow a call with a comma')
-                return
-             endif
-             iserr=.false.
-             return
-          case(sym_dot,sym_d1:sym_d7,sym_open_square,sym_at)
-             must_be_assignment=.true.
-             dotcall=.false.
-             call make_node(parser,sym_name,1)
-             if(qual(parser,dotcall)) return
-             if(dotcall) then
-                if(n==1.and.call_ok) then
-                   call make_node(parser,sym_do,1)
-                   if(parser%sym==sym_comma) then
-                      call parse_error(parser,'Cannot follow a call with a comma')
-                      return
-                   endif
-                   iserr=.false.
-                   return
-                else
+          do
+             if(expect_name(parser)) return
+             select case(parser%sym)
+             case(sym_open,sym_pct)
+                if(n>1.or.nu>0.or..not.call_ok) then
                    call parse_error(parser,&
-                        'Unexpected call in what seems to be left hand side expression')
+                        'Unexpected symbol in what seems to be a left hand side expression')
                    return
                 endif
+                if(arglist(parser)) return
+                call make_node(parser,sym_do,1)
+                if(parser%sym==sym_comma) then
+                   call parse_error(parser,'Cannot follow a call with a comma')
+                   return
+                endif
+                iserr=.false.
+                return
+             case(sym_dot,sym_d1:sym_d7,sym_open_square,sym_at)
+                must_be_assignment=.true.
+                dotcall=.false.
+                call make_node(parser,sym_name,1)
+                if(qual(parser,dotcall)) return
+                if(dotcall) then
+                   if(n==1.and.call_ok) then
+                      call make_node(parser,sym_do,1)
+                      if(parser%sym==sym_comma) then
+                         call parse_error(parser,'Cannot follow a call with a comma')
+                         return
+                      endif
+                      iserr=.false.
+                      return
+                   else
+                      call parse_error(parser,&
+                           'Unexpected call in what seems to be left hand side expression')
+                      return
+                   endif
+                endif
+             end select
+             m=m+1
+             if(parser%sym==sym_damp) then
+                call scan(parser)
+                must_be_assignment=.true.
+             else
+                exit
              endif
-          end select
+          enddo
+          if(m>1) call make_node(parser,sym_damp,m)
           select case(parser%sym)
           case(sym_plus,sym_minus,sym_mult,sym_and,sym_or,sym_amp,sym_bar,sym_xor,sym_concat)
              call push_sym_val(parser,parser%sym)
@@ -2289,13 +2322,13 @@ contains
 
     call make_node(parser,sym_define,n)
     if(expect(parser,sym_define)) return
-    
+
     if(must_be_assignment.and..not.assign_ok) then
        call parse_error(parser,'Cannot have an assignment in this context')
     endif
     if(rhs(parser,n)) return
     call make_node(parser,sym_define,2)
-    
+
     iserr=.false.
   end function assn_or_call
 
@@ -2342,24 +2375,35 @@ contains
   recursive function valref(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
+    integer:: n
     iserr=.true.
-    if(parser%sym==sym_caret) then
-       call scan(parser)
-       if(expect(parser,sym_open)) return
-       if(expr(parser)) return
-       if(expect(parser,sym_close)) return
-       call make_node(parser,sym_caret,1)
-    else
-       if(expect_name(parser)) return
-       if(parser%sym==sym_dash) then
+    n=0
+    do 
+       if(parser%sym==sym_caret) then
           call scan(parser)
-          if(expect_name(parser)) return
-          call make_node(parser,sym_use,2)
+          if(expect(parser,sym_open)) return
+          if(expr(parser)) return
+          if(expect(parser,sym_close)) return
+          call make_node(parser,sym_caret,1)
        else
-          call make_node(parser,sym_name,1)
-       end if
-    endif
-    if(qual(parser)) return
+          if(expect_name(parser)) return
+          if(parser%sym==sym_dash) then
+             call scan(parser)
+             if(expect_name(parser)) return
+             call make_node(parser,sym_use,2)
+          else
+             call make_node(parser,sym_name,1)
+          end if
+       endif
+       n=n+1
+       if(qual(parser)) return
+       if(parser%sym==sym_damp) then
+          call scan(parser)
+       else
+          exit
+       endif
+    enddo
+    if(n>1) call make_node(parser,sym_damp,n)
     iserr=.false.
   end function valref
 
@@ -3763,10 +3807,6 @@ contains
        call make_node(parser,sym_any,0)
        if(typunary(parser)) return
        call make_node(parser,sym_includes,2)
-    elseif(parser%sym==sym_fix) then
-       call scan(parser)
-       if(typunary(parser)) return
-       call make_node(parser,sym_fix,1)
     else
        if(typval(parser)) return
     endif
@@ -3805,23 +3845,42 @@ contains
     case(sym_any)
        call scan(parser)
        call make_node(parser,sym_any,0)
-    case(sym_dash)
+    case(sym_fix,sym_literal)
        call scan(parser)
-       if(parser%sym==sym_number) then
-          if(pm_fast_vkind(parser%lexval)/=&
-               pm_long) then
-             call parse_error(parser,&
-                  'Cannot have "''" before non-default integer constant')
-          endif
-          call push_val(parser,parser%lexval)
-          call scan(parser)
-          call make_node(parser,sym_dash,1)
-       elseif(parser%sym==sym_true.or.parser%sym==sym_false) then
-          call push_sym_val(parser,parser%sym)
-          call scan(parser)
-          call make_node(parser,sym_dash,1)
+       if(sym==sym_literal.and.parser%sym/=sym_open) then
+          call make_node(parser,sym_any,0)
+          call make_node(parser,sym_literal,1)
        else
-          call parse_error(parser,'Expected number,"true" or "false"')
+          if(parser%sym==sym_open) then
+             call scan(parser)
+             if(parser%sym==sym_number) then
+                if(pm_fast_vkind(parser%lexval)/=&
+                     pm_long) then
+                   call parse_error(parser,&
+                        'Cannot have "fix" before non-default integer constant')
+                endif
+                call push_val(parser,parser%lexval)
+                call make_node(parser,sym_number,1)
+                call scan(parser)
+                call make_node(parser,sym,1)
+             elseif(parser%sym==sym_true.or.parser%sym==sym_false) then
+                call make_node(parser,parser%sym,0)
+                call scan(parser)
+                call make_node(parser,sym,1)
+             elseif(parser%sym==sym_string) then
+                call push_val(parser,parser%lexval)
+                call make_node(parser,sym_string,1)
+                call scan(parser)
+                call make_node(parser,sym,1)
+             else
+                if(typ(parser)) return
+                call make_node(parser,sym,1)
+             endif
+             if(expect(parser,sym_close)) return
+          else
+             call push_null_val(parser)
+             call make_node(parser,sym,1)
+          endif
        endif
     case(sym_dollar)
        call scan(parser)
@@ -4689,7 +4748,7 @@ contains
     
     if(pm_debug_checks) then
        if(parser%vtop-base/=proc_num_args) then
-          write(*,*) '========='
+          write(*,*) '=========',parser%vtop-base,proc_num_args
           do flags=base+1,parser%vtop
              call dump_parse_tree(parser%context,6,parser%vstack(flags),2)
              write(*,*) '==='
@@ -4861,6 +4920,7 @@ contains
     ! Special forms of return type which compute it based on arguments
     if(parser%sym==sym_arrow) then
        call scan(parser)
+       if(expect(parser,sym_open)) return
        sym=parser%sym
        select case(sym)
        case(sym_gt,sym_dim,sym_vdim,sym_invar_dim,sym_fix_dim,&
@@ -4876,7 +4936,7 @@ contains
           call make_node(parser,sym,1)
        case(sym_pct,sym_define,sym_dot,sym_query,sym_amp,&
             sym_hash,sym_caret,sym_dcaret,sym_d1:sym_d7,sym_invar,sym_shared,&
-            sym_type,sym_tilde)
+            sym_type,sym_tilde,sym_damp,sym_bar)
           ! These return N types based on types of a
           ! list of N expressions
           call scan(parser)
@@ -4905,6 +4965,7 @@ contains
           call swap_vals(parser)
           call push_null_val(parser)
        end select
+       if(expect(parser,sym_close)) return
     else
        call push_num_val(parser,0)
        call push_null_val(parser)
@@ -4914,9 +4975,123 @@ contains
     return
   end function proc_sig
 
+  function builtin_flags(parser,flags) result(iserr)
+    type(parse_state),intent(inout):: parser
+    integer,intent(out):: flags
+    logical:: iserr
+    iserr=.true.
+    flags=0
+    if(parser%sym==sym_open_attr) then
+       call scan(parser)
+       do
+          select case(parser%sym)
+          case(sym_proc_is_generator)
+             flags=ior(flags,proc_is_generator)
+          case(sym_proc_is_impure)
+             flags=ior(flags,proc_is_impure)
+          case(sym_proc_has_for)
+             flags=ior(flags,proc_has_for)
+          case(sym_proc_is_dcomm)
+             flags=ior(flags,proc_is_dcomm)
+          case(sym_proc_is_file)
+             flags=ior(flags,proc_is_file)
+          case(sym_proc_is_not_inlinable)
+             flags=ior(flags,proc_is_not_inlinable)
+          case(sym_proc_needs_type)
+             flags=ior(flags,proc_needs_type)
+          case default
+             call parse_error(parser,'Bad PM__intrinsic attribute')
+             return
+          end select
+          call scan(parser)
+          if(parser%sym/=sym_comma) exit
+          call scan(parser)
+       enddo
+       if(expect(parser,sym_close_attr)) return
+    endif
+    iserr=.false.
+  end function builtin_flags
+
   !======================================================
   ! Built in procedure definition
   !======================================================
+  function intrinsic(parser) result(iserr)
+    type(parse_state),intent(inout):: parser
+    logical:: iserr
+    type(pm_ptr),target:: ptr
+    type(pm_ptr)::p,link
+    type(pm_reg),pointer:: reg
+    integer:: name,sym,opcode,opcode2,flags
+    reg=>pm_register(parser%context,'builtin',ptr)
+    iserr=.true.
+
+    call scan(parser)
+    if(builtin_flags(parser,flags)) goto 999
+    
+    if(.not.check_name(parser,name)) then
+       if(op(parser,name,.false.,.false.)) goto 999
+       call push_sym_val(parser,name)
+    else
+       call push_sym_val(parser,name)
+    endif
+    if(parser%sym==sym_pct) then
+       call scan(parser)
+       flags=ior(flags,call_is_comm)
+    endif
+
+    ! Create full name: module!name
+    call push_sym(parser,&
+         -get_modl_name(parser%modl))
+    ptr=top_val(parser)
+    name=ptr%offset
+    call push_sym(parser,name)
+    call name_vector(parser,parser%top-2)
+
+    ! Link into list of delarations for this name
+    ptr=decl_entry(parser,int(ptr%offset),modl_proc,link)
+    call push_val(parser,link)
+    call push_val(parser,parser%modl)  ! module
+    call push_num_val(parser,flags)    ! flags
+    if(expect(parser,sym_open)) goto 999
+    if(proc_sig(parser)) return
+
+    if(expect(parser,sym_colon)) goto 999
+    if(expect(parser,sym_string)) goto 999
+    p=pm_dict_lookup(parser%context,parser%op_names,parser%lexval)
+    if(pm_fast_isnull(p)) then
+       call parse_error(parser,'Bad intrinsic operation'//&
+            pm_value_as_string(parser%context,parser%lexval))
+       goto 999
+    endif
+    opcode=p%offset
+    
+    if(parser%sym==sym_open) then
+       call scan(parser)
+       if(expect(parser,sym_number)) goto 999
+       opcode2=parser%lexval%data%ln(parser%lexval%offset)
+       if(expect(parser,sym_close)) goto 999
+    else
+       opcode2=0
+    endif
+    
+    call push_num_val(parser,int(opcode))
+    call push_num_val(parser,int(opcode2))
+    call push_val(parser,pm_null_obj)
+    call push_null_val(parser)
+    call make_node(parser,sym_builtin,sysproc_num_args)
+    if(debug_parser_extra) then
+       write(*,*) 'BUILTIN DECL>----------------'
+       call dump_parse_tree(parser%context,6,top_val(parser),2)
+       write(*,*) 'BI-DECL-------------'
+    endif
+    call add_proc_decl(parser,name,ptr)
+    iserr=.false.
+999 call pm_delete_register(parser%context,reg)
+  contains
+    include 'fisnull.inc'
+  end function intrinsic
+
+
   function builtin(parser,opcode,opcode2,pdata,pflags) result(iserr)
     type(parse_state),intent(inout):: parser
     integer,intent(in):: opcode
@@ -4978,6 +5153,7 @@ contains
     include 'fisnull.inc'
   end function builtin
 
+
   !==============================================================
   ! Add top of stack as declaration of procedure name
   ! Stack must contain <name> <procedure decl> as top 2 entries
@@ -5033,7 +5209,7 @@ contains
     if(typ_params(parser,m)) goto 999   
     params=top_val(parser)
 
-    ! <: typelist
+    ! in typelist
     if(parser%sym==sym_in) then
        call scan(parser)
        if(typ_list(parser,m)) return
@@ -5453,11 +5629,13 @@ contains
     integer:: m,sym,name,name2,base,top,kind,line,pos
     integer:: serror
     logical:: ok
-    call push_sym_val(parser,sym_pm_system)
-    call push_val(parser,parser%sysmodl)
-    call push_null_val(parser)
-    call make_node(parser,sym_use,3)
-    call new_import(parser,sym_pm_system,pop_val(parser))
+    if(.not.(parser%modl==parser%sysmodl)) then
+       call push_sym_val(parser,sym_pm_system)
+       call push_val(parser,parser%sysmodl)
+       call push_null_val(parser)
+       call make_node(parser,sym_use,3)
+       call new_import(parser,sym_pm_system,pop_val(parser))
+    endif
     do while(parser%sym==sym_use)
        call use_stmt
        if(parser%sym==sym_semi) then
@@ -5490,6 +5668,24 @@ contains
           if(param_decl(parser)) goto 999
        case(sym_test)
           if(test_stmt(parser)) goto 999
+       case(sym_pm_if_compiling)
+          call scan(parser)
+          if(.not.pm_is_compiling) then
+             do while(parser%sym/=sym_pm_else)
+                call scan(parser)
+             enddo
+             call scan(parser)
+          endif
+       case(sym_pm_else)
+          call scan(parser)
+          do while(parser%sym/=sym_pm_endif)
+             call scan(parser)
+          enddo
+          call scan(parser)
+       case(sym_pm_endif)
+          call scan(parser)
+       case(sym_pm_intrinsic)
+          if(intrinsic(parser)) goto 999
        case default
           exit
        end select
@@ -6202,12 +6398,12 @@ contains
        caret=" "
        caret(n:n)="!"
        if(pm_opts%colour) then
-          write(*,'(3X,A,A67,A)') pm_error_start,caret,pm_error_end
+          write(*,'(3X,A,A67,A)') pm_opts%error_start,caret,pm_error_end
        else
           write(*,'(3X,A67)') caret
        endif
 10     continue
-       write(*,'(A,A)') trim(pm_opts%error),trim(emess)
+       write(*,'(A,X,A)') trim(pm_opts%error),trim(emess)
     endif
     parser%error_count=parser%error_count+1
     if(parser%error_count>max_errors) then

@@ -3969,20 +3969,27 @@ contains
     integer,intent(in):: depth
     character(len=80):: spaces=' '
     integer:: k
-    type(pm_ptr):: name
+    type(pm_ptr):: name,p
     integer:: tno,i
     if(depth>=35) then
        write(*,*) spaces(1:depth*2),'...'
     endif
     k=pm_fast_typeof(v)
-    !write(*,*) 'k=',k
+    write(*,*) 'k=',k
     select case(k)
     case(pm_array_type,pm_const_array_type)
-       write(*,*) spaces(1:depth*2),'Array (',v%data%hash,v%offset
-       call vector_dump(context,v%data%ptr(v%offset+pm_array_vect),depth+1)
-       write(*,*) spaces(1:depth*2),') over ('
-       call vector_dump(context,v%data%ptr(v%offset+pm_array_dom),depth+1)
-       write(*,*) spaces(1:depth*2),')'
+       p=v%data%ptr(v%offset+pm_array_vect)
+       p=p%data%ptr(p%offset)
+       write(*,*) 'vkind=',pm_fast_vkind(p)
+       if(pm_fast_vkind(p)==pm_string) then
+          write(*,*) spaces(1:depth*2),trim(pm_value_as_string(context,p))
+       else
+          write(*,*) spaces(1:depth*2),'Array (',v%data%hash,v%offset
+          call vector_dump(context,v%data%ptr(v%offset+pm_array_vect),depth+1)
+          write(*,*) spaces(1:depth*2),') over ('
+          call vector_dump(context,v%data%ptr(v%offset+pm_array_dom),depth+1)
+          write(*,*) spaces(1:depth*2),')'
+       endif
     case(pm_dref_type,pm_dref_shared_type)
        if(k==pm_dref_type) then
           write(*,*) spaces(1:depth*2),'D-ref ('
@@ -4027,7 +4034,7 @@ contains
   contains
     include 'ftypeof.inc'
     include 'fesize.inc'
-       
+    include 'fvkind.inc'
   end subroutine vector_dump
   
   recursive subroutine vector_dump_to(context,v,j,output,depth)
@@ -4054,17 +4061,21 @@ contains
     k=pm_fast_typeof(v)
     select case(k)
     case(pm_array_type,pm_const_array_type)
-       call output(context,spaces(1:depth*2)//'Array (')
        w=v%data%ptr(v%offset+pm_array_vect)
        w=w%data%ptr(w%offset+j)
-       esize=vector_esize(w)
-       do jj=0,min(5,esize)
-          call vector_dump_to(context,w,jj,output,depth+1)
-       enddo
-       if(esize>5) call output(context,spaces(1:depth*2+2)//'...')
-       call output(context,spaces(1:depth*2)//') over (')
-       call vector_dump_to(context,v%data%ptr(v%offset+pm_array_dom),j,output,depth+1)
-       call output(context,spaces(1:depth*2)//')')
+       if(pm_fast_vkind(w)==pm_string) then
+          call output(context,spaces(1:depth*2)//trim(pm_value_as_string(context,w)))
+       else
+          call output(context,spaces(1:depth*2)//'Array (')
+          esize=vector_esize(w)
+          do jj=0,min(5,esize)
+             call vector_dump_to(context,w,jj,output,depth+1)
+          enddo
+          if(esize>5) call output(context,spaces(1:depth*2+2)//'...')
+          call output(context,spaces(1:depth*2)//') over (')
+          call vector_dump_to(context,v%data%ptr(v%offset+pm_array_dom),j,output,depth+1)
+          call output(context,spaces(1:depth*2)//')')
+       endif
     case(pm_dref_type,pm_dref_shared_type)
        if(k==pm_dref_type) then
           call output(context,spaces(1:depth*2)//'D-ref (')
@@ -4121,7 +4132,7 @@ contains
   contains
     include 'ftypeof.inc'
     include 'fesize.inc'
-       
+    include 'fvkind.inc'
   end subroutine vector_dump_to
 
   

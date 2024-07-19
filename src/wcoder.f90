@@ -37,7 +37,6 @@ module pm_wcode
   use pm_lib
   use pm_symbol
   use pm_types
-  use pm_sysdefs
   use pm_ast
   use pm_cnodes
   use pm_infer
@@ -111,7 +110,7 @@ module pm_wcode
      logical:: proc_shared_inline
 
      ! Inlining
-     type(pm_ptr):: inline_args,outer_rv
+     type(pm_ptr):: inline_args,inline_keys,inline_key_names,outer_rv
      logical:: inline_all,inline_none
 
      ! Compile time types
@@ -179,6 +178,8 @@ contains
        wcd%typeset=pm_set_new(wcd%context,32_pm_ln)
     endif
     wcd%inline_args=pm_null_obj
+    wcd%inline_keys=pm_null_obj
+    wcd%inline_key_names=pm_null_obj
   end subroutine init_wcoder
 
   !====================================================
@@ -270,8 +271,7 @@ contains
             cnode_args+2,proc_is_not_inlinable)
        wcd%proc_is_chan=cnode_flags_set(pr,pr_flags,proc_run_complete)
        wcd%proc_shared_inline=.false.
-       wcd%npar=cnode_get_num(pr,pr_nret)+&
-            cnode_get_num(pr,pr_nkeys)+wcd%loop_extra_arg
+       wcd%npar=cnode_get_num(pr,pr_nret)+wcd%loop_extra_arg
       if(pm_is_compiling) then
           if(rv%data%i(rv%offset)==-1) then
              wcd%retvar=alloc_result_var(wcd,int(pm_null))
@@ -279,15 +279,15 @@ contains
              wcd%retvar=alloc_result_var(wcd,rv%data%i(rv%offset))
           endif
           nret=wcd%nvar
-          if(.not.pm_fast_isnull(keys)) then
-             p2=pm_fast_newnc(wcd%context,pm_int,&
-                  int(pm_fast_esize(keys)+1))
-             wcd%keys=p2
-             do j=0,pm_fast_esize(keys)
-                p2%data%i(p2%offset+j)=&
-                     alloc_key_var(wcd,keys%data%i(keys%offset+j))
-             enddo
-          endif
+!!$          if(.not.pm_fast_isnull(keys)) then
+!!$             p2=pm_fast_newnc(wcd%context,pm_int,&
+!!$                  int(pm_fast_esize(keys)+1))
+!!$             wcd%keys=p2
+!!$             do j=0,pm_fast_esize(keys)
+!!$                p2%data%i(p2%offset+j)=&
+!!$                     alloc_key_var(wcd,keys%data%i(keys%offset+j))
+!!$             enddo
+!!$          endif
           if(wcd%loop_extra_arg/=0) then
              if(vev>0) then
                 wcd%vevar=cvar_alloc_entry(wcd,v_is_parve,0,0,int(pm_logical))
@@ -303,7 +303,8 @@ contains
        if(debug_wcode) then
           write(*,*) 'WCODE PROC> #',i,'SIGNO>',n,'VE>',ve,&
                'NRET>',wcd%npar,'NVAR>',wcd%nvar,&
-               'CAN INLINE> ',wcd%proc_can_inline,'CHAN>',wcd%proc_is_chan
+               'CAN INLINE> ',wcd%proc_can_inline,'CHAN>',wcd%proc_is_chan,&
+               'EXTRA>',wcd%loop_extra_arg
        endif
        cblock=cnode_get(pr,pr_cblock)
        call wcode_proc_body(wcd,cblock,rv,ve)
@@ -514,6 +515,9 @@ contains
     npar=wcd%npar
     p=cnode_get(cblock,cblock_first_var)
     if(.not.pm_fast_isnull(p)) then
+!!$       write(*,*) 'ALLOCATING PARAM maybe>',&
+!!$                  trim(pm_name_as_string(wcd%context,cnode_get_name(p,var_name))),&
+!!$                  cnode_flags_set(p,var_flags,var_is_param)
        do while(cnode_flags_set(p,var_flags,var_is_param))
           slot=cnode_get_num(p,var_index)
           typ=get_var_type(wcd,p,rv)
@@ -791,7 +795,7 @@ contains
     logical:: break
 
     type(pm_ptr):: args
-    integer:: nargs,totargs,nret
+    integer:: nargs,totargs,nkeys,nret
     integer:: costart,cs,save_xbase,save_top,save_lbtop
     integer(pm_p):: m
     integer:: i,j,k,opr,tk,name,name2,new_ve,new_ve2,sig
@@ -799,12 +803,12 @@ contains
     type(pm_ptr):: arg,u,v,tv
     logical:: varg,ok,break2,save_inline_none
     integer:: typ,pc,jmp,tno,idx,n,ii,kk,slot,slot1,slot2,slot3
- 
+
     if(pm_debug_checks) then
        if(cnode_get_kind(callnode)/=cnode_is_call) &
             call pm_panic('Wcode call')
     endif
-    
+
     break=.false.
 
     args=cnode_get(callnode,call_args)
@@ -812,7 +816,7 @@ contains
     nret=cnode_get_num(callnode,call_nret)
     sig=-cnode_get_num(callnode,call_sig)
     new_ve=-1
-    
+
     if(debug_wcode) then
        if(sig>0) then 
           write(*,*) 'WCODE CALL>',sym_names(sig)
@@ -882,9 +886,9 @@ contains
              endif
              k=wcd%pc
              if(wcode_cblock(wcd,arg,rv,new_ve2).neqv.break2) then
-               call wcode_error(wcd,callnode,&
-                    'Communicating operations do not match '//&
-                    'in different branches of "if"/"switch"')
+                call wcode_error(wcd,callnode,&
+                     'Communicating operations do not match '//&
+                     'in different branches of "if"/"switch"')
              endif
              if(.not.break2) call release_var(wcd,new_ve2)
              if(break2) then
@@ -905,7 +909,7 @@ contains
           new_ve=0
           if(tno==wcd%true_name) then
              call wcode_comm_block(wcd,cnode_arg(args,2),&
-               wcd%lstack(wcd%ltop-1),rv,new_ve)
+                  wcd%lstack(wcd%ltop-1),rv,new_ve)
           elseif(tno==wcd%false_name) then
              if(.not.pm_fast_isnull(cnode_arg(args,3))) then
                 call wcode_comm_block(wcd,cnode_arg(args,3),&
@@ -920,7 +924,7 @@ contains
              if(.not.pm_fast_isnull(cnode_arg(args,3))) then
                 call comp_start_else_block(wcd,pc)
                 call wcode_comm_block(wcd,cnode_arg(args,3),&
-                  wcd%lstack(wcd%ltop-1),rv,new_ve)
+                     wcd%lstack(wcd%ltop-1),rv,new_ve)
                 call comp_finish_else_block(wcd,pc)
              else
                 call comp_finish_block(wcd,pc)
@@ -1144,7 +1148,7 @@ contains
           break2=wcode_cblock(wcd,cnode_arg(args,8),rv,new_ve)
           call comp_start_else_block(wcd,pc)
           call arg_set_slot(wcd,cnode_arg(args,2),&
-                  arg_slot(wcd,cnode_arg(args,4)))
+               arg_slot(wcd,cnode_arg(args,4)))
           if(sig==sym_pm_serve.or.sig==sym_pm_recv) then
              call arg_set_slot(wcd,cnode_arg(args,6),&
                   arg_slot(wcd,cnode_arg(args,3)))
@@ -1421,72 +1425,98 @@ contains
           call wc_arg(wcd,cnode_arg(args,3),.false.,rv,ve)
        endif
     case(sym_present)
-       v=cnode_arg(cnode_arg(args,3),1)
-       idx=v%data%i(v%offset)
-       v=cnode_arg(cnode_arg(args,4),1)
-       idx=idx+v%data%i(v%offset)
        if(wcd%base==0) then
-          if(pm_is_compiling) then
-             v=cnode_arg(cnode_arg(args,4),1)
-             idx=v%data%i(v%offset)
-             i=wcd%keys%data%i(wcd%keys%offset+idx-1)
-             call wc_call(wcd,callnode,op_if,0,4,0,ve)
-             pc=comp_start_if_else_block(wcd)
-             call wc(wcd,cvar_ptr(wcd,i,1))
-             call comp_assign_slots(wcd,callnode,arg_slot(wcd,cnode_arg(args,1)),&
-                  cvar_ptr(wcd,i,2),.true.,rv,ve)
-             call comp_start_else_block(wcd,pc)
-             call comp_assign(wcd,callnode,cnode_arg(args,1),cnode_arg(args,5),.true.,rv,ve)
-             call comp_finish_else_block(wcd,pc)
-          else
-             call wc_call(wcd,callnode,op_get_key,idx+&
-                  wcd%loop_extra_arg+pm_stack_locals,4,2,ve)
-             call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
-             call wc_arg(wcd,cnode_arg(args,2),.true.,rv,ve)
-             call wc_arg(wcd,cnode_arg(args,5),.false.,rv,ve)
-          endif
+          call wc_call_args(wcd,callnode,args,op_present,0,2,1,rv,ve)
        else
-          arg=cnode_arg(wcd%inline_args,idx+wcd%keybase-1)
-          ok=.true.
-          if(cnode_get_kind(arg)==cnode_is_const) then
-             if(pm_fast_vkind(cnode_arg(arg,1))==pm_tiny_int) then
-                ok=.false.
-             endif
-          endif
-          call release_var(wcd,var_slot(wcd,cnode_arg(args,1)))
-          if(ok) then
-             call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
-                  arg,wcd%oldbase,rv,ve)
-             call wc_call(wcd,callnode,op_logical_return,1,2,1,ve)
-             call wc_arg(wcd,cnode_arg(args,2),.true.,rv,ve)
+          ! Inline version
+          if(.not.pm_fast_isnull(wcd%inline_keys)) then
+             ok=.false.
+             do j=1,cnode_numargs(wcd%inline_keys)
+                 if(wcd%inline_key_names%data%i(wcd%inline_key_names%offset+j-1)==&
+                     cnode_get_num(cnode_arg(args,i),var_name)) then
+                    ok=.true.
+                 endif
+             enddo
           else
-             call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
-                  cnode_arg(args,5),wcd%base,rv,ve)
-             call wc_call(wcd,callnode,op_logical_return,0,2,1,ve)
-             call wc_arg(wcd,cnode_arg(args,2),.true.,rv,ve)
+             ok=.false.
           endif
+          call wc_call(wcd,callnode,op_logical_return,merge(1,0,ok),2,1,ve)
+          call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
        endif
     case(sym_key)
-       v=cnode_arg(cnode_arg(args,2),1)
-       idx=v%data%i(v%offset)
+       n=nargs/4
        if(wcd%base==0) then
-          if(pm_is_compiling) then
-             wcd%rdata(cnode_get_num(cnode_arg(args,1),var_index)+wcd%base)=&
-                  -wcd%keys%data%i(wcd%keys%offset+idx-1)
-          else
-             v=cnode_arg(cnode_arg(args,3),1)
-             idx=idx+v%data%i(v%offset)+wcd%loop_extra_arg
-             call wc_call_args(wcd,callnode,args,op_get_key2,&
-                  idx+pm_stack_locals,1,1,rv,ve)
-          endif
+          do i=1,nargs/4
+              if(get_arg_type(wcd,cnode_arg(args,i+n),rv)==&
+                  get_arg_type(wcd,cnode_arg(args,i*2+n+n),rv).or..true.) then
+                if(pm_is_compiling) then
+                   call wc_call(wcd,callnode,op_get_key,0,5,1,ve)
+                   pc=comp_start_block(wcd)
+                   break2=wcode_cblock(wcd,cnode_arg(args,i*2+n+n-1),rv,ve)
+                   call comp_finish_block(wcd,pc)
+                   call wc_arg(wcd,cnode_arg(args,i+n),.true.,rv,ve)
+                   call wc_arg(wcd,cnode_arg(args,i),.false.,rv,ve)
+                   call wc_arg(wcd,cnode_arg(args,i*2+n+n),.false.,rv,ve)
+                else
+                   new_ve=alloc_var(wcd,pm_ve_type)
+                   call wc_call(wcd,callnode,op_get_key,0,4,0,ve)
+                   call wc(wcd,-new_ve)
+                   call wc_arg(wcd,cnode_arg(args,i+n),.true.,rv,ve)
+                   call wc_arg(wcd,cnode_arg(args,i),.false.,rv,ve)
+                   break2=wcode_cblock(wcd,cnode_arg(args,i*2+n+n-1),rv,new_ve)
+                   call wc_call(wcd,callnode,op_default,0,3,1,new_ve)
+                   call wc_arg(wcd,cnode_arg(args,i+n),.true.,rv,new_ve)
+                   call wc_arg(wcd,cnode_arg(args,i*2+n+n),.false.,rv,new_ve)
+                endif
+             else
+                write(*,*) 'Diffnt',&
+                     trim(pm_type_as_string(wcd%context,get_arg_type(wcd,cnode_arg(args,i+n),rv))),&
+                     trim(pm_type_as_string(wcd%context,get_arg_type(wcd,cnode_arg(args,i*2+n+n),rv)))
+                ! key arg type differs from default value - so key arg must be present
+                call link_to_val(wcd,callnode,cnode_arg(args,i+n),wcd%base,&
+                     cnode_arg(args,i),wcd%base,rv,ve)
+             endif
+          enddo
        else
-          call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
-               cnode_arg(wcd%inline_args,idx+wcd%keybase),wcd%oldbase,&
-               rv,ve)
+          ! Inline case
+          outer:do i=1,n
+             if(.not.pm_fast_isnull(wcd%inline_keys)) then
+                do j=1,cnode_numargs(wcd%inline_keys)
+                   v=cnode_arg(wcd%inline_keys,j)
+                   if(wcd%inline_key_names%data%i(wcd%inline_key_names%offset+j-1)==&
+                        cnode_get_num(cnode_arg(args,i),var_name)) then
+                      call link_to_val(wcd,callnode,cnode_arg(args,i+n),wcd%base,&
+                           cnode_arg(wcd%inline_keys,j),wcd%oldbase,rv,ve)
+                      cycle outer
+                   endif
+                enddo
+             endif
+             break2=wcode_cblock(wcd,cnode_arg(args,i*2+n+n-1),rv,new_ve)
+             call link_to_val(wcd,callnode,cnode_arg(args,i+n),wcd%base,&
+                  cnode_arg(args,i*2+n+n),wcd%base,rv,ve)
+          enddo outer
        endif
-    case(sym_default)
-       call wc_call_args(wcd,callnode,args,op_default,&
-            check_arg_type(wcd,args,rv,1),1,1,rv,ve)
+
+!!$       v=cnode_arg(cnode_arg(args,2),1)
+!!$       idx=v%data%i(v%offset)
+!!$       if(wcd%base==0) then
+!!$          if(pm_is_compiling) then
+!!$             wcd%rdata(cnode_get_num(cnode_arg(args,1),var_index)+wcd%base)=&
+!!$                  -wcd%keys%data%i(wcd%keys%offset+idx-1)
+!!$          else
+!!$             v=cnode_arg(cnode_arg(args,3),1)
+!!$             idx=idx+v%data%i(v%offset)+wcd%loop_extra_arg
+!!$             call wc_call_args(wcd,callnode,args,op_get_key2,&
+!!$                  idx+pm_stack_locals,1,1,rv,ve)
+!!$          endif
+!!$       else
+!!$          call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
+!!$               cnode_arg(wcd%inline_args,idx+wcd%keybase),wcd%oldbase,&
+!!$               rv,ve)
+!!$       endif
+!!$    case(sym_default)
+!!$       call wc_call_args(wcd,callnode,args,op_default,&
+!!$            check_arg_type(wcd,args,rv,1),1,1,rv,ve)
     case(sym_init_var)
        call wc_call(wcd,callnode,op_init_var,0,2,1,ve)
        call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
@@ -1567,7 +1597,7 @@ contains
           call wc_call_args(wcd,callnode,args,op_import_val,0,nargs,1,rv,new_ve)
        else
           call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
-              cnode_arg(args,2),wcd%base,rv,ve)
+               cnode_arg(args,2),wcd%base,rv,ve)
        endif
     case(sym_import_varg)
        if(.not.pm_is_compiling) then
@@ -1575,7 +1605,7 @@ contains
              n=wcd%top-wcd%xbase
              if(wcd%top+n>max_code_stack) call pm_panic('out of code stack')
              do i=1,n
-                !!! Note this is not right type (for vm only does not matter)
+!!! Note this is not right type (for vm only does not matter)
                 wcd%rdata(wcd%top+i)=alloc_var(wcd,pm_ve_type)
              enddo
              do i=1,n
@@ -1665,7 +1695,7 @@ contains
                            trim(pm_type_as_string(wcd%context,&
                            check_arg_type_with_mode(wcd,wcd%inline_args,wcd%outer_rv,n)))
                    endif
-                   
+
                    call comp_assign_slots(wcd,callnode,&
                         arg_slot_in_frame(wcd,cnode_arg(wcd%inline_args,n),wcd%oldbase),&
                         slot,.true.,rv,ve)
@@ -1702,15 +1732,20 @@ contains
        else
           totargs=nargs
        endif
+       if(pm_fast_isnull(cnode_get(callnode,call_keys))) then
+          nkeys=0
+       else
+          nkeys=cnode_numargs(cnode_get(callnode,call_keys))
+       endif
        if(cnode_flags_clear(callnode,call_flags,call_is_comm)) then
           call wcode_proc_call(wcd,callnode,rv,ve,-1,&
-               args,nargs,totargs,nret,sig)
+               args,nargs,totargs,nkeys,nret,sig)
 !!$       elseif(pm_is_compiling) then
 !!$          break=.true.
 !!$          return
        else
           call wcode_proc_call(wcd,callnode,rv,wcd%lstack(wcd%ltop-1),ve,&
-               args,nargs,totargs,nret,sig)
+               args,nargs,totargs,nkeys,nret,sig)
        endif
     end select
     if(debug_wcode) then
@@ -1756,8 +1791,8 @@ contains
          v=cnode_arg(u,2)
          rv%data%i(rv%offset+slot:rv%offset+slot2)=&
               v%data%i(v%offset:v%offset+slot2-slot)
-        if(pm_is_compiling) then
-           call comp_start_else_block(wcd,pc)
+         if(pm_is_compiling) then
+            call comp_start_else_block(wcd,pc)
             if(wcd%num_errors==0) call for_body(0)
             call comp_finish_else_block(wcd,pc)
          else
@@ -1768,7 +1803,7 @@ contains
          endif
       endif
     end subroutine for_statement
-    
+
     subroutine for_body(ve)
       integer:: j,ve
       integer:: save_xbase,save_top
@@ -1813,7 +1848,7 @@ contains
       slot=v%data%i(v%offset)
       slot2=v%data%i(v%offset+1_pm_p)
       u=pm_dict_val(wcd%context,wcd%sig_cache,int(&
-            rvv(int(cnode_get_num(callnode,call_index))),pm_ln))
+           rvv(int(cnode_get_num(callnode,call_index))),pm_ln))
       if(.not.pm_is_compiling) new_ve=alloc_var(wcd,pm_ve_type)
       any_break=.false.
       do kk=1,cnode_numargs(u)
@@ -1844,7 +1879,7 @@ contains
       enddo
       call release_var(wcd,new_ve)
     end subroutine any_statement
-    
+
     subroutine each_proc_body
       integer:: i,j,typ,slot,slot2,slot3
       integer:: n,ii
@@ -1938,7 +1973,7 @@ contains
          break=wcode_cblock(wcd,cnode_arg(args,nret+1),rv,ve)
       endif
     end subroutine each_proc_body
-    
+
     function rvv(n) result(m)
       integer,intent(in):: n
       integer:: m
@@ -1952,7 +1987,7 @@ contains
          call release_var(wcd,wcd%rdata(i))
       enddo
     end subroutine release_import_varg
-    
+
   end function  wcode_call
 
   !========================================
@@ -1974,20 +2009,20 @@ contains
   !      ve2     = vector engine for inner scope
   !====================================================================
   recursive subroutine wcode_proc_call(wcd,callnode,rv,ve,ve2,&
-       args,nargs,totargs,nret,sig)
+       args,nargs,totargs,nkeys,nret,sig)
     type(wcoder),intent(inout):: wcd
     type(pm_ptr),intent(in):: callnode,rv
     integer,intent(in):: ve,ve2
     type(pm_ptr),intent(in):: args
-    integer,intent(in):: nargs,totargs,nret
+    integer,intent(in):: nargs,totargs,nkeys,nret
     integer,intent(in):: sig
     integer:: ve1,idx,procnode_kind,op,slot,slot2,slot3,typ
-    integer:: i,j,arg_base,nkeys,op2,taints,par_kind,pc
-    type(pm_ptr):: procnode,arg,tv,amps
+    integer:: i,j,arg_base,op2,taints,par_kind,pc,tno,nproc_keys
+    type(pm_ptr):: keys,key_names,proc_keys,procnode,arg,tv,amps,p
     logical:: varg,ok,autocv,save_inline_all,steps_back,enclosing_block
     integer:: extra_ve,ignore_args
     logical:: keep_ctime_const
-    integer,dimension(totargs):: conv
+    integer,dimension(-nkeys:totargs):: conv
     if(ve2<0) then
        extra_ve=0
     else
@@ -2038,11 +2073,15 @@ contains
     par_kind=0
     
     ! Get signature details
+
+    !write(*,*) 'GETSIG>',idx
+    
     procnode=pm_dict_key(wcd%context,wcd%sig_cache,int(idx,pm_ln))
     if(pm_fast_esize(procnode)>1) par_kind=procnode%data%i(procnode%offset+2)
     procnode=pm_dict_val(wcd%context,wcd%sig_cache,int(idx,pm_ln))
     varg=cnode_flags_set(callnode,call_flags,call_is_vararg)
     procnode_kind=cnode_get_kind(procnode)
+    keys=cnode_get(callnode,call_keys)
     
     ! Process any autoconversions
     conv=-1
@@ -2084,11 +2123,14 @@ contains
        endif
        wcd%inline_all=save_inline_all
        keep_ctime_const=.false.
+       key_names=pm_name_val(wcd%context,cnode_get_num(callnode,call_key_names))
+       proc_keys=cnode_get(cnode_arg(procnode,1),pr_keys)
+       nproc_keys=pm_fast_esize(proc_keys)/2
     else
        ! Intrinsic procedure - operator info stored in proc object
        op=cnode_get_num(procnode,bi_opcode)
        op2=cnode_get_num(procnode,bi_opcode2)
-       if(cnode_flags_set(procnode,bi_flags,proc_needs_type)) then
+       if(cnode_flags_set(procnode,pr_flags,proc_needs_type)) then
           if(op==op_logical_return) then
              if(check_arg_type(wcd,args,rv,1)==wcd%false_name) then
                 op2=0
@@ -2096,7 +2138,11 @@ contains
                 op2=1
              endif
           elseif(op==op_elem) then
-             call pm_panic('op_elem in proc_needs_type')
+             if(nargs==3) then
+                tno=check_arg_type(wcd,args,rv,3)
+                p=pm_type_val(wcd%context,tno)
+                op2=p%data%ln(p%offset)+1
+             endif
           else
               op2=check_arg_type(wcd,args,rv,1)
           endif
@@ -2112,6 +2158,7 @@ contains
           extra_ve=0
        endif
        keep_ctime_const=.true.
+       nproc_keys=0
     endif
 
     !write(*,*) 'CALLVE> PRE',ve1
@@ -2125,7 +2172,8 @@ contains
     
     ! Start coding the call instruction
     !write(*,*) 'CALLVE>',ve1
-    call wc_call(wcd,callnode,op,op2,totargs+extra_ve+1-ignore_args,nret,ve1)
+    call wc_call(wcd,callnode,op,op2,&
+         totargs+extra_ve+1-ignore_args+merge(nkeys,nproc_keys,pm_is_compiling),nret,ve1)
     if(extra_ve>0) then 
        call wc(wcd,ve2)
     endif
@@ -2134,16 +2182,6 @@ contains
     do i=1,nret
        call wc_p_arg(wcd,cnode_arg(args,i),.true.,rv,ve1,.false.)
     enddo
-
-    ! Keyword arguments treated slighly differenly when compiling
-    if(pm_is_compiling) then
-       nkeys=cnode_get_num(callnode,call_nkeys)
-       if(nkeys>0) then
-          call comp_keys(nkeys)
-       endif
-    else
-       nkeys=0
-    endif
 
     ! If compiling need to flag up any "&" args
     ! (mainly for optimiser)
@@ -2157,7 +2195,7 @@ contains
     ! Code arguments before arg...
     arg_base=wcd%pc
     j=0
-    do i=nret+nkeys+1+ignore_args,nargs
+    do i=nret+1+ignore_args,nargs
        if(pm_is_compiling.and..not.pm_fast_isnull(amps)) then
           if(amps%data%i(amps%offset+j)+nret+nkeys==i) then
              call wc_p_arg(wcd,cnode_arg(args,i),.true.,rv,ve1,keep_ctime_const)
@@ -2184,6 +2222,34 @@ contains
           call wc_p(wcd,wcd%rdata(i-nargs+wcd%xbase),keep_ctime_const)
        endif
     enddo
+
+    ! Code keyword arguments
+    if(pm_is_compiling) then
+       ! ... TODO ...
+    else
+       if(pm_fast_isnull(keys)) then
+          do j=1,nproc_keys
+             call wc(wcd,&
+                  -pm_max_stack-add_const(wcd,pm_fast_tinyint(wcd%context,-1)))
+          enddo
+       else
+          outer: do j=1,nproc_keys
+             do i=1,nkeys
+                if(proc_keys%data%i(proc_keys%offset+j-1)==key_names%data%i(key_names%offset+i-1)) then
+                   if(conv(-i)>0) then
+                      call wc_p(wcd,conv(-i),keep_ctime_const)
+                      call release_var(wcd,conv(-i))
+                   else
+                      call wc_p_arg(wcd,cnode_arg(keys,i),.false.,rv,ve1,keep_ctime_const)
+                   endif
+                   cycle outer
+                endif
+             enddo
+             call wc(wcd,&
+                  -pm_max_stack-add_const(wcd,pm_fast_tinyint(wcd%context,-1)))
+          enddo outer
+       endif
+    endif
 
     ! When compiling some args may have been disagregated
     ! so neeed to correct number of arguments
@@ -2218,15 +2284,22 @@ contains
          arg=cnode_arg(procnode,i)
          ! Argument indices are coded as displacements back from end of args
          ! (gets around possible presence of keyword args)
-         idx=totargs-arg%data%i(arg%offset)
+         idx=arg%data%i(arg%offset)
          if(pm_fast_esize(arg)==1) then
             tno=arg%data%i(arg%offset+1)
             slot=alloc_var(wcd,tno)
             call wc_call(wcd,callnode,op_make_poly,tno,3,1,ve)
             call wc(wcd,-slot)
-            call wc_arg(wcd,cnode_arg(args,idx),.false.,rv,ve)
+            if(idx<0) then
+               call wc_arg(wcd,cnode_arg(args,idx),.false.,rv,ve)
+            else
+               call wc_arg(wcd,cnode_arg(args,idx),.false.,rv,ve)
+            endif
          else
-            if(idx<=nargs) then
+            if(idx<0) then
+               slot=get_sub_elem(wcd,callnode,op_elem,cnode_arg(keys,-idx),&
+                    arg%data%i,arg%offset+1,arg%offset+pm_fast_esize(arg),rv,ve)
+            elseif(idx<=nargs) then
                slot=get_sub_elem(wcd,callnode,op_elem,cnode_arg(args,idx),&
                     arg%data%i,arg%offset+1,arg%offset+pm_fast_esize(arg),rv,ve)
             else
@@ -2302,12 +2375,8 @@ contains
          enddo
       endif
       
-      ! Cannot currently inline procs with keyword args
+!!$      ! Cannot currently inline procs with keyword args
       p=cnode_arg(proc,1)
-      if(cnode_get_num(p,pr_nkeys)>0) then
-         ok=.false.
-         return
-      endif
       
       ! For now cannot inline shared calls
       flags=iand(ior(taints,cnode_get_num(callnode,call_flags)),proc_run_shared+proc_run_local)
@@ -2315,17 +2384,6 @@ contains
          ok=.false.
          return
       endif
-
-!!$      ! .. or calls returning shared/uniform when compiling
-!!$      if(pm_is_compiling.and..false.) then
-!!$         if(nret>0.and.extra_ve==0) then
-!!$            tno=check_arg_type_with_mode(wcd,args,rv,1)
-!!$            if(pm_type_get_mode(wcd%context,tno)>=sym_mirrored) then
-!!$               ok=.false.
-!!$               return
-!!$            endif
-!!$         endif
-!!$      endif
       
       ! Always inline "each" procs
       if(cnode_flags_set(p,pr_flags,proc_is_each_proc)) then
@@ -2338,6 +2396,7 @@ contains
          ok=.false.
          return
       endif
+
       if(wcd%inline_all) then
          ok=.true.
          return
@@ -2487,8 +2546,9 @@ contains
     
     integer:: save_base,save_oldbase,save_xbase,save_lbase,save_keybase,save_lbl
     integer:: save_loop_extra_arg
+    type(pm_ptr):: save_args,save_rv,save_keys,save_key_names
     logical:: save_proc_is_chan,save_shared_inline
-    type(pm_ptr):: pr,p,c,cblock,rv,save_args,save_rv,arg,tv
+    type(pm_ptr):: pr,p,c,cblock,rv,arg,tv
     integer:: pc,depth,par,num_named,first_pc,npar,slot,i,n,xarg,tno,lastxarg
     logical:: break
     integer:: ve
@@ -2519,6 +2579,8 @@ contains
     save_lbase=wcd%lbase
     save_xbase=wcd%xbase
     save_args=wcd%inline_args
+    save_keys=wcd%inline_keys
+    save_key_names=wcd%inline_key_names
     save_rv=wcd%outer_rv
     save_keybase=wcd%keybase
     save_proc_is_chan=wcd%proc_is_chan
@@ -2526,6 +2588,8 @@ contains
     save_shared_inline=wcd%proc_shared_inline
 
     wcd%inline_args=args
+    wcd%inline_keys=cnode_get(callnode,call_keys)
+    wcd%inline_key_names=pm_name_val(wcd%context,cnode_get_num(callnode,call_key_names))
     
     if(debug_wcode) then
        write(*,*) 'INLINE PAR TYPES>>'
@@ -2547,8 +2611,8 @@ contains
     if(debug_wcode) write(*,*) 'Inline>',pm_name_as_string(wcd%context,cnode_get_num(pr,pr_name))
     cblock=cnode_get(pr,pr_cblock)
     rv=cnode_arg(proc,2)
-    nkeys=cnode_get_num(pr,pr_nkeys)
-    npar=nret+1+nkeys
+    !nkeys=cnode_get_num(pr,pr_nkeys)
+    npar=nret+1
     wcd%keybase=nret
     
     wcd%proc_is_chan=cnode_flags_set(pr,pr_flags,proc_run_complete)
@@ -2673,6 +2737,8 @@ contains
     wcd%oldbase=save_oldbase
     wcd%outer_rv=save_rv
     wcd%inline_args=save_args
+    wcd%inline_keys=save_keys
+    wcd%inline_key_names=save_key_names
     wcd%keybase=save_keybase
     wcd%vevar=save_vevar
     wcd%proc_is_chan=save_proc_is_chan
@@ -3653,10 +3719,10 @@ contains
           call pm_panic('wc call not callnode')
        endif
     endif
-    depth=cnode_get_num(node,call_par_depth)
-    if(depth/=0) depth=depth+wcd%lbase
+    depth=cnode_get_num(node,call_par_depth)+wcd%lbase
+    !if(depth/=0) depth=depth+wcd%lbase
     if(depth<wcd%ltop) then
-       if(pm_is_compiling) then
+        if(pm_is_compiling) then
           call wc(wcd,op)
           call wc(wcd,op2)
           call wc(wcd,nargs+nret*comp_op_nret_div+comp_op_shared)
@@ -5958,7 +6024,7 @@ contains
     if(pm_main_process) then
        call pm_error_header(wcd%context,cnode_get_name(node,cnode_modl_name),&
             cnode_get_name(node,cnode_lineno),cnode_get_name(node,cnode_charno))
-       write(*,'(A,A)') trim(pm_opts%error),trim(mess)
+       write(*,'(A,X,A)') trim(pm_opts%error),trim(mess)
     endif
     wcd%num_errors=wcd%num_errors+1
     if(wcd%num_errors>max_wcode_errors) then

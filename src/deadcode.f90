@@ -35,7 +35,6 @@ module pm_deadcode
   use pm_symbol
   use pm_types
   use pm_parser
-  use pm_sysdefs
   use pm_cnodes
   use pm_codegen
   implicit none

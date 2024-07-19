@@ -66,6 +66,7 @@ module pm_options
      logical:: ftn_name_elems
 
      character(len=25):: error
+     character(len=7):: error_start
      logical:: colour
      
   end type pm_opts_type
@@ -76,7 +77,7 @@ contains
 
   subroutine init_opts(context)
     type(pm_context),pointer:: context
-    logical:: colour
+    logical:: colour,bright
     pm_opts%inline=.true.
     pm_opts%check_stmts=.not.pm_is_compiling
     pm_opts%show_elems=.false.
@@ -110,8 +111,14 @@ contains
     pm_opts%ftn_name_types=.false.
     pm_opts%ftn_name_elems=.false.
     colour=pm_colour_messages.and.pm_isatty(6)
+    bright=pm_bright_messages
+    if(bright) then
+       pm_opts%error_start=pm_error_start_bright
+    else
+       pm_opts%error_start=pm_error_start
+    endif
     if(colour) then
-       pm_opts%error=pm_error_start//'Error: '//pm_error_end
+       pm_opts%error=pm_opts%error_start//'Error:'//pm_error_end
     else
        pm_opts%error='Error: '
     endif
@@ -161,6 +168,8 @@ contains
        write(*,*) '  GENERAL OPTIONS'
        write(*,*) '  -N              Do not colour-highlight error messages'
        write(*,*) '  -H              Colour-highlight error messages'
+       write(*,*) '  -HB             Colour-highlight error messages using bright colours'
+       write(*,*) '  -HS             Colour-highlight error messages using standard colours'
        if(pm_is_compiling) then
           write(*,*)
           write(*,*) '  OPTIMISER OPTIONS'
@@ -226,11 +235,19 @@ contains
              write(*,*) 'Not a command line option: ',trim(arg)
              call usage()
           endif
-       elseif(arg(1:2)=='-N') then
-          pm_opts%error='Error: '
+       elseif(arg=='-N') then
+          pm_opts%error='Error:'
           pm_opts%colour=.false.
-       elseif(arg(1:2)=='-H') then
+       elseif(arg=='-HS') then
           pm_opts%error=pm_error_start//'Error: '//pm_error_end
+          pm_opts%error_start=pm_error_start
+          pm_opts%colour=.true.
+       elseif(arg=='-HB') then
+          pm_opts%error=pm_error_start_bright//'Error: '//pm_error_end
+          pm_opts%error_start=pm_error_start_bright
+          pm_opts%colour=.true.
+       elseif(arg=='-H') then
+          pm_opts%error=pm_opts%error_start//'Error: '//pm_error_end
           pm_opts%colour=.true.
        elseif(arg(1:2)=='-D') then
           if(arg=='-D') then
@@ -335,7 +352,7 @@ contains
                    pm_opts%ftn_name_types=.false.
                    pm_opts%ftn_name_elems=.false.
                 elseif(pm_main_process) then
-                   write(*,*) 'Not a valid fortran name (-ftn-name-no) option:',trim(arg)
+                   write(*,*) 'Not a valid fortran name (-ftn-no-name) option:',trim(arg)
                    call usage()
                 endif
              elseif(pm_main_process) then

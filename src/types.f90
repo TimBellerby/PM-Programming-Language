@@ -75,12 +75,12 @@ module pm_types
   integer,parameter:: pm_type_new_literal=19
   integer,parameter:: pm_type_new_except=20
   integer,parameter:: pm_type_new_param=21+pm_type_has_params
-  integer,parameter:: pm_type_new_amp=22
+
   integer,parameter:: pm_type_new_has=23
   integer,parameter:: pm_type_new_vect=24+pm_type_has_vect
   integer,parameter:: pm_type_new_params=25
   integer,parameter:: pm_type_new_type=26
-  integer,parameter:: pm_type_new_enveloped=27
+  integer,parameter:: pm_type_new_category=27
   integer,parameter:: pm_type_new_bottom=28
   integer,parameter:: pm_type_new_includes=29
   integer,parameter:: pm_type_new_unfixed=30
@@ -109,12 +109,12 @@ module pm_types
   integer,parameter:: pm_type_is_literal=19
   integer,parameter:: pm_type_is_except=20
   integer,parameter:: pm_type_is_param=21
-  integer,parameter:: pm_type_is_amp=22
+ !
   integer,parameter:: pm_type_is_has=23
   integer,parameter:: pm_type_is_vect=24
   integer,parameter:: pm_type_is_params=25
   integer,parameter:: pm_type_is_type=26
-  integer,parameter:: pm_type_is_enveloped=27
+  integer,parameter:: pm_type_is_category=27
   integer,parameter:: pm_type_is_bottom=28
   integer,parameter:: pm_type_is_includes=29
   integer,parameter:: pm_type_is_unfixed=30
@@ -173,6 +173,24 @@ module pm_types
   integer(pm_p),public,parameter:: pm_elemref_type=pm_last_lib_type+11
   integer(pm_p),public,parameter:: pm_last_sys_type=pm_elemref_type
 
+  ! Categorical types
+  integer,public,parameter:: pm_a_struct_type = pm_last_sys_type + 1
+  integer,public,parameter:: pm_a_rec_type = pm_last_sys_type + 2
+  integer,public,parameter:: pm_a_unique_type = pm_last_sys_type + 3
+  integer,public,parameter:: pm_a_fix_type = pm_last_sys_type + 4
+  integer,public,parameter:: pm_a_literal_type = pm_last_sys_type + 5
+  integer,public,parameter:: pm_a_basic_type = pm_last_sys_type + 6
+  integer,public,parameter:: pm_last_category_type = pm_a_basic_type
+
+  ! Literal types
+  integer,public,parameter:: pm_int_literal_type = pm_last_category_type + 1
+  integer,public,parameter:: pm_real_literal_type = pm_last_category_type + 2
+  integer,public,parameter:: pm_bool_literal_type = pm_last_category_type + 3
+  integer,public,parameter:: pm_string_literal_type = pm_last_category_type + 4
+  integer,public,parameter:: pm_last_literal_type = pm_string_literal_type
+  
+ 
+    
   ! Kind of dref type (internal type describing references)
   integer,public,parameter:: pm_dref_is_dot=0
   integer,public,parameter:: pm_dref_is_var=-1
@@ -195,20 +213,22 @@ contains
   subroutine pm_init_types(context)
     type(pm_context),pointer:: context
     integer:: i,j
-    integer,dimension(2):: key
+    integer,dimension(3):: key
     integer:: flags
-    character(len=12),dimension(pm_last_sys_type),parameter:: base_types= (/&
-    'PM__tinyint','proc       ','type       ','name       ',&
-    'null       ','sint       ','int        ','lint       ',&
-    'int8       ','int16      ','int32      ','int64      ',&
-    '<int128>   ','sreal      ','real       ','<real32>   ',&
-    '<real64>   ','<real128>  ','scpx       ','cpx        ',&
-    '<cpx64>    ','<cpx128>   ','<cpx256>   ','bool       ',&
-    '<packbool> ','<ext>      ','<char>     ','<pointer>  ',&
-    '<stack>    ','<usr>      ','<dict>     ','<set>      ',&
-    'prc_info   ','string     ','<poly>     ','<struct>   ',&
-    '<rec>      ','<polyref>  ','<array>    ','<cstarray> ',&
-    '<dref>     ','<dref-inv> ','<elemref>  '/)
+    character(len=15),dimension(pm_last_category_type),parameter:: base_types= (/&
+    'PM__tinyint   ','proc          ','type          ','name          ',&
+    'null          ','sint          ','int           ','lint          ',&
+    'int8          ','int16         ','int32         ','int64         ',&
+    '<int128>      ','sreal         ','real          ','<real32>      ',&
+    '<real64>      ','<real128>     ','scpx          ','cpx           ',&
+    '<cpx64>       ','<cpx128>      ','<cpx256>      ','bool          ',&
+    '<packbool>    ','<ext>         ','<char>        ','<pointer>     ',&
+    '<stack>       ','<usr>         ','<dict>        ','<set>         ',&
+    'prc_info      ','string        ','<poly>        ','<struct>      ',&
+    '<rec>         ','<polyref>     ','<array>       ','<cstarray>    ',&
+    '<dref>        ','<dref-inv>    ','<elemref>     ','a_struct      ',&
+    'a_rec         ','a_unique      ','a_fix         ','a_literal     ',&
+    'a_basic       '/)
     
     context%tcache=pm_dict_new(context,128_pm_ln)
     context%pcache=pm_dict_new(context,1024_pm_ln)
@@ -225,7 +245,7 @@ contains
        if(j/=i) call pm_panic('init_type')
     enddo
     key(1)=pm_type_is_basic+pm_type_has_storage+pm_type_leaves
-    do i=pm_null+1,pm_last_sys_type
+    do i=pm_null+1,pm_last_category_type
        key(2)=pm_intern(context,trim(base_types(i)))
        if(pm_debug_level>2) then
           write(*,*) 'Init types(',trim(base_types(i)),')',key(2)
@@ -233,9 +253,27 @@ contains
        j=pm_idict_add(context,context%tcache,key,2,&
             pm_null_obj)
        if(j/=i) call pm_panic('init_type')
+       if(i==pm_last_sys_type) then
+          key(1)=pm_type_new_category
+       endif
     enddo
+    key(1)=pm_type_new_unfixed
+    key(2)=0
+    key(3)=pm_long
+    j=pm_idict_add(context,context%tcache,key,3,&
+         pm_null_obj)
+    key(3)=pm_single
+    j=pm_idict_add(context,context%tcache,key,3,&
+         pm_null_obj)
+    key(3)=pm_logical
+    j=pm_idict_add(context,context%tcache,key,3,&
+         pm_null_obj)
+    key(3)=pm_string_type
+    j=pm_idict_add(context,context%tcache,key,3,&
+         pm_null_obj)
+    
     key(1)=pm_type_is_user
-    do i=1,pm_last_sys_type
+    do i=1,pm_last_category_type
        if(base_types(i)(1:1)/='<') then
           key(2)=pm_intern(context,trim(base_types(i)))
           j=pm_idict_add(context,context%tcache,key,2,&
@@ -641,6 +679,18 @@ contains
   end function pm_type_num_leaves
 
   !=================================================
+  ! Return number of arguments associated with a type
+  !=================================================
+  function pm_type_numargs(context,tno) result(n)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    integer:: n
+    n=pm_fast_esize(pm_type_vect(context,tno))-1
+  contains
+    include 'fesize.inc'
+  end function pm_type_numargs
+
+  !=================================================
   ! Return argument #n of type tno
   !=================================================
   function pm_type_arg(context,tno,n) result(tno2)
@@ -802,10 +852,14 @@ contains
     integer:: typ2
     type(pm_ptr):: tv
     integer:: kind
+    if(typ==0) then
+       typ2=0
+       return
+    endif
     tv=pm_type_vect(context,typ)
     kind=pm_tv_kind(tv)
     select case(kind)
-    case(pm_type_is_all,pm_type_is_vect,pm_type_is_enveloped,&
+    case(pm_type_is_all,pm_type_is_vect,&
          pm_type_is_param,&
          pm_type_is_value,pm_type_is_literal)
        typ2=pm_type_strip_to_basic(context,pm_tv_arg(tv,1))
@@ -960,35 +1014,17 @@ contains
   ! Error codes:
   !   combined_mode=-1,-2...
   !        Shared distributed value not allowed for position -combined_mode
-  !   combined_mode=-1001,-1002,...
-  !        Partial value not allowed in position -(combined_mode+1000)
   !  shared_ok -- permissible to have an argumnet with 'shared' mode
-  !  complete  -- cannot have an argument mode associated with a conditional context
   !============================================================================================
-  function pm_type_combine_modes(context,array,shared_ok,complete,cond,unlabelled)&
-       result(combined_mode)
+  function pm_type_combine_modes(context,array,shared_ok) result(combined_mode)
     type(pm_context),pointer:: context
     integer,intent(in),dimension(:):: array
-    logical,intent(in):: shared_ok,complete,cond,unlabelled
+    logical,intent(in):: shared_ok
     integer:: combined_mode
     integer:: i,mode,cmode,tno
-    if(cond) then
-       combined_mode=sym_partial
-       return
-    endif
-    !cmode=merge(sym_shared,sym_mirrored,shared_ok)
     cmode=sym_mirrored
     do i=1,size(array)
        tno=pm_type_strip_mode(context,array(i),mode)
-       if(complete) then
-          if(mode==sym_partial) then
-             combined_mode=-i-1000
-          elseif(mode==sym_coherent&
-            .and.unlabelled) then
-             combined_mode=-i-2000
-             return
-          endif
-       endif
        if(mode==sym_shared.and..not.shared_ok) then
           if(iand(pm_type_flags(context,tno),pm_type_has_distributed)/=0) then
              combined_mode=-i
@@ -1414,12 +1450,6 @@ contains
        ok=pm_test_type_includes(context,p,pm_tv_arg(u,1),&
             mode,einfo,params,base,user,ubase)
        return
-!!$    case(pm_type_is_vect)
-!!$       if(iand(pm_type_flags(context,p),pm_type_has_vect)==0) then
-!!$             ok=pm_test_type_includes(context,p,pm_tv_arg(u,1),&
-!!$                  mode,einfo,params,base,user,ubase)
-!!$          return
-!!$       endif
     case(pm_type_is_bottom)
        ok=.true.
        return
@@ -1707,12 +1737,6 @@ contains
        else
           ok=.false.
        endif
-    case(pm_type_is_enveloped)
-       if(uk==pm_type_is_enveloped) then
-          ok=pm_tv_name(t)==pm_tv_name(u)
-       else
-          ok=.false.
-       endif
     case(pm_type_is_except)
        ok=pm_test_type_includes(context,pm_tv_arg(t,1),q,&
             mode,einfo,params,base,user,ubase)
@@ -1740,12 +1764,29 @@ contains
              params(nt)=pm_type_combine(context,params(nt),q)
           endif
        endif
-    case(pm_type_is_amp,pm_type_is_vect,pm_type_is_uninitialised)
+    case(pm_type_is_vect,pm_type_is_uninitialised)
        ok=tk==uk
        if(ok) ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
             mode,einfo,params,base,user,ubase)
     case(pm_type_is_bottom)
        ok=.false.
+    case(pm_type_is_category)
+       select case(p)
+       case(pm_a_struct_type)
+          ok=uk==pm_type_is_struct
+       case(pm_a_rec_type)
+          ok=uk==pm_type_is_rec
+       case(pm_a_unique_type)
+          ok=uk==pm_type_is_single_name
+       case(pm_a_literal_type)
+          ok=uk==pm_type_is_unfixed
+       case(pm_a_fix_type)
+          ok=uk==pm_type_is_fix
+       case(pm_a_basic_type)
+          ok=uk==pm_type_is_basic
+       case default
+          call pm_panic('test-includes,category')
+       end select
     case default
        write(*,*) 'Type=',p
        write(*,*) 'Kind=',pm_tv_kind(t)
@@ -1894,7 +1935,6 @@ contains
           endif
        endif
     case(pm_type_is_par_kind,pm_type_is_vect,&
-         pm_type_is_enveloped,&
          pm_type_is_contains,pm_type_is_has,&
          pm_type_is_params,pm_type_is_param)
        ok=pm_type_contains_elem(context,p,pm_tv_arg(u,1),&
@@ -2140,26 +2180,6 @@ contains
           einfo%kind=pm_type_err_elem_not_found
           offset=0
        endif
-    case(pm_type_is_enveloped)
-       tno2=pm_tv_arg(tv,2)
-       tv2=pm_type_vect(context,tno2)
-       nameset=pm_name_val(context,pm_tv_name(tv2))
-       found=.false.
-       do i=1,pm_fast_esize(nameset)
-          name2=nameset%data%i(nameset%offset+i)
-          if(name==abs(name2)) then
-             found=.true.
-             exit
-          endif
-       enddo
-       if(.not.found) then
-          einfo%kind=pm_type_err_elem_not_in_interface
-          einfo%typ1=tno2
-          offset=0
-          return
-       endif
-       offset=pm_type_find_elem(context,pm_tv_arg(tv,1),&
-            name,change,stack,top,maxstack,etype,einfo)
     case default
        einfo%kind=pm_type_err_elem_bad_type
        offset=0
@@ -2490,6 +2510,8 @@ contains
     end subroutine remake
   end function pm_type_as_concrete
 
+
+  !!! Obsolete?
   recursive function pm_type_remove_params(context,tno,params) result(tno2)
     type(pm_context),pointer:: context
     integer,intent(in):: tno
@@ -2638,7 +2660,7 @@ contains
     nv=pm_dict_val(context,context%tcache,int(tno,pm_ln))
     narg=pm_tv_numargs(tv)
     select case(tk)
-    case(pm_type_is_user,pm_type_is_basic)
+    case(pm_type_is_user,pm_type_is_basic,pm_type_is_category)
        name=pm_tv_name(tv)
        if(name<0) then
           call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
@@ -2726,7 +2748,7 @@ contains
              call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
              if(add_char(',')) return
           enddo
-          if(amps%data%i(amps%offset+j)==n) then
+          if(amps%data%i(amps%offset+j)==narg) then
              if(add_char('&')) return
           endif
           call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n)
@@ -2847,7 +2869,9 @@ contains
        call bracket(1,pm_type_is_includes,pm_type_is_all,pm_type_is_any,pm_type_is_except)
     case(pm_type_is_value,pm_type_is_literal)
        if(tk==pm_type_is_value) then
-          if(add_char('''')) return
+          if(add_char('fix(')) return
+       else
+          if(add_char('literal(')) return
        endif
        if(pm_tv_name(tv)==0) then
           call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
@@ -2866,13 +2890,10 @@ contains
              str(n:n)='"'
              n=n+1
           else
-             str(n:)=pm_number_as_string(context,nv,0_pm_ln)
+             str(n:)=pm_value_as_string(context,nv)
           endif
           n=len_trim(str)+1
-          str(n:n)='@'
-          n=n+1
-          str(n:)=pm_int_as_string(pm_tv_name(tv))
-          n=len_trim(str)+1
+          if(add_char(')')) return
        endif
     case(pm_type_is_fix)
        if(add_char('fix(')) return
@@ -2965,9 +2986,6 @@ contains
        enddo
        if(add_char('_')) return
        if(add_char(')')) return
-    case(pm_type_is_amp)
-       if(add_char('&')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
     case(pm_type_is_vect)
        if(add_char('^^(')) return
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)

@@ -81,6 +81,8 @@ module pm_ast
   integer,parameter:: proc_coded_type=node_args+9
   integer,parameter:: proc_numret=node_args+10
   integer,parameter:: proc_result_types=node_args+11
+  
+  
 
   ! Alternative final sections for 'proc' parse nodes
 
@@ -420,7 +422,10 @@ contains
        return
     endif
     if(pm_fast_vkind(ptr)==pm_pointer) then
-       if(ptr%data%ptr(ptr%offset)%offset/=9876) then
+       if(ptr%offset<=0) then
+          write(iunit,*) spaces(1:depth*2),'INVALID PTR'
+          return
+       elseif(ptr%data%ptr(ptr%offset)%offset/=9876) then
           if(ptr%data%ptr(ptr%offset)%offset==9875) then
              write(iunit,*) spaces(1:depth*2),'REUSED NODE',&
                   ptr%offset,ptr%data%hash,ptr%data%esize

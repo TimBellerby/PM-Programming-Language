@@ -23,6 +23,23 @@
 ! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 ! THE SOFTWARE.
 
+!================================================
+! Middle-level Intermediate representation
+!------------------------------------------------
+! The structure is built of cnodes:
+! proc    - user defined procedure
+! builtin - intrinsic (built-in) procedure
+! cblock  - list of calls
+! call    - either linked to a signature
+!           (list of argument types and procedures)
+!           or flagged as a "special" call
+!         - argument list refers to var, const, and
+!           cblock cnodes
+!         - control stuctures = calls with cblock args
+! var     - vars and runtime consts
+! const   - literal constants
+!================================================
+
 module pm_cnodes
 
   use pm_kinds
@@ -35,10 +52,11 @@ module pm_cnodes
   use pm_symbol
   use pm_types
   use pm_ast
-  use pm_sysdefs
+
+  implicit none
 
   ! Debug cnode operations
-  logical,parameter:: debug_cnodes=.false.
+  logical,parameter:: debug_cnodes=.true.
   
   ! Magic number for code tree nodes
   integer,parameter:: cnode_magic_no=10456_pm_p
@@ -63,10 +81,11 @@ module pm_cnodes
   integer,parameter:: cnode_is_arg_constraint=9
   integer,parameter:: cnode_is_par_constraint=10
   integer,parameter:: cnode_is_type_constraint=11
-  !integer,parameter:: cnode_is_interface_constraint=12
-  integer,parameter:: cnode_is_any_sig=13
-  integer,parameter:: cnode_is_autoconv_sig=14
-  integer,parameter:: cnode_num_kinds=14
+  integer,parameter:: cnode_is_any_sig=12
+  integer,parameter:: cnode_is_autoconv_sig=13
+  integer,parameter:: cnode_is_changelist=14
+  integer,parameter:: cnode_is_callsig=15
+  integer,parameter:: cnode_num_kinds=15
 
   ! Offsets into cblock cnodes
   integer,parameter:: cblock_parent=cnode_args+0
@@ -88,18 +107,19 @@ module pm_cnodes
 
   ! Offsets into call cnodes
   integer,parameter:: call_args=cnode_args+0
-  integer,parameter:: call_parent=cnode_args+1
-  integer,parameter:: call_sig=cnode_args+2
-  integer,parameter:: call_flags=cnode_args+3
-  integer,parameter:: call_link=cnode_args+4
-  integer,parameter:: call_back_link=cnode_args+5
-  integer,parameter:: call_nret=cnode_args+6
-  integer,parameter:: call_nkeys=cnode_args+7
-  integer,parameter:: call_index=cnode_args+8
-  integer,parameter:: call_par_depth=cnode_args+9
-  integer,parameter:: call_var=cnode_args+10
-  integer,parameter:: call_amp=cnode_args+11
-  integer,parameter:: call_node_size=12
+  integer,parameter:: call_keys=cnode_args+1
+  integer,parameter:: call_parent=cnode_args+2
+  integer,parameter:: call_sig=cnode_args+3
+  integer,parameter:: call_flags=cnode_args+4
+  integer,parameter:: call_link=cnode_args+5
+  integer,parameter:: call_back_link=cnode_args+6
+  integer,parameter:: call_nret=cnode_args+7
+  integer,parameter:: call_key_names=cnode_args+8
+  integer,parameter:: call_index=cnode_args+9
+  integer,parameter:: call_par_depth=cnode_args+10
+  integer,parameter:: call_var=cnode_args+11
+  integer,parameter:: call_amp=cnode_args+12
+  integer,parameter:: call_node_size=13
   
   ! Offsets into var cnodes
   integer,parameter:: var_parent=cnode_args+0
@@ -109,7 +129,7 @@ module pm_cnodes
   integer,parameter:: var_index=cnode_args+4
   integer,parameter:: var_par_depth=cnode_args+5
   integer,parameter:: var_create_depth = cnode_args + 6
-  integer,parameter:: var_if_scope = cnode_args + 7
+  integer,parameter:: var_lex_scope = cnode_args + 7
   integer,parameter:: var_node_size=8
   integer,parameter:: var_extra_info=cnode_args+8
 
@@ -131,31 +151,36 @@ module pm_cnodes
   integer,parameter:: var_is_no_import_export=32768
   integer,parameter:: var_is_sync=65536
 
-  ! Offsets into proc nodes
-  integer,parameter:: pr_cblock=cnode_args+0
-  integer,parameter:: pr_max_index=cnode_args+1
-  integer,parameter:: pr_recurse=cnode_args+2
-  integer,parameter:: pr_id=cnode_args+3
-  integer,parameter:: pr_rtype=cnode_args+4 ! Must be same as bi_rtype
-  integer,parameter:: pr_nargs=cnode_args+5
-  integer,parameter:: pr_nkeys=cnode_args+6
-  integer,parameter:: pr_nret=cnode_args+7
-  integer,parameter:: pr_flags=cnode_args+8
-  integer,parameter:: pr_name=cnode_args+9
-  integer,parameter:: pr_ncalls=cnode_args+10
-  integer,parameter:: pr_tkeys=cnode_args+11
-  integer,parameter:: pr_node_size=12
+  ! Offsets into proc & builtin nodes
+  integer,parameter:: pr_ptype=cnode_args+0
+  integer,parameter:: pr_rtype=cnode_args+1
+  integer,parameter:: pr_nargs=cnode_args+2
+  integer,parameter:: pr_nret=cnode_args+3
+  integer,parameter:: pr_flags=cnode_args+4
+  integer,parameter:: pr_amps=cnode_args+5
+  integer,parameter:: pr_name=cnode_args+6
 
-  ! Offsets into builtin nodes
-  integer,parameter:: bi_opcode=cnode_args+0
-  integer,parameter:: bi_opcode2=cnode_args+1
-  integer,parameter:: bi_data=cnode_args+2
-  integer,parameter:: bi_flags=cnode_args+3
-  integer,parameter:: bi_rtype=cnode_args+4  ! Must be same as pr_rtype
-  integer,parameter:: bi_rcode=cnode_args+5
-  integer,parameter:: bi_rsym=cnode_args+6
-  integer,parameter:: bi_id=cnode_args+7
-  integer,parameter:: bi_node_size=8
+  ! Offets into proc nodes only
+  integer,parameter:: pr_cblock=cnode_args+7
+  integer,parameter:: pr_max_index=cnode_args+8
+  integer,parameter:: pr_recurse=cnode_args+9
+  integer,parameter:: pr_id=cnode_args+10
+  integer,parameter:: pr_ncalls=cnode_args+11
+  integer,parameter:: pr_keys=cnode_args+12
+  integer,parameter:: pr_keycall=cnode_args+13
+  integer,parameter:: pr_argcall=cnode_args+14
+  integer,parameter:: pr_node_size=15
+
+  ! Offsets into builtin nodes only
+  integer,parameter:: bi_opcode=cnode_args+7
+  integer,parameter:: bi_opcode2=cnode_args+8
+  integer,parameter:: bi_id=cnode_args+9
+  integer,parameter:: bi_node_size=10
+
+  integer(pm_p),parameter:: spsig_thru=-4_pm_p
+  integer(pm_p),parameter:: spsig_dup=-5_pm_p
+  integer(pm_p),parameter:: spsig_noop=-6_pm_p
+
   
 contains
 
@@ -446,6 +471,13 @@ contains
           call print_proc_cnode(context,iunit,cnode_arg(cnode,2),&
                sig_cache,cnode_arg(cnode,1))
           write(iunit,'(a)') '}'
+       case(cnode_is_callsig)
+          write(iunit,'(a)') 'sig{'
+          do i=1,cnode_numargs(cnode)
+             call print_proc_cnode(context,iunit,pm_null_obj,&
+                  sig_cache,cnode_arg(cnode,i))
+          enddo
+          write(iunit,'(a)') '}'
        case(cnode_is_arglist)
           write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'{'
           if(cnode_flags_set(cnode,cnode_args+1,proc_is_var)) then
@@ -479,6 +511,13 @@ contains
              call pm_dump_tree(context,iunit,cnode_arg(cnode,i),2)
           enddo
           write(iunit,'(a)') '}'
+       case(cnode_is_builtin)
+          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//'] {'
+          call print_proc_cnode(context,iunit,pm_null_obj,&
+               sig_cache,cnode)
+          write(iunit,'(a)') '}'
+       case default
+          write(iunit,'("????",i5)') kind
        end select
     else
        call pm_dump_tree(context,iunit,cnode,1)
@@ -493,23 +532,20 @@ contains
     integer,intent(in):: iunit
     type(pm_ptr),intent(in):: rvec,sig_cache,cnode
     integer:: flags
+
+    write(iunit,'(a)') '  '//&
+         trim(pm_name_as_string(context,cnode_get_num(cnode,pr_name)))//&
+         trim(pm_type_as_string(context,cnode_get_num(cnode,pr_ptype)))//' {'
+    
     if(cnode_get_kind(cnode)==cnode_is_builtin) then
-       if(cnode_get_num(cnode,cnode_args)>=0) then
-          write(iunit,'(a)') '   Builtin '//&
-               op_names(cnode_get_num(cnode,cnode_args))//&
-               pm_int_as_string(cnode_get_num(cnode,cnode_args+1))//'{'
-       else
-          write(iunit,'(a)') '   Fold {'
-          if(.not.pm_fast_isnull(cnode_get(cnode,bi_rcode))) then
-             call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_get(cnode,bi_rcode),4)
-          endif
-       endif
-       write(iunit,'(a)') '   }'
+       write(iunit,'(a)') '   Builtin '//&
+            op_names(cnode_get_num(cnode,bi_opcode))//&
+            pm_int_as_string(cnode_get_num(cnode,bi_opcode2))
     else
-       write(iunit,'(A,i2,A,i2,A,i2,A,i3,A)') &
+ 
+        write(iunit,'(A,i2,A,i2,A,i2,A,i3,A)') &
             '   [nargs=',&
-            cnode_get_num(cnode,pr_nargs),',nkeys=',&
-            cnode_get_num(cnode,pr_nkeys),',nret=',cnode_get_num(cnode,pr_nret),&
+            cnode_get_num(cnode,pr_nargs),',nret=',cnode_get_num(cnode,pr_nret),&
             ',ncalls=',cnode_get_num(cnode,pr_ncalls),']'
        if(cnode_flags_set(cnode,pr_flags,proc_is_comm)) &
             write(iunit,'(a)') '   [loop]'
@@ -523,13 +559,15 @@ contains
             write(iunit,'(a)') '   [empty-each]'
        flags=cnode_get_kind(cnode)
        !write(*,*) 'Kind=',flags
-       call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_arg(cnode,1),4)
+       call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_get(cnode,pr_cblock),4)
     endif
+
+    write(iunit,'(a)') '  }'
   contains
     include 'fisnull.inc'
   end subroutine print_proc_cnode
   
-  subroutine print_cblock_cnode(context,iunit,rvec,sig_cache,cnode,depth)
+  recursive subroutine print_cblock_cnode(context,iunit,rvec,sig_cache,cnode,depth)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,depth
     type(pm_ptr),intent(in):: rvec,sig_cache,cnode
@@ -543,16 +581,16 @@ contains
     include 'fisnull.inc'
   end subroutine print_cblock_cnode
   
-  subroutine print_call_cnode(context,iunit,rvec,sig_cache,cnode,depth)
+  recursive subroutine print_call_cnode(context,iunit,rvec,sig_cache,cnode,depth)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,depth
     type(pm_ptr),intent(in):: rvec,sig_cache,cnode
     integer:: signo,name,i,j,k,nret,nargs,modl,line
-    type(pm_ptr):: p,args,amps
+    type(pm_ptr):: p,args,amps,keys,keynames
     character(len=120):: str,location
     signo=cnode_get_num(cnode,call_sig)
     if(signo<0) then
-       str=repeat(' ',depth)//pm_name_as_string(context,-signo)
+       str=repeat(' ',depth)//trim(pm_int_as_string(cnode_get_num(cnode,call_par_depth)+1))//' '//pm_name_as_string(context,-signo)
        i=len_trim(str)+1
        if(.not.pm_fast_isnull(rvec)) then
           k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
@@ -561,6 +599,8 @@ contains
                   '['//trim(pm_int_as_string(k))//'] ',.false.,depth)
           endif
        endif
+    elseif(signo==0) then
+       call append_to_line(iunit,str,i,' VAR-CALL ',.false.,depth)
     else
        p=pm_dict_key(context,sig_cache,&
             int(signo,pm_ln))
@@ -585,8 +625,8 @@ contains
              str=repeat(' ',depth)//'call [noop]'//&
                   pm_name_as_string(context,name)
           elseif(k<0) then
-            str=repeat(' ',depth)//'call [??]'//&
-                  pm_name_as_string(context,name)
+             str=repeat(' ',depth)//'call '//'!![-'//trim(pm_int_as_string(-k))//']'&
+                  //pm_name_as_string(context,name)
           else
              str=repeat(' ',depth)//'call '//'['//trim(pm_int_as_string(k))//']'&
                   //pm_name_as_string(context,name)
@@ -621,6 +661,18 @@ contains
        call print_value_cnode(context,iunit,rvec,sig_cache,cnode_arg(args,j),depth,str,i)
        i=i+1
     enddo
+    keys=cnode_get(cnode,call_keys)
+    if(.not.pm_fast_isnull(keys)) then
+       
+       keynames=pm_name_val(context,cnode_get_num(cnode,call_key_names))
+       do j=1,cnode_numargs(keys)
+          call append_to_line(iunit,str,i,&
+               trim(pm_name_as_string(context,keynames%data%i(keynames%offset+j-1))),.false.,depth)
+          call append_to_line(iunit,str,i,':=:'//trim(pm_name_as_string(context,name))//':',.false.,depth)
+          call print_value_cnode(context,iunit,rvec,sig_cache,cnode_arg(keys,j),depth,str,i)
+          i=i+1
+       enddo
+    endif
     modl=cnode_get_num(cnode,cnode_modl_name)
     line=cnode_get_num(cnode,cnode_lineno)
     location=trim(pm_name_as_string(context,modl))//':'//pm_int_as_string(line)
@@ -632,13 +684,14 @@ contains
     include 'fisnull.inc'
   end subroutine print_call_cnode
 
-  subroutine print_value_cnode(context,iunit,rvec,sig_cache,cnode,depth,str,i)
+  recursive subroutine print_value_cnode(context,iunit,rvec,sig_cache,cnode,depth,str,i)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,depth
     type(pm_ptr),intent(in):: rvec,sig_cache,cnode
     character(len=*),intent(inout):: str
     integer,intent(inout):: i
     integer:: kind,name,tno
+    type(pm_ptr):: p
     kind=pm_fast_vkind(cnode)
     if(kind==pm_tiny_int) then
        call append_to_line(iunit,str,i,&
@@ -663,6 +716,10 @@ contains
           else
              call append_quoted_to_line(iunit,str,i,&
                   trim(pm_name_as_string(context,name)),.false.,depth)
+             if(.not.cnode_flags_clear(cnode,var_flags,var_is_imported+var_is_shadowed)) then
+                call append_to_line(iunit,str,i,''''//&
+                     trim(pm_int_as_string(cnode_get_num(cnode,var_index))),.false.,depth)
+             endif
           endif
           if(.not.pm_fast_isnull(rvec)) then
              tno=rvec%data%i(rvec%offset+cnode_get_num(cnode,var_index))
@@ -678,6 +735,26 @@ contains
           str=' '
           str(depth+1:depth+1)='}'
           i=depth+1
+       case(cnode_is_changelist)
+          call append_to_line(iunit,str,i,'^(',.false.,depth)
+          p=cnode_arg(cnode,1)
+          do while(.not.pm_fast_isnull(p))
+             call print_value_cnode(context,iunit,rvec,sig_cache,p%data%ptr(p%offset),depth,str,i)
+             p=p%data%ptr(p%offset+1)
+             if(.not.pm_fast_isnull(p)) then
+                call append_to_line(iunit,str,i,',',.false.,depth)
+             endif
+          enddo
+          call append_to_line(iunit,str,i,') &(',.false.,depth)
+          p=cnode_arg(cnode,2)
+          do while(.not.pm_fast_isnull(p))
+             call print_value_cnode(context,iunit,rvec,sig_cache,p%data%ptr(p%offset),depth,str,i)
+             p=p%data%ptr(p%offset+1)
+             if(.not.pm_fast_isnull(p)) then
+                call append_to_line(iunit,str,i,',',.false.,depth)
+             endif
+          enddo
+          call append_to_line(iunit,str,i,')',.false.,depth)
        end select
     endif
   contains

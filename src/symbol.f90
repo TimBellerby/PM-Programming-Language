@@ -66,10 +66,11 @@ module pm_symbol
   integer,parameter:: sym_caret = 22
   integer,parameter:: sym_dcaret = 23
   integer,parameter:: sym_dcolon = 24
-  integer,parameter:: sym_define = 25
-  integer,parameter:: sym_cond = 26
-  integer,parameter:: sym_string = 27
-  integer,parameter:: sym_number = 28
+  integer,parameter:: sym_damp = 25
+  integer,parameter:: sym_define = 26
+  integer,parameter:: sym_cond = 27
+  integer,parameter:: sym_string = 28
+  integer,parameter:: sym_number = 29
 
   ! Operators
   integer,parameter:: sym1 = sym_number
@@ -228,7 +229,11 @@ module pm_symbol
   integer,parameter:: sym_pm_head_node = last_resv + 14
   integer,parameter:: sym_pm_do_at = last_resv + 15
   integer,parameter:: sym_pm_do = last_resv + 16
-  integer,parameter:: last_stmt = sym_pm_do
+  integer,parameter:: sym_pm_intrinsic = last_resv + 17
+  integer,parameter:: sym_pm_if_compiling = last_resv + 18
+  integer,parameter:: sym_pm_else = last_resv + 19
+  integer,parameter:: sym_pm_endif = last_resv + 20
+  integer,parameter:: last_stmt = sym_pm_endif
   integer,parameter:: num_sym = last_stmt
 
   ! Non-reserved words that the compiler needs to know about
@@ -257,9 +262,21 @@ module pm_symbol
   
   ! filesystem
   integer,parameter:: sym_filesystem = num_sym + 18
+
+  ! Attributes for intrinsics
+  integer,parameter:: sym_proc_is_generator = num_sym + 19
+  integer,parameter:: sym_proc_is_impure = num_sym + 20
+  integer,parameter:: sym_proc_has_for = num_sym + 21
+  integer,parameter:: sym_proc_is_dcomm = num_sym + 22
+  integer,parameter:: sym_proc_is_file = num_sym + 23
+  integer,parameter:: sym_proc_is_not_inlinable = num_sym + 24
+  integer,parameter:: sym_proc_needs_type = num_sym + 25
+
+  ! Specialised types
+  integer,parameter:: sym_literal = num_sym + 26
   
   ! Symbols used as node types (actual name not really used)
-  integer,parameter:: node0 = num_sym + 18
+  integer,parameter:: node0 = num_sym + 26
   integer,parameter:: sym_iter = node0 + 1
   integer,parameter:: sym_list = node0 + 2
   integer,parameter:: sym_builtin = node0 + 3
@@ -495,6 +512,7 @@ module pm_symbol
   data sym_names(sym_caret)            /'^'/
   data sym_names(sym_dcaret)           /'^^'/
   data sym_names(sym_dcolon)           /'::'/
+  data sym_names(sym_damp)             /'&&'/
   data sym_names(sym_define)           /'='/
   data sym_names(sym_cond)             /'=>'/
   
@@ -636,6 +654,10 @@ module pm_symbol
   data sym_names(sym_pm_head_node)     /'PM__head_node'/
   data sym_names(sym_pm_do_at)         /'PM__do_at'/
   data sym_names(sym_pm_do)            /'PM__do'/
+  data sym_names(sym_pm_intrinsic)     /'PM__intrinsic'/
+  data sym_names(sym_pm_if_compiling)  /'PM__if_compiling'/
+  data sym_names(sym_pm_else)          /'PM__else'/
+  data sym_names(sym_pm_endif)         /'PM__endif'/
 
   !===============================================================
 
@@ -661,9 +683,19 @@ module pm_symbol
 
   data sym_names(sym_filesystem)       /'filesystem'/
 
+  data sym_names(sym_proc_is_generator)     /'is_generator'/
+  data sym_names(sym_proc_is_impure)        /'is_impure'/
+  data sym_names(sym_proc_has_for)          /'has_for'/
+  data sym_names(sym_proc_is_dcomm)         /'is_dcomm'/
+  data sym_names(sym_proc_is_file)          /'is_file'/
+  data sym_names(sym_proc_is_not_inlinable) /'is_not_inlinable'/
+  data sym_names(sym_proc_needs_type)       /'needs_type'/
+
+  data sym_names(sym_literal)          /'literal'/
+  
   ! Symbols that are node names only
   data sym_names(sym_iter)             /'<iter>'/
-  data sym_names(sym_list)             /'<list>'/
+  data sym_names(sym_list)             /'list'/
   data sym_names(sym_builtin)          /'<builtin>'/
   data sym_names(sym_each_proc)        /'<each-proc>'/
   data sym_names(sym_mode)             /'<mode>'/

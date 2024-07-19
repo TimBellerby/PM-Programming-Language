@@ -5558,7 +5558,7 @@ contains
          call out_line(g,'END SELECT')
       case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
          continue
-      case(pm_type_is_all,pm_type_is_par_kind,pm_type_is_enveloped,&
+      case(pm_type_is_all,pm_type_is_par_kind,&
          pm_type_is_vect)
        call outpack(pm_tv_arg(tv,1),varname,depth)
       end select
@@ -5682,7 +5682,7 @@ contains
          call out_line(g,'END SELECT')
       case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
          continue
-      case(pm_type_is_all,pm_type_is_par_kind,pm_type_is_enveloped,&
+      case(pm_type_is_all,pm_type_is_par_kind,&
            pm_type_is_vect)
          call outunpack(pm_tv_arg(tv,1),varname,depth)
       end select
@@ -5857,7 +5857,7 @@ contains
        enddo
     case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
        continue
-    case(pm_type_is_all,pm_type_is_par_kind,pm_type_is_enveloped,&
+    case(pm_type_is_all,pm_type_is_par_kind,&
          pm_type_is_vect)
        call outcount(g,pm_tv_arg(tv,1),varname,depth)
     end select
