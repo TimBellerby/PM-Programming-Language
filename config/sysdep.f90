@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2019
+! Copyright (c) Tim Bellerby, 2024
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -35,11 +35,14 @@ module pm_sysdep
   ! ********* Error messages ****************
   ! Error messages in colour
   logical:: pm_colour_messages=.true.
+  logical:: pm_bright_messages=.true.
+  logical:: pm_bold_messages=.true.
+  character(len=*),parameter:: pm_error_start_bright=achar(27)//'[91;1m'
   character(len=*),parameter:: pm_error_start=achar(27)//'[31;1m'
   character(len=*),parameter:: pm_error_end=achar(27)//'[39;22m'
   character(len=*),parameter:: pm_loc_start=achar(27)//'[1m'
   character(len=*),parameter:: pm_loc_end=achar(27)//'[22m'
-  
+
   ! ********* File settings *****************
   ! Standard output
   integer,parameter:: pm_stdout_unit=6
@@ -50,8 +53,8 @@ module pm_sysdep
   ! Suffix for input files
   character(len=4),parameter:: pm_file_suffix='.pmm'
 
-  ! Prefix for library files
-  character(len=15),parameter:: pm_file_prefix='/usr/lib/pm/lib'
+  ! Environment variable holding location of library files
+  character(len=15),parameter:: pm_env_var='PMMLIB'
 
   ! Directory separator (one character only)
   character(len=1),parameter:: pm_file_dirsep='/' 
@@ -83,13 +86,13 @@ module pm_sysdep
   ! Types used by memory model (block offsets,object sizes,bitmap flags)
   
   ! integer,parameter:: pm_p=kind(1)    ! Pointer offsets, object types +
-                                       ! flags  (>~24 bits, typically int)
+                                        ! flags  (>~24 bits, typically int)
 
-integer,parameter:: pm_p=8
+  integer,parameter:: pm_p=8
   
-  integer,parameter:: pm_f=kind(1)    ! Bitmap storage  (integer word)
-                                      ! On some systems int64 may
-                                      ! improve things slightly
+  integer,parameter:: pm_f=kind(1)      ! Bitmap storage  (integer word)
+                                        ! On some systems int64 may
+                                        ! improve things slightly
 
   ! ********* Vector Virtual Machine ********
   
@@ -204,15 +207,19 @@ contains
   subroutine pm_module_filename(inbuffer,buffer)
    character(len=*):: inbuffer,buffer
    integer:: n,m
+   character(len=pm_max_filename_size):: libpath
    buffer=inbuffer
    n=len_trim(buffer)
    if(n>len(pm_file_suffix)) then
      if(buffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) return
    endif
    if(buffer(1:4)=='lib.') then
-      m=len(pm_file_prefix)
-      buffer(m+1:m+n)=buffer(1:n)
-      buffer(1:m)=pm_file_prefix
+      call get_environment_variable(pm_env_var,libpath)
+      m=len_trim(libpath)
+      if(m>0) then
+         buffer(m+1:m+n)=buffer(1:n)
+         buffer(1:m)=libpath
+      endif
    endif
    do m=1,n
       if(buffer(m:m)=='.') then
