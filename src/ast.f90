@@ -38,6 +38,9 @@ module pm_ast
   use pm_vmdefs
   use pm_types
 
+  ! Langauge features
+  integer,parameter:: num_comm_args=6
+ 
   ! Offsets into module objects
   integer,parameter:: modl_name=1
   integer,parameter:: modl_link=2
@@ -76,13 +79,11 @@ module pm_ast
   integer,parameter:: proc_params=node_args+4
   integer,parameter:: proc_keys=node_args+5
   integer,parameter:: proc_amplocs=node_args+6
-  integer,parameter:: proc_coded_params=node_args+7
+  integer,parameter:: proc_when=node_args+7
   integer,parameter:: proc_coded_results=node_args+8
   integer,parameter:: proc_coded_type=node_args+9
   integer,parameter:: proc_numret=node_args+10
   integer,parameter:: proc_result_types=node_args+11
-  
-  
 
   ! Alternative final sections for 'proc' parse nodes
 
@@ -102,27 +103,28 @@ module pm_ast
   integer,parameter:: proc_coded_builtin=node_args+16
   integer,parameter:: sysproc_num_args=17
 
-  ! Values for proc flags 
-  integer,parameter:: proc_is_comm=           1
-  integer,parameter:: proc_run_complete=      2
-  integer,parameter:: proc_run_local=         4
-  integer,parameter:: proc_run_shared=        8
-  integer,parameter:: proc_run_always=        16
-  integer,parameter:: proc_inline=            32
-  integer,parameter:: proc_no_inline=         64
-  integer,parameter:: proc_is_open=           128
-  integer,parameter:: proc_is_each_proc=      256
-  integer,parameter:: proc_is_cond=           512
-  integer,parameter:: proc_is_uncond=         1024
-  integer,parameter:: proc_is_abstract=       2048
-  integer,parameter:: proc_is_thru_each =     2**12
-  integer,parameter:: proc_is_empty_each =    2**13
-  integer,parameter:: proc_is_dup_each =      2**14
-  integer,parameter:: proc_is_var =           2**15
+  ! Values for proc flags
+  integer,parameter:: proccall_is_comm=       1
+  integer,parameter:: proccall_is_ref =       2
+  integer,parameter:: proccall_is_general =   4
+  integer,parameter:: proccall_is_yield =     8
+
+  integer,parameter:: proccall_is_inline=     16
+  integer,parameter:: proccall_is_no_inline=  32
+
+  integer,parameter:: proc_is_cond=           256
+  integer,parameter:: proc_is_uncond=         512
+  integer,parameter:: proc_run_complete=      2**10
+  integer,parameter:: proc_run_local=         2**11
+  integer,parameter:: proc_run_shared=        2**12
+  integer,parameter:: proc_run_always=        2**13
+  integer,parameter:: proc_is_open=           2**14
+  integer,parameter:: proc_is_abstract=       2**15
   integer,parameter:: proc_is_generator =     2**16
   integer,parameter:: proc_needs_type =       2**17
   integer,parameter:: proc_is_recursive =     2**18
   integer,parameter:: proc_unfinished =       2**19
+  
   integer,parameter:: proc_is_impure =        2**20
   integer,parameter:: proc_is_not_inlinable = 2**21
   integer,parameter:: proc_has_for =          2**22
@@ -130,26 +132,24 @@ module pm_ast
   integer,parameter:: proc_has_vkeys =        2**24
   integer,parameter:: proc_is_dcomm =         2**25
   integer,parameter:: proc_is_file =          2**26
-  integer,parameter:: proc_needs_par =        2**27
-  integer,parameter:: proc_prints_out =       2**28
+  integer,parameter:: proc_prints_out =       2**27
 
   ! Proc flags that can be taken as taints
   integer,parameter:: proc_taints = proc_is_impure &
        + proc_is_not_inlinable + proc_has_for      &
-       + proc_is_not_pure_each + proc_is_dcomm + proc_is_file   &
-       + proc_needs_par + proc_prints_out
+       + proc_is_dcomm + proc_is_file   &
+       + proc_prints_out
 
   ! Flags for proc calls
-  integer,parameter:: call_is_comm=1
-  integer,parameter:: call_ignore_rules=256
-  integer,parameter:: call_is_fixed = 2**10
-  integer,parameter:: call_is_assign_call = 2**11
-  integer,parameter:: call_is_vararg = 2**12
+  integer,parameter:: call_ignore_rules=      512
+  integer,parameter:: call_is_fixed =         2**10
+  integer,parameter:: call_is_assign_call =   2**11
+  integer,parameter:: call_is_vararg =        2**12
   integer,parameter:: call_inline_when_compiling = 2**13
-  integer,parameter:: call_dup_result = 2**14
-  integer,parameter:: call_is_cond = 2**15
-  integer,parameter:: call_is_no_touch = 2**16
-  integer,parameter:: call_is_unlabelled = 2**17
+  integer,parameter:: call_dup_result =       2**14
+  integer,parameter:: call_is_cond =          2**15
+  integer,parameter:: call_is_no_touch =      2**16
+  integer,parameter:: call_is_unlabelled =    2**17
   integer,parameter:: call_is_uninitialised = 2**18
   
 contains

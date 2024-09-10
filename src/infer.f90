@@ -44,7 +44,6 @@ module pm_infer
   use pm_lib
   use pm_symbol
   use pm_types
-  use pm_parser
   use pm_cnodes
   use pm_codegen
   use pm_vmdefs
@@ -153,17 +152,19 @@ contains
   ! Returns signature index as tiny int in on vstack
   ! ====================================================
   function inf_proc(coder,procnode,callnode,atype,ptype,nret,nkeys,&
-       keynames,keybase,proc_nkeys) result(rtype)
+       keynames,keybase,proc_nkeys,nomatch,only_when) result(rtype)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: procnode,callnode
     integer,intent(in):: atype,ptype
     integer,intent(in):: nret,nkeys,keybase,proc_nkeys
+    logical,intent(in):: only_when
+    logical,intent(out):: nomatch
     type(pm_ptr),intent(in):: keynames
     type(pm_ptr):: cnode,cac
     integer:: rtype
     integer:: at
     integer,dimension(4+proc_nkeys):: key
-    integer:: i,j,keysize,nk
+    integer:: i,j,keysize,nk,tno
     integer(pm_ln):: k
     logical:: save_redo_calls,save_incomplete
     integer:: taints,save_taints
@@ -190,7 +191,7 @@ contains
        return
     endif
 
-    iscomm=cnode_flags_set(procnode,pr_flags,proc_is_comm)
+    iscomm=cnode_flags_set(procnode,pr_flags,proccall_is_comm)
 
     ! Dictionary entries in coder%proc_cache:
     ! Key is proc and argument types and implicit par_kind
@@ -219,6 +220,31 @@ contains
             'Keyword arguments in call to procedure that does not take any')
        call inf_error_with_trace(coder,procnode,&
             'Procedure definition corresponding to the above error')
+    endif
+
+    nomatch=.false.
+    if(.not.pm_fast_isnull(cnode_get(procnode,pr_when))) then
+       if(proc_nkeys==0) call new_stack_frame(coder,cnode_get_num(procnode,pr_max_index))
+       call init_stack_frame(coder,coder%base,1,coder%base+last_key_index,atype,0)
+       call inf_arg_types(coder,procnode,atype)
+       call inf_cblock(coder,cnode_get(procnode,pr_when))
+       tno=get_arg_type(coder,callnode,cnode_get(procnode,pr_whenvar))
+       if(tno==coder%false_fix.or.tno==coder%false_literal) then
+          call pop_stack_frame(coder)
+          nomatch=.true.
+          return
+       elseif(tno/=coder%true_fix.and.tno/=coder%true_literal) then
+          call inf_error(coder,procnode,&
+               '"when" expression must have a fixed or literal bool value')
+          call more_error(coder%context,'Type of expression is: '//&
+               trim(pm_type_as_string(coder%context,tno)))
+       endif
+    endif
+
+    if(only_when) then
+       call pop_stack_frame(coder)
+       nomatch=.false.
+       return
     endif
     
     if(debug_inference) then
@@ -326,7 +352,10 @@ contains
     save_incomplete=coder%incomplete
     save_taints=coder%taints
 
-    if(proc_nkeys==0) call new_stack_frame(coder,cnode_get_num(procnode,pr_max_index))
+    if(proc_nkeys==0.and.pm_fast_isnull(cnode_get(procnode,pr_when))) then
+       call new_stack_frame(coder,cnode_get_num(procnode,pr_max_index))
+    endif
+    
     do
        if(debug_inference) write(*,*) 'TRY>',key(1),key(2),rtype
 
@@ -436,8 +465,8 @@ contains
     call code_int_vec(coder,coder%stack,coder%base,coder%top)
     call code_num(coder,&
          ior(iand(cnode_get_num(procnode,pr_flags),&
-         proc_is_comm+proc_run_shared+proc_run_local+proc_inline+&
-         proc_no_inline+proc_run_complete+proc_run_always),&
+         proccall_is_comm+proc_run_shared+proc_run_local+proccall_is_inline+&
+         proccall_is_no_inline+proc_run_complete+proc_run_always),&
          coder%taints))
     call make_code(coder,pm_null_obj,cnode_is_resolved_proc,3)
     cnode=top_code(coder)
@@ -469,26 +498,12 @@ contains
     include 'fisnull.inc'
   end function inf_proc
 
-  !=======================================================================
-  ! Process keyword arguments
-  ! This requires type inference of default expressions before checking
-  ! and converting the arguments
-  !=======================================================================
-  subroutine inf_key_args(coder,callnode,procnode,atype,nkeys,call_keys,key_base,&
-       keytypes,n)
+  subroutine inf_arg_types(coder,procnode,atype)
     type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: callnode,procnode,call_keys
-    integer,intent(in):: atype,nkeys,key_base
-    integer,intent(out):: keytypes(*),n
-    integer i,j,cname,pname,ctype,ptype,dtype,pdtype,mtype
-    logical:: nomatch,error
-    type(pm_ptr):: callkeys,proc_keys,arglist,tv
-    integer:: nargs,totargs,tno
-
-    proc_keys=cnode_get(procnode,pr_keys)
-
-    ! Need to infer standard arguments in case they are
-    ! used in default expressions
+    type(pm_ptr),intent(in):: procnode
+    integer,intent(in):: atype
+    type(pm_ptr):: arglist,tv
+    integer:: nargs,totargs,i,j
     arglist=cnode_get(procnode,pr_argcall)
     if(.not.pm_fast_isnull(arglist)) then
        nargs=cnode_numargs(arglist)
@@ -509,6 +524,31 @@ contains
           call set_var_type(coder,cnode_arg(arglist,nargs),pop_word(coder))
        endif
     endif
+  contains
+    include 'fisnull.inc'
+  end subroutine inf_arg_types
+  
+  !=======================================================================
+  ! Process keyword arguments
+  ! This requires type inference of default expressions before checking
+  ! and converting the arguments
+  !=======================================================================
+  subroutine inf_key_args(coder,callnode,procnode,atype,nkeys,call_keys,key_base,&
+       keytypes,n)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: callnode,procnode,call_keys
+    integer,intent(in):: atype,nkeys,key_base
+    integer,intent(out):: keytypes(*),n
+    integer i,j,cname,pname,ctype,ptype,dtype,pdtype,mtype
+    logical:: nomatch,error
+    type(pm_ptr):: callkeys,proc_keys,arglist,tv
+    integer:: nargs,totargs,tno
+
+    proc_keys=cnode_get(procnode,pr_keys)
+
+    ! Need to infer standard arguments in case they are
+    ! used in default expressions
+    call inf_arg_types(coder,procnode,atype)
     
     arglist=cnode_get(procnode,pr_keycall)
     n=pm_fast_esize(proc_keys)/2
@@ -583,17 +623,21 @@ contains
   ! ==================================================
   ! Type infer builtin procedure
   ! ===================================================
-  function inf_builtin(coder,procnode,atype,ptype) result(rtype)
+  function inf_builtin(coder,procnode,callnode,atype,ptype) result(rtype)
     type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: procnode
+    type(pm_ptr),intent(in):: procnode,callnode
     integer,intent(in):: atype,ptype
     integer:: rtype,mode,atype1
     integer,dimension(1):: key
-    integer:: k
-    type(pm_ptr):: tv
+    integer:: k,t1,n
+    type(pm_ptr):: tv,v
     type(pm_type_einfo):: einfo
     logical:: isstatic
 
+    if(debug_inference) then
+       write(*,*) 'BUILTIN>',trim(pm_name_as_string(coder%context,cnode_get_num(procnode,pr_name)))
+    endif
+    
     rtype=cnode_get_num(procnode,pr_rtype)
     if(rtype<0) then
        ! Cached concrete return type
@@ -606,7 +650,7 @@ contains
        endif
     endif
 
-    atype1=pm_type_arg(coder%context,atype,1)
+    atype1=pm_type_strip_mode(coder%context,pm_type_arg(coder%context,atype,2),mode)
 
     ! special handling of return types for some operations
     select case(cnode_get_num(procnode,bi_opcode))
@@ -619,14 +663,50 @@ contains
     case(op_get_dom)
        rtype=pm_type_arg(coder%context,atype1,2)
     case(op_as,op_get_poly_or)
-       rtype=pm_type_arg(coder%context,atype,2)
+       rtype=pm_type_arg(coder%context,atype,3)
     case(op_import_val,op_import_varg,op_broadcast_val,&
          op_clone,op_get_rf)
        rtype=atype1
     case(op_elem)
-       rtype=pm_type_arg(coder%context,&
-            pm_type_strip_mode(coder%context,atype1,mode),&
-            cnode_get_num(procnode,bi_opcode2))
+       n=cnode_get_num(procnode,bi_opcode2)
+       if(n/=0) then
+          tv=pm_type_vect(coder%context,atype1)
+          k=pm_tv_kind(tv)
+          if(k==pm_type_is_vect) then
+             t1=pm_tv_arg(tv,1)
+             tv=pm_type_vect(coder%context,t1)
+             rtype=pm_type_strip_mode(coder%context,pm_tv_arg(tv,n-1),mode)
+             if(mode<sym_invar.and.pm_tv_name(tv)/=sym_pling) then
+                rtype=pm_new_vect_type(coder%context,rtype)
+             endif
+          else
+             rtype=pm_tv_arg(tv,n-1)
+          endif
+       else
+          tv=pm_type_vect(coder%context,atype)
+          t1=pm_tv_arg(tv,8)
+          v=pm_type_val(coder%context,t1)
+          n=v%data%ln(v%offset)
+          t1=pm_type_strip_mode(coder%context,pm_tv_arg(tv,7),mode)
+          tv=pm_type_vect(coder%context,t1)
+          k=pm_tv_kind(tv)
+          if(k/=pm_type_is_struct.and.k/=pm_type_is_rec.and.k/=pm_type_is_tuple) then
+             call inf_error_with_trace(coder,callnode,&
+                  'Cannot apply ".element_at_index" to: '//&
+                  trim(pm_type_as_string(coder%context,t1)))
+             rtype=error_type
+          elseif(n<1.or.n>pm_tv_numargs(tv)) then
+             call inf_error(coder,callnode,&
+                  '".element_at_index": index out of bounds: '//&
+                  trim(pm_int_as_string(n)))
+             call more_error(coder%context,'Type being indexed: '//&
+                  trim(pm_type_as_string(coder%context,t1)))
+             call inf_trace(coder)
+             rtype=error_type
+          else
+             rtype=pm_tv_arg(tv,n)
+          endif
+       endif
     case(op_make_array,op_pack)
        rtype=pm_new_arr_type(coder%context,sym_const,atype1,&
             pm_type_arg(coder%context,atype,2),int(pm_long))
@@ -637,7 +717,7 @@ contains
        tv=pm_type_vect(coder%context,atype1)
        rtype=pm_new_arr_type(coder%context,pm_tv_name(tv),&
             pm_tv_arg(tv,1),&
-            pm_type_arg(coder%context,atype,2),int(pm_long))
+            pm_type_arg(coder%context,atype,3),int(pm_long))
     case(op_make_type_val)
        rtype=pm_new_type_type(coder%context,atype1)
     case(op_import_dref)
@@ -726,7 +806,7 @@ contains
 !!$                rtype=pm_tv_arg(tv,1)
 !!$                tv=pm_type_vect(coder%context,rtype)
 !!$                rtype=pm_type_strip_mode(coder%context,pm_tv_arg(tv,int(sym-sym_d1+1)),mode)
-!!$                if(mode<sym_mirrored.and.pm_tv_name(tv)/=sym_pling) then
+!!$                if(mode<sym_invar.and.pm_tv_name(tv)/=sym_pling) then
 !!$                   rtype=pm_new_vect_type(coder%context,rtype)
 !!$                endif
 !!$             else
@@ -901,16 +981,16 @@ contains
        ! call (with symbol sig)
        select case(sig)
        case(sym_while)
-          call check_loop_writes(5)
-          list=cnode_arg(args,2)
-          list2=cnode_arg(args,4)
+          call check_loop_writes(4)
+          list=cnode_arg(args,1)
+          list2=cnode_arg(args,3)
           counter=0
           do
              call clear_cblock_mark(list)
              call clear_cblock_mark(list2)
              call inf_cblock(coder,list)
-             call check_logical(3)
-             if(arg_type(3)==coder%false_fix) return
+             call check_logical(2)
+             if(arg_type(2)==coder%false_fix) return
              call inf_cblock(coder,list2)
              if(.not.(cblock_marked(list).or.&
                   cblock_marked(list2))) exit
@@ -921,16 +1001,15 @@ contains
                 exit
              endif
           enddo
-          if(cblock_has_comm(cnode_arg(args,2))&
-               .or.cblock_has_comm(cnode_arg(args,4))) then
+          if(cblock_has_comm(cnode_arg(args,1))&
+               .or.cblock_has_comm(cnode_arg(args,3))) then
              call set_call_sig(merge(1,0,coder%par_kind2<=par_mode_conc))
           else
              call set_call_sig(0)
           endif
        case(sym_until,sym_each)
-          if(nargs<4) call inf_error(coder,callnode,'Towels')
-          call check_loop_writes(4)
-          list=cnode_arg(args,2)
+          call check_loop_writes(3)
+          list=cnode_arg(args,1)
           counter=0
           do 
              call clear_cblock_mark(list)
@@ -943,7 +1022,7 @@ contains
                 exit
              endif
           enddo
-          call check_logical(3)
+          call check_logical(2)
           if(cblock_has_comm(list)) then
              call set_call_sig(merge(1,0,coder%par_kind<=par_mode_conc))
           else
@@ -966,11 +1045,11 @@ contains
                   cnode_get(cnode_arg(args,2),var_name))
              coder%stack(get_slot(1))=error_type
           else
-             mode=merge(sym_shared,sym_mirrored,&
+             mode=merge(sym_shared,sym_invar,&
                   iand(pm_type_flags(coder%context,tno),&
                   pm_type_has_distributed)/=0)
              coder%stack(get_slot(1))=pm_type_add_mode(coder%context,tno,&
-                  mode,.false.)
+                  mode)
              if(tno>0.and.coder%par_kind==par_mode_conc.and.mode==sym_shared) then
                 if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
                    call inf_error_with_trace(coder,callnode,&
@@ -995,17 +1074,21 @@ contains
                         ' to a non-communicating operation')
                 endif
                 call push_word(coder,&
-                     pm_type_add_mode(coder%context,tno,sym_mirrored,.false.))
+                     pm_type_add_mode(coder%context,tno,sym_invar))
              enddo
              call make_type(coder,n+2)
              tno=pop_word(coder)
              coder%stack(get_slot(1))=tno
              call flag_import_export(tno)
           endif
+       case(sym_null)
+          do i=1,nret
+             coder%stack(get_slot(i))=pm_null
+          enddo
        case(sym_export)
           tno=arg_type_with_mode(1)
           mode=pm_type_get_mode(coder%context,tno)
-          if(mode/=sym_coherent.and.mode/=sym_partial) then
+          if(mode/=sym_private) then
              call inf_error(coder,callnode,&
                   'Cannot modify "'//trim(sym_names(mode))//'" variable as a "shared" value '//&
                   'in a nested parallel statement: '//&
@@ -1094,89 +1177,6 @@ contains
           if(debug_inference) write(*,*) 'DREF=',&
                trim(pm_type_as_string(coder%context,top_word(coder)))
           coder%stack(get_slot(1))=pop_word(coder)
-       case(sym_hash)
-          if(arg_type(2)/=pm_null) then
-             call inf_cblock(coder,cnode_arg(args,1))
-          endif
-       case(sym_for_stmt)
-          coder%taints=ior(coder%taints,proc_needs_par)
-          tno=coder%par_kind
-          coder%stack(get_slot(1))=pm_long
-          coder%stack(get_slot(2))=tno
-          if(tno==error_type) tno=pm_null
-          if(tno>par_mode_multi_node.or.arg_type(7)==pm_null) then
-             save_par_kind=coder%par_kind2
-             coder%par_kind2=coder%par_kind
-             if(tno>par_mode_multi_node) then
-                coder%par_kind=par_mode_inner
-             else
-                coder%par_kind=par_mode_conc
-             endif
-             slot=get_slot(1)
-             coder%stack(slot)=pm_long
-             slot=get_slot(2)
-             coder%stack(slot)=pm_null
-             call inf_cblock(coder,cnode_arg(args,4))
-             call inf_cblock(coder,cnode_arg(args,3))
-             call make_code(coder,pm_null_obj,cnode_is_any_sig,0)
-             coder%par_kind=coder%par_kind2
-             coder%par_kind2=save_par_kind
-          else
-             save_par_kind=coder%par_kind2
-             coder%par_kind2=coder%par_kind
-             coder%par_kind=par_mode_multi_node
-             nerrors=coder%num_errors
-             call inf_cblock(coder,cnode_arg(args,4))
-             list=cnode_arg(args,8)
-             list=cnode_arg(list,1)
-             slot=list%data%i(list%offset)
-             slot2=list%data%i(list%offset+1)
-             coder%stack(coder%base+slot:coder%base+slot2)=undefined
-             call inf_cblock(coder,cnode_arg(args,3))
-             coder%par_kind2=save_par_kind
-             if(coder%num_errors==nerrors) then
-                call code_int_vec(coder,coder%stack,coder%base+slot,coder%base+slot2)
-                coder%stack(coder%base+slot:coder%base+slot2)=undefined
-                coder%par_kind=par_mode_single_node
-                call inf_cblock(coder,cnode_arg(args,3))
-                if(coder%num_errors==nerrors) then
-                   call code_int_vec(coder,coder%stack,coder%base+slot,coder%base+slot2)
-                   call inf_cblock(coder,cnode_arg(args,5))
-                   coder%par_kind=coder%par_kind2
-                   coder%par_kind2=save_par_kind
-                   if(coder%num_errors==nerrors) then
-                      call make_code(coder,pm_null_obj,cnode_is_any_sig,2)
-                   else
-                      call drop_code(coder)
-                      call drop_code(coder)
-                      return
-                   endif
-                else
-                   coder%par_kind=coder%par_kind2
-                   coder%par_kind2=save_par_kind
-                   call drop_code(coder)
-                   return
-                endif
-             else
-                coder%par_kind=coder%par_kind2
-                coder%par_kind2=save_par_kind
-                return
-             endif
-          endif
-          list=pop_code(coder)
-          key(1)=pm_dict_size(coder%context,coder%proc_cache)
-          k=pm_idict_add(coder%context,coder%proc_cache,&
-               key,1,list)
-          call set_call_sig(int(k))
-       case(sym_pct)
-          if(nargs==1) then
-             call inf_cblock(coder,cnode_arg(args,1))
-          else
-             tno=arg_type(3)
-             slot=get_slot(1)
-             coder%stack(slot)=tno
-             call inf_cblock(coder,cnode_arg(args,2))
-          endif
        case(sym_struct,sym_rec)
           t=cnode_arg(args,2)
           t=cnode_arg(t,1)
@@ -1215,7 +1215,7 @@ contains
                      trim(pm_name_as_string(coder%context,&
                      namep%data%i(namep%offset-mode))))
              endif
-             mode=sym_mirrored
+             mode=sym_invar
           endif
           do i=1,nargs-2
              tno2=pm_type_strip_mode(coder%context,coder%wstack(coder%wtop-nargs+2+i),mode2)
@@ -1249,10 +1249,21 @@ contains
                  tno2=error_type
               endif
            endif
-           tno2=pm_type_add_mode(coder%context,tno2,mode,&
-               cnode_flags_set(callnode,call_flags,call_is_cond))
-          call combine_types(cnode_arg(args,1),tno2)
-       case(sym_dot,sym_dot_ref,sym_get_dot,sym_get_dot_ref)
+           tno2=pm_type_add_mode(coder%context,tno2,mode)
+           call combine_types(cnode_arg(args,1),tno2)
+        case(sym_open_smiley)
+           call push_word(coder,pm_type_new_tuple+pm_type_is_list)
+           call push_word(coder,0)
+           do i=1,nargs
+              call push_word(coder,arg_type_with_mode(i+1))
+           enddo
+           mode=pm_type_mix_modes(coder%context,&
+                coder%wstack(coder%wtop-nargs+1:coder%wtop))
+           call make_type_if_possible(coder,nargs+2)
+           tno2=pop_word(coder)
+           tno2=pm_type_add_mode(coder%context,tno2,mode)
+           call combine_types(cnode_arg(args,1),tno2)
+        case(sym_dot,sym_dot_ref,sym_get_dot,sym_get_dot_ref)
           if(sig==sym_get_dot.or.sig==sym_get_dot_ref) then
              tno=arg_type(3)
              if(tno/=error_type) then
@@ -1271,13 +1282,13 @@ contains
           if(tno==error_type) then
              call set_arg_to_error_type(1)
           else
-             tno=pm_type_strip_mode_and_cond(coder%context,&
-                  tno,mode,cond)
+             tno=pm_type_strip_mode(coder%context,&
+                  tno,mode)
              if(tno>0) then
                 call set_call_sig(resolve_elem(tno,name,&
                      sig==sym_dot_ref.or.sig==sym_get_dot_ref,.false.,tno2))
                 call combine_types(cnode_arg(args,1),&
-                     pm_type_add_mode(coder%context,tno2,mode,cond))
+                     pm_type_add_mode(coder%context,tno2,mode))
              else
                 call set_arg_to_error_type(1)
              endif
@@ -1297,38 +1308,37 @@ contains
              call set_arg_to_error_type(1)
              return
           endif
-          tno2=pm_type_strip_mode_and_cond(coder%context,&
-               arg_type_with_mode(2),mode,cond)
+          tno2=pm_type_strip_mode(coder%context,&
+               arg_type_with_mode(2),mode)
           k=inf_cast(coder,callnode,tno,tno2,.true.)
           call set_call_sig(int(k))
           call combine_types(cnode_arg(args,1),&
-               pm_type_add_mode(coder%context,tno2,mode,cond))
+               pm_type_add_mode(coder%context,tno2,mode))
        case(sym_var_set_mode)
           mode2=cnode_num_arg(args,2)
           coder%stack(get_slot(1))=pm_type_add_mode(coder%context,&
                pm_type_strip_mode(coder%context,&
-               arg_type_with_mode(1),mode),mode2,.false.)
-          if(mode==sym_partial.or.&
-               mode2>=sym_mirrored.and.mode<sym_mirrored) then
+               arg_type_with_mode(1),mode),mode2)
+          if(mode2>=sym_invar.and.mode<sym_invar) then
              call inf_error_with_trace(coder,callnode,&
                   'Cannot initialise "'//&
                   trim(sym_names(mode2))//'" variable with "'//&
                   trim(sym_names(mode))//'" value')
           endif
-       case(sym_partial,sym_coherent)
+       case(sym_private)
           coder%stack(get_slot(1))=pm_type_replace_mode(coder%context,&
-               arg_type_with_mode(1),sig,.false.)
+               arg_type_with_mode(1),sig)
        case(sym_set_mode)
           mode=cnode_num_arg(args,2)
           coder%stack(get_slot(1))=pm_type_replace_mode(coder%context,&
-               arg_type_with_mode(1),mode,.false.)
+               arg_type_with_mode(1),mode)
        case(sym_change_mode)
           mode=cnode_num_arg(args,3)
           coder%stack(get_slot(1))=pm_type_replace_mode(coder%context,&
-               arg_type_with_mode(2),mode,.false.)
+               arg_type_with_mode(2),mode)
        case(sym_invar)
           tno=pm_type_strip_mode(coder%context,arg_type_with_mode(1),mode)
-          if(mode<sym_mirrored) then
+          if(mode<sym_invar) then
              call inf_error_with_trace(coder,callnode,&
                   'Expression must be invariant instead of: '//trim(sym_names(mode)))
           endif
@@ -1346,7 +1356,7 @@ contains
           endif
        case(sym_assignment)
           tno=pm_type_get_mode(coder%context,arg_type_with_mode(1))
-          if(tno>=sym_mirrored) then
+          if(tno>=sym_invar) then
              call inf_error(coder,callnode,&
                   'Assignments to "'//trim(sym_names(tno))//&
                   '" variables are not allowed outside of a "sync" statement') 
@@ -1401,7 +1411,7 @@ contains
           coder%stack(get_slot(1))=tno
        case(sym_dcaret)
           coder%stack(get_slot(1))=pm_type_add_mode(coder%context,&
-               pm_new_vect_type(coder%context,arg_type(2)),sym_shared,.false.)
+               pm_new_vect_type(coder%context,arg_type(2)),sym_shared)
        case(sym_open)
           if(nargs>0) then
              t=pm_type_vect(coder%context,coder%stack(coder%base))
@@ -1440,8 +1450,6 @@ contains
            coder%stack(get_slot(2))=pm_logical
        case(sym_underscore,sym_colon,sym_end_loop,sym_init_var)
           continue
-       case(sym_arg)
-          call combine_types(cnode_arg(args,1),arg_type(2))
        case(first_pragma:last_pragma)
           if(sig==sym_infer_type.or.sig==sym_infer_type_and_stack) then
              call inf_cblock(coder,cnode_arg(args,1))
@@ -1556,7 +1564,7 @@ contains
       writelist=cnode_arg(changelist,2)
       slot=list2%data%i(list2%offset)
       slot2=list2%data%i(list2%offset+1)
-      tno=pm_type_strip_mode_and_cond(coder%context,arg_type(3),mode,cond)
+      tno=pm_type_strip_mode(coder%context,arg_type(3),mode)
       t=check_poly(coder,tno)
       if(tno/=error_type.and..not.pm_fast_isnull(t)) then
          n=pm_set_size(coder%context,t)
@@ -1581,7 +1589,7 @@ contains
             tno=list%data%i(list%offset)
             coder%stack(coder%base+slot:coder%base+slot2)=undefined
             coder%stack(get_slot(1))=&
-                 pm_type_add_mode(coder%context,tno,mode,cond)
+                 pm_type_add_mode(coder%context,tno,mode)
             call inf_cblock(coder,cnode_arg(args,2))
             call code_int_vec(coder,coder%stack,coder%base+slot,coder%base+slot2)
             
@@ -1947,13 +1955,13 @@ contains
             trim(sig_name_str(coder,int(sig))),'@',&
             callnode%data%ptr(callnode%offset+cnode_lineno)%offset
        if(cnode_get_kind(args)/=cnode_is_arglist) call pm_panic('not arglist')
-       call qdump_code_tree(coder,pm_null_obj,6,callnode,2)
+       !call qdump_code_tree(coder,pm_null_obj,6,callnode,2)
     endif
 
     ! extract characteristics of call
     amps=cnode_get_num(callnode,call_amp)
     flags=cnode_get_num(callnode,call_flags)
-    is_comm=iand(flags,call_is_comm)/=0
+    is_comm=iand(flags,proccall_is_comm)/=0
     is_cond=iand(flags,call_is_cond)/=0
     is_unlabelled=iand(flags,call_is_unlabelled)/=0
     ignore_rules=cnode_flags_set(callnode,call_flags,call_ignore_rules)
@@ -2024,7 +2032,7 @@ contains
           call call_error('Cannot pass a shared value to a standard procedure')
           call inf_error_with_trace(coder,cnode_arg(args,nret-mode),&
                'Cannot pass a shared value to a standard procedure')
-          mode=sym_coherent
+          mode=sym_private
        endif
        
        ! Rules for "&" arguments
@@ -2032,6 +2040,8 @@ contains
        if(amps/=0.and..not.ignore_rules) then
           amplocs=pm_name_val(coder%context,amps)
           do i=0,pm_fast_esize(amplocs)
+             call qdump_code_tree(coder,pm_null_obj,6,amplocs,2)
+             write(*,*) 'AMPLOC-->',amplocs%data%i(amplocs%offset+i),i,pm_fast_esize(amplocs)
              tno2=pm_type_strip_mode(coder%context,&
                   coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i)+nkey),mode2)
              if(tno2>0) then
@@ -2049,7 +2059,7 @@ contains
                    endif
                 endif
              endif
-             if(mode2/=sym_partial.and.mode2/=sym_coherent.and.(mode2/=sym_chan.or.is_unlabelled)) then
+             if(mode2/=sym_private.and.(mode2/=sym_chan.or.is_unlabelled)) then
                 if(mode2==sym_chan) then
                    call call_error('Cannot change "chan" variable in an unlabelled conditional context')
                 else
@@ -2107,10 +2117,10 @@ contains
     if(.not.is_comm) then
        
        ! Apply return mode to returned values
-       if(mode/=sym_coherent) then
+       if(mode/=sym_private) then
           do j=1,nret
              coder%stack(get_slot(j))=pm_type_replace_mode(coder%context,&
-                  coder%stack(get_slot(j)),mode,is_cond)
+                  coder%stack(get_slot(j)),mode)
           enddo
        endif
        
@@ -2152,11 +2162,11 @@ contains
       integer,intent(in),optional:: sig_start
       integer:: ressig
       
-      integer:: h,i,j,m,start,slot,pcheck,nkey_sig,jpass
+      integer:: h,i,j,m,start,slot,pcheck,nkey_sig,jpass,nconsidered
       integer:: vbase,wbase
-      type(pm_ptr):: v,proc,match_proc,rtvect
+      type(pm_ptr):: tv,v,proc,match_proc,rtvect
       integer:: rt,rt2,pars,mpars,apars,tno,match_pars
-      logical:: ok,found,visible,found_has_no_rtypes
+      logical:: ok,found,visible,found_has_no_rtypes,when_no_match
       integer:: save_par_kind,save_par_kind2
       type(pm_type_einfo):: einfo
       integer,dimension(1):: key
@@ -2182,26 +2192,31 @@ contains
       ! This is done in multiple passes with increasingly broader matching
       ! allowed in passes 1..3
 
-      if(pm_debug_level>4) write(*,*) 'Checking',cnode_numargs(procs),' sigs'
+      if(debug_inference) write(*,*) 'Checking',cnode_numargs(procs),' sigs'
       found=.false.
-      apars=error_type
-      
+      apars=0
+
       outer: do jpass=0,3
          if(debug_inference) write(*,*) 'MATCH PASS> ',jpass
+         nconsidered=0
          do i=1,cnode_numargs(procs)
             proc=cnode_arg(procs,i)
-
+            if(debug_inference) write(*,*) 'CHECK nret',cnode_get_num(proc,pr_nret),nret,&
+                 'amps',cnode_get_num(proc,pr_amps),amps,&
+                 'comm',cnode_flags_set(proc,pr_flags,proccall_is_comm),is_comm
             if(cnode_get_num(proc,pr_nret)/=nret) cycle
             if(cnode_get_num(proc,pr_amps)/=amps) cycle
-            if(cnode_flags_set(proc,pr_flags,proc_is_comm).neqv.is_comm) cycle
-            !!! Deal with cond/uncond here
+            if(iand(cnode_get_num(proc,pr_flags),proccall_is_comm+proccall_is_ref+proccall_is_general)/=&
+                 iand(flags,proccall_is_comm+proccall_is_ref+proccall_is_general)) cycle
+
+            nconsidered=nconsidered+1
             
             pars=cnode_get_num(proc,pr_ptype)
             
             if(debug_inference) then
                write(*,*) 'CHECKING SIG',(i-1)/2,&
                     ' OF ',(cnode_numargs(procs)-2)/2,&
-                    ' FOR>',trim(sig_name_str(coder,int(sig)))
+                    ' FOR> ',trim(sig_name_str(coder,int(sig)))
                write(*,*) '>> ',trim(pm_type_as_string(coder%context,pars))
             endif
 
@@ -2215,8 +2230,11 @@ contains
                ! Check for a visible match
                if(is_visible(coder,callnode,proc)) visible=.true.
 
-               ! If this is a second (or later) match, then check for compatibility
+               !!$               ! If this is a second (or later) match, then check for compatibility
                if(found) then
+                  if(debug_inference) write(*,*) 'SECOND MATCH>',&
+                       trim(pm_type_as_string(coder%context,pars)),'AFTER>',&
+                       trim(pm_type_as_string(coder%context,match_pars))
                   if(pm_type_includes(coder%context,pars,&
                        match_pars,pm_type_incl_type,einfo)) then
                      coder%wtop=wbase
@@ -2240,20 +2258,38 @@ contains
                            endif
                         endif
                      endif
+                     if(pm_type_has_when(coder%context,pars)) then
+                        if(pm_type_includes(coder%context,match_pars,&
+                             pars,pm_type_incl_type,einfo)) then
+                           ! Two equally specific when procs - the second must have when(false)
+                           coder%trace_depth=coder%trace_depth+1
+                           if(coder%trace_depth<max_par_depth) then
+                              coder%trace(coder%trace_depth)=callnode
+                              coder%trace_keys(coder%trace_depth)=keybase
+                           endif
+                           rt=inf_proc(coder,proc,callnode,apars,pars,nret,nkey,&
+                                keynames,keybase,&
+                                int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.true.)
+                           coder%trace_depth=coder%trace_depth-1
+                           if(.not.when_no_match) then
+                              call inf_error(coder,callnode,&
+                                   'Ambiguous call to: '//trim(sig_name_str(coder,int(sig))))
+                              call more_error(coder%context,&
+                                   'Two or more equivalent procedures have "when" expressions evaluating to "true"')
+                              call print_call_details(coder,callnode,keybase,nargs)
+                              call print_proc_details(coder,match_proc)
+                              call print_proc_details(coder,proc)
+                           endif
+                        endif
+                     endif
                      cycle
                   else
                      if(.not.present(err)) then
                         call inf_error(coder,callnode,&
                              'Ambiguous call to: '//trim(sig_name_str(coder,int(sig))))
                         call print_call_details(coder,callnode,keybase,nargs)
-                        call print_proc_details(coder,cnode_arg(procs,i+1),&
-                             sig,&
-                             cnode_flags_set(callnode,call_flags,call_is_comm),&
-                             pars)
-                        call print_proc_details(coder,proc,&
-                             sig,&
-                             cnode_flags_set(callnode,call_flags,call_is_comm),&
-                             match_pars)
+                        call print_proc_details(coder,match_proc)
+                        call print_proc_details(coder,proc)
                      else
                         err=.true.
                      endif
@@ -2261,17 +2297,11 @@ contains
                      exit
                   endif
                endif
-
+               
                ! A good match has been found
                ! infer the associated procedure
-               found=.true.
-               match_pars=pars
-               match_proc=proc
-               found_has_no_rtypes=&
-                    pm_type_kind(coder%context,cnode_get_num(match_proc,pr_rtype))==&
-                    pm_type_is_undef_result
                if(cnode_get_kind(proc)==cnode_is_builtin) then
-                  rt=inf_builtin(coder,proc,apars,pars)
+                  rt=inf_builtin(coder,proc,callnode,apars,pars)
                else
                   
                   pcheck=coder%vtop
@@ -2284,13 +2314,17 @@ contains
                      coder%trace_keys(coder%trace_depth)=keybase
                   endif
 
-                  rt=inf_proc(coder,match_proc,callnode,apars,pars,nret,nkey,&
+                  rt=inf_proc(coder,proc,callnode,apars,pars,nret,nkey,&
                        keynames,keybase,&
-                       int(pm_fast_esize(cnode_get(match_proc,pr_keys))+1)/2)
+                       int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.false.)
+                  coder%trace_depth=coder%trace_depth-1
+                  if(when_no_match) then
+                     cycle
+                  endif
                   if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
                      coder%supress_errors=.false.
                   endif
-                  coder%trace_depth=coder%trace_depth-1
+
                   if(rt<0) then
                      if(debug_inference) then
                         write(*,*) 'INCOMPLETE PROC>',coder%vtop,start,coder%incomplete
@@ -2305,7 +2339,14 @@ contains
                   else
                      !if(coder%vtop/=pcheck+1) call pm_panic('pcheck mismatch')
                   endif
-               endif               
+               endif
+
+               found=.true.
+               match_pars=pars
+               match_proc=proc
+               found_has_no_rtypes=&
+                    pm_type_kind(coder%context,cnode_get_num(match_proc,pr_rtype))==&
+                    pm_type_is_undef_result
                
                if(nret>0) then
                   if(rt>0) then
@@ -2354,29 +2395,36 @@ contains
          if(.not.present(err)) then
             if(.not.found) then
                call cnode_error(coder,callnode,&
-                    'No matching procedure:')
+                    'No matching procedure returning '//trim(pm_int_as_string(nret))//' value'//&
+                    merge(': ','s:',nret==1))
             else
                call cnode_error(coder,callnode,&
-                    'No matching procedure visible to module containing call')
+                    'No matching procedure is visible to the module containing the call')
+               call more_error(coder%context,'(expecting '//trim(pm_int_as_string(nret))//' return value'//&
+                     merge(': ','s:',nret==1))
             endif
             m=coder%wtop
             call make_type(coder,nargs+2)
             call print_call_details(coder,callnode,keybase,nargs)
             coder%wtop=m
-
-            call more_error(coder%context,'Procedures considered:')
-            do m=1,cnode_numargs(procs)
-               pars=cnode_get_num(cnode_arg(procs,m),pr_ptype)
-               call print_proc_details(coder,cnode_arg(procs,m),&
-                    sig,&
-                    cnode_flags_set(callnode,call_flags,call_is_comm),&
-                    pars)
-               if(m>pm_opts%proc_list.and..not.pm_opts%see_all_procs) then
-                  call more_error(coder%context,&
-                       '... (to see all procedures use -fsee-all-procs)')
-                  exit
-               endif
-            enddo
+               call more_error(coder%context,'Procedures considered:')
+               do m=1,cnode_numargs(procs)
+                  proc=cnode_arg(procs,m)
+                  if(nconsidered/=0) then
+                     if(cnode_get_num(proc,pr_nret)/=nret) cycle
+                     if(cnode_get_num(proc,pr_amps)/=amps) cycle
+                     if(iand(cnode_get_num(proc,pr_flags),proccall_is_comm+proccall_is_ref+proccall_is_general)/=&
+                          iand(flags,proccall_is_comm+proccall_is_ref+proccall_is_general)) cycle
+                  endif
+                  pars=cnode_get_num(proc,pr_ptype)
+                  call print_proc_details(coder,proc)
+                  if(m>pm_opts%proc_list.and..not.pm_opts%see_all_procs) then
+                     call more_error(coder%context,&
+                          '... (to see all procedures use -fsee-all-procs)')
+                     exit
+                  endif
+               enddo
+            
             call inf_trace(coder)
             do i=1,nret
                call set_arg_to_error_type(i)
@@ -2415,6 +2463,8 @@ contains
       integer:: proctyp,tno,name,start,arg(1)
       logical:: err
 
+      write(*,*) 'var call enter>',coder%wtop
+      
       ! Get value for procedure name (actually its type)
       var=cnode_get(callnode,call_var)
       if(cnode_get_kind(var)==cnode_is_var) then
@@ -2457,7 +2507,7 @@ contains
                ressig=simple_proc_call(sig,pr,sig_start=start)
                if(ressig>0) call check_returns_against_sig(proctyp,tv,callnode)
                ! Pop off extra set of arg types pushed by match_call_sig
-               coder%top=coder%wtop-nargs-2
+               coder%wtop=coder%wtop-nargs-2
             else
                call inf_error(coder,callnode,&
                     'Call arguments do not match procedure type'//&
@@ -2477,6 +2527,8 @@ contains
          call set_arg_to_error_type(i)
       enddo
       ressig=undefined
+
+      write(*,*) 'var call end>',coder%wtop
     end function  var_call
 
     !=======================================================
@@ -2487,35 +2539,38 @@ contains
     subroutine check_call_against_sig(tno,tvp,callnode)
       integer,intent(in):: tno
       type(pm_ptr),intent(in):: tvp,callnode
-      integer:: tno2,i,k,tno3
-      type(pm_ptr):: tv,tv2,tv3,amplocs
-      type(pm_type_einfo):: einfo
-      integer:: nret,flags,n,mode,argmode
+      type(pm_ptr):: tv
+      integer:: flags,kind
 
       tv=pm_type_vect(coder%context,pm_tv_arg(tvp,1))
       
       ! Get information on call
-      nret=cnode_get_num(callnode,call_nret)
       flags=cnode_get_num(callnode,call_flags)
+      if(iand(flags,proccall_is_ref)/=0) then
+         kind=sym_dot
+      elseif(iand(flags,proccall_is_general)/=0) then
+         kind=sym_dash
+      elseif(iand(flags,proccall_is_comm)/=0) then
+         kind=sym_pct
+      else
+         kind=sym_proc
+      endif
       
-      ! Check type of call
-      name=pm_tv_name(tv)
-      if(iand(flags,call_is_comm)/=0) then
-         if(name/=sym_pct) then
-            call inf_error(coder,callnode,&
-                 'Call does not match procedure type: '//&
-                 pm_type_as_string(coder%context,tno))
-            call more_error(coder%context,&
-                 'Expecting communicating "%" procedure')
-         endif
-      elseif(name/=sym_proc) then
+      if(pm_tv_name(tv)/=kind) then
          call inf_error(coder,callnode,&
-              'Call does not match procedure type: '//&
-              pm_type_as_string(coder%context,tno))
-         call more_error(coder%context,&
-              'Not expecting communicating "%" procedure')
+              'Call does not match procedure type ("'//&
+              trim(pm_name_as_string(coder%context,pm_tv_name(tv)))//'" vs "'//&
+              trim(pm_name_as_string(coder%context,kind))//'"):'//&
+              trim(pm_type_as_string(coder%context,tno)))
       endif
 
+      if(iand(pm_tv_flags(tv),pm_type_is_yield)/=0.neqv.&
+           cnode_flags_set(callnode,call_flags,proccall_is_yield)) then
+         call inf_error(coder,callnode,&
+              'Call does not match procedure type ("yield")'//&
+              trim(pm_type_as_string(coder%context,tno)))
+      endif
+      
     end subroutine check_call_against_sig
 
     !=======================================================
@@ -2523,43 +2578,55 @@ contains
     ! then it is necessary to check the returned values against
     ! the signature
     !=======================================================
-    subroutine check_returns_against_sig(tno,tvp,callsig)
+    subroutine check_returns_against_sig(tno,tvp,callnode)
       integer,intent(in):: tno
-      type(pm_ptr),intent(in):: tvp,callsig
+      type(pm_ptr),intent(in):: tvp,callnode
       type(pm_ptr):: tv2
-      integer:: tno2,tno3,i,k,n,at
+      integer:: tno2,nret
+      integer:: tno3,i,k,n,at
       type(pm_type_einfo):: einfo
 
+      nret=cnode_get_num(callnode,call_nret)
+      
       ! Check returns
-      tno2=pm_tv_arg(tv,2)
+      tno2=pm_type_arg(coder%context,pm_tv_arg(tvp,1),2)
       tv2=pm_type_vect(coder%context,tno2)
-      n=pm_tv_numargs(tv2)
-      if(nret/=n) then
-         call inf_error(coder,callnode,&
-              'Call does not match procedure type: '//&
-              pm_type_as_string(coder%context,tno))
-         call more_error(coder%context,'Different number of return values')
-         return
-      endif
-      do i=1,n
-         at=get_var_type(coder,callnode,cnode_arg(args,i))
-         if(.not.pm_type_includes(coder%context,pm_tv_arg(tv2,i),&
-              at,pm_type_incl_val,einfo)) then
-
-            
-            !!!! Check conversion to interface/proc_sig
-            
+      if(pm_tv_kind(tv2)==pm_type_is_undef_result) then
+         if(nret/=pm_tv_name(tv2)) then
             call inf_error(coder,callnode,&
                  'Call does not match procedure type: '//&
                  pm_type_as_string(coder%context,tno))
-            call more_error(coder%context,&
-                 'Return type mismatch: '//&
-                 trim(pm_type_as_string(coder%context,pm_tv_arg(tv2,i)))//&
-                 ' vs: '//&
-                 trim(pm_type_as_string(coder%context,at)))
+            call more_error(coder%context,'Call has a different number of return values: '//&
+                 trim(pm_int_as_string(nret))//' vs '//trim(pm_int_as_string(pm_tv_name(tv2))))
+            return
          endif
-      enddo
-
+      else
+         n=pm_tv_numargs(tv2)
+         if(nret/=n) then
+            call inf_error(coder,callnode,&
+              'Call does not match procedure type: '//&
+              pm_type_as_string(coder%context,tno))
+            call more_error(coder%context,'Different number of return values: '//&
+                 trim(pm_int_as_string(nret))//' vs '//trim(pm_int_as_string(n)))
+            return
+         endif
+         
+         do i=1,n
+            at=get_var_type(coder,callnode,cnode_arg(args,i))
+            if(.not.pm_type_includes(coder%context,pm_tv_arg(tv2,i),&
+                 at,pm_type_incl_val,einfo)) then
+               
+               call inf_error(coder,callnode,&
+                    'Call does not match procedure type: '//&
+                    pm_type_as_string(coder%context,tno))
+               call more_error(coder%context,&
+                    'Return type mismatch: '//&
+                    trim(pm_type_as_string(coder%context,pm_tv_arg(tv2,i)))//&
+                    ' vs: '//&
+                    trim(pm_type_as_string(coder%context,at)))
+            endif
+         enddo
+      endif
       return
 10    continue
      
@@ -2695,6 +2762,12 @@ contains
     endif
     pv=pm_type_vect(coder%context,pars)
     pk=pm_tv_kind(pv)
+    n=pm_tv_numargs(pv)
+
+    if(n>nargs) then
+       argtyp=undefined
+       return
+    endif
 
     if(pm_debug_checks) then
        if(pk/=pm_type_is_tuple.and.&
@@ -2723,7 +2796,6 @@ contains
     coder%wstack(wbase+2)=0
 
     ! Process each argument, converting if required
-    n=pm_tv_numargs(pv)
     do i=1,nargs
        at=coder%wstack(wbase-nargs+i)
        if(at==undefined) call pm_panic('broken type resolution chain')
@@ -3310,13 +3382,12 @@ contains
     integer:: rtyp
     type(pm_type_einfo):: einfo
 
-    
     tv=pm_type_vect(coder%context,atype)
-    n=pm_tv_numargs(tv)
+    n=pm_tv_numargs(tv)-1
     opcode=cnode_get_num(procnode,bi_opcode)
     if(opcode==op_num_elems_fold) then
        coder%temp=pm_fast_newnc(coder%context,pm_long,1)
-       tno=pm_tv_arg(tv,1)
+       tno=pm_tv_arg(tv,2)
        tk=pm_type_kind(coder%context,tno)
        if(tk/=pm_type_is_struct.and.tk/=pm_type_is_rec) then
           call inf_error_with_trace(coder,procnode,&
@@ -3332,9 +3403,9 @@ contains
     elseif(opcode==op_type_include_fold) then
        ok=pm_type_includes(coder%context,&
             pm_type_arg(coder%context,&
-            pm_type_arg(coder%context,atype,1),1),&
-            pm_type_arg(coder%context,&
             pm_type_arg(coder%context,atype,2),1),&
+            pm_type_arg(coder%context,&
+            pm_type_arg(coder%context,atype,3),1),&
             pm_type_incl_type,einfo)
        if(ok) then
           rtype=coder%true_literal
@@ -3344,10 +3415,10 @@ contains
        return
     endif
     arg1=pm_dict_val(coder%context,coder%context%tcache,&
-         int(pm_tv_arg(tv,1),pm_ln))
+         int(pm_tv_arg(tv,2),pm_ln))
     if(n>1) then
        arg2=pm_dict_val(coder%context,coder%context%tcache,&
-            int(pm_tv_arg(tv,2),pm_ln))
+            int(pm_tv_arg(tv,3),pm_ln))
     endif
     rtyp=pm_type_strip_to_basic(coder%context,pm_type_arg(coder%context,rstype,1))
     
@@ -3375,8 +3446,8 @@ contains
        endif
     else
        if(opcode==op_eq_fold.or.opcode==op_ne_fold) then
-          ok=pm_type_name(coder%context,pm_tv_arg(tv,1))==&
-               pm_type_name(coder%context,pm_tv_arg(tv,2))
+          ok=pm_type_name(coder%context,pm_tv_arg(tv,2))==&
+               pm_type_name(coder%context,pm_tv_arg(tv,3))
           if(opcode==op_ne_fold) ok=.not.ok
        else
           call fold_comparison(opcode,arg1,arg2,ok)
@@ -3640,12 +3711,6 @@ contains
              top=top-1
              node=coder%trace(top)
              if(.not.hide(node)) then
-!!$                call pm_error_header(coder%context,&
-!!$                     cnode_get_name(node,cnode_modl_name),&
-!!$                     cnode_get_name(node,cnode_lineno),&
-!!$                     cnode_get_name(node,cnode_charno))
-!!$                top=top-1
-!!$                if(top<1) return
                 exit
              endif
           enddo
@@ -3710,6 +3775,7 @@ contains
     integer:: i
     character(len=100):: str
     character(len=2):: join,ampstr
+    character(len=1):: procchr,dotchr
     integer:: n,k,nargs,nkeys
     integer::ampidx,signame,signamebase
     type(pm_ptr):: tv,key,val,amp,keyargs,keynames,name
@@ -3717,18 +3783,8 @@ contains
     if(coder%supress_errors) return
     nargs=cnode_numargs(cnode_get(node,call_args))-cnode_get_num(node,call_nret)
     if(present(numargs)) nargs=numargs
-    k=0
-    key=pm_dict_key(coder%context,&
-         coder%sig_cache,int(cnode_get_num(node,call_sig),pm_ln))
-    val=pm_dict_val(coder%context,&
-         coder%sig_cache,int(cnode_get_num(node,call_sig),pm_ln))
-    keyargs=cnode_get(node,call_keys)
-    if(pm_fast_isnull(keyargs)) then
-       nkeys=0
-    else
-       nkeys=cnode_numargs(cnode_get(node,call_keys))
-    endif
- 
+
+    nkeys=0
     ampidx=cnode_get_num(node,call_amp)
     if(ampidx==0) then
        amp=pm_null_obj
@@ -3759,25 +3815,34 @@ contains
          signamebase==sym_make_sublhs_amp) then
        signame=sym_sub
     endif
-    if(cnode_flags_clear(node,call_flags,&
-         call_is_comm)) then
-       call more_error(coder%context,' '//trim(pm_name_as_string(coder%context,&
-            signame))//' (')
-       n=0
+
+
+    if(cnode_flags_set(node,call_flags,proccall_is_comm)) then
+       n=6
+       if(cnode_flags_set(node,call_flags,proccall_is_general)) then
+          procchr=''''
+       else
+          procchr='%'
+       endif
     else
-       call more_error(coder%context,' '//trim(pm_name_as_string(coder%context,&
-            signame))//'%(')
-       call more_error(coder%context,'  region:   '//&
-            trim(pm_type_as_string(coder%context,&
-            coder%wstack(base+1),distr=.true.)))
-       call more_error(coder%context,'  schedule: '//&
-            trim(pm_type_as_string(coder%context,&
-            coder%wstack(base+2),distr=.true.)))
-       call more_error(coder%context,'  here:     '//&
-            trim(pm_type_as_string(coder%context,&
-            coder%wstack(base+3),distr=.true.)))
-       n=3
+       n=1
+       procchr=' '
     endif
+
+    if(cnode_flags_set(node,call_flags,proccall_is_ref)) then
+       procchr=' '
+       dotchr='.'
+    else
+       dotchr=' '
+    endif
+
+    if(cnode_flags_set(node,call_flags,proccall_is_yield)) then
+       n=n+3
+    endif
+
+    call more_error(coder%context,dotchr//trim(pm_name_as_string(coder%context,&
+            signame))//procchr//' (')
+    k=0
     do i=n+1,nargs
        if(i<nargs.or.nkeys>0) then
           join=', '
@@ -3804,7 +3869,15 @@ contains
             ' = '//&
             trim(pm_type_as_string(coder%context,coder%wstack(base+i)))//join)     
     enddo
-    call more_error(coder%context,' )')
+ 
+    if(cnode_flags_set(node,call_flags,proccall_is_yield)) then
+       call more_error(coder%context,' ) yield (')
+       call more_error(coder%context,'     '//&
+            trim(pm_type_as_string(coder%context,coder%wstack(base+nkeys+2+n-2))))
+       call more_error(coder%context,' )')
+    else
+       call more_error(coder%context,' )')
+    endif
   contains
     include 'fesize.inc'
     include 'fisnull.inc'
@@ -3833,30 +3906,15 @@ contains
   ! Print details of procedure definition
   ! with given signature (sig) and parameter types (tno)
   ! ====================================================
-  subroutine print_proc_details(coder,node,sig,iscomm,tno)
+  subroutine print_proc_details(coder,node)
     type(code_state):: coder
     type(pm_ptr),intent(in):: node
-    integer,intent(in):: sig
-    logical,intent(in):: iscomm
-    integer,intent(in):: tno
-    integer:: name,ampidx
-    integer:: i,k,n,nx,nargs
-    integer:: typ
-    type(pm_ptr):: tv,tv2,key,amp,val
-    character(len=256):: str,str2
-    character(len=7):: buf1,buf2
+    integer:: name
+    integer:: istart,n,tno,nret,i
+    character(len=512):: str,str2,buf1,buf2
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
-    k=0
-    key=pm_dict_key(coder%context,coder%sig_cache,int(sig,pm_ln))
-    val=pm_dict_val(coder%context,coder%sig_cache,int(sig,pm_ln))
-    name=key%data%i(key%offset+pm_fast_esize(key))
-    ampidx=key%data%i(key%offset+pm_fast_esize(key)-2)
-    if(ampidx==0) then
-       amp=pm_null_obj
-    else
-       amp=pm_name_val(coder%context,ampidx)
-    endif
+    name=cnode_get_num(node,pr_name)
     str=' '
     call pm_name_string(coder%context,&
          cnode_get_name(node,cnode_modl_name),str2)
@@ -3875,63 +3933,51 @@ contains
        endif
     endif
     n=max(len_trim(str)+2,20)
-    if(add_char(':')) goto 777
+    str(n:n)=':'
     n=n+2
+    nret=cnode_get_num(node,pr_nret)
+    do i=1,nret-1
+       str(n:n+1)='_,'
+       n=n+1
+    enddo
+    if(nret>0) then
+       str(n:n+1)='_='
+       n=n+1
+    endif
+ 
+    if(cnode_flags_set(node,pr_flags,proccall_is_ref)) then
+       str(n:n)='.'
+       n=n+1
+    endif
     call pm_name_string(coder%context,name,str(n:))
     n=len_trim(str)+1
-    if(.not.iscomm) then
-       if(pm_fast_isnull(amp)) then
-          str(n:)=pm_type_as_string(coder%context,tno)
+    if(cnode_flags_set(node,pr_flags,proccall_is_ref)) then
+       istart=7
+    elseif(cnode_flags_set(node,pr_flags,proccall_is_comm)) then
+       if(cnode_flags_set(node,pr_flags,proccall_is_general)) then
+          str(n:n)=''''
        else
-          tv=pm_type_vect(coder%context,tno)
-          nargs=pm_tv_numargs(tv)
-          nx=0
-          if(add_char('(')) goto 777
-          do i=1,nargs
-             call check_amp
-             typ=pm_tv_arg(tv,i)
-             call pm_type_to_string(coder%context,typ,str,n,.false.)
-             if(n>len(str)-10) goto 777
-             if(i<nargs) then
-                if(add_char(',')) goto 777
-             endif
-          enddo
-          if(add_char(')')) goto 777
+          str(n:n)='%'
        endif
+       n=n+1
+       istart=7
     else
-       if(add_char('%')) goto 777
-       tv=pm_type_vect(coder%context,tno)
-       if(add_char('(')) goto 777
-       typ=pm_tv_arg(tv,1)
-       if(typ/=0) then
-          if(add_char('region:')) goto 777
-          call pm_type_to_string(coder%context,typ,str,n,.false.)
-          if(add_char(',')) goto 777
+       istart=2
+    endif
+    if(cnode_flags_set(node,pr_flags,proccall_is_yield)) istart=istart+3
+    tno=cnode_get_num(node,pr_ptype)
+    call pm_type_to_string(coder%context,tno,str,n,tuple_start=istart)
+    n=n+1
+    if(n>len(str)-20) then
+       str(n:n+2)='...'
+    else
+       if(cnode_flags_set(node,pr_flags,proccall_is_yield)) then
+          str(n:)=')yield('
+          n=n+7
+          tno=pm_type_arg(coder%context,tno,istart)
+          call pm_type_to_string(coder%context,tno,str,n)
+          str(n:n)=')'
        endif
-       typ=pm_tv_arg(tv,2)
-       if(typ/=0) then
-          if(add_char('schedule:')) goto 777
-          call pm_type_to_string(coder%context,typ,str,n,.false.)
-          if(add_char(',')) goto 777
-       endif
-       typ=pm_tv_arg(tv,3)
-       if(typ/=0) then
-          if(add_char('here:')) goto 777
-          call pm_type_to_string(coder%context,typ,str,n,.false.)
-          if(add_char(',')) goto 777
-       endif
-       if(n>len(str)-10) goto 777
-       nargs=pm_tv_numargs(tv)
-       do i=4,nargs
-          call check_amp
-          typ=pm_tv_arg(tv,i)
-          call pm_type_to_string(coder%context,typ,str,n,.false.)
-          if(n>len(str)-10) goto 777
-          if(i<nargs) then
-             if(add_char(',')) goto 777
-          endif
-       enddo
-       if(add_char(')')) goto 777
     endif
 777 continue
     call more_error(coder%context,trim(str))
@@ -3939,30 +3985,7 @@ contains
 
     include 'fesize.inc'
     include 'fisnull.inc'
-    
-    function add_char(c) result(term)
-      character(len=*),intent(in):: c
-      logical:: term
-      if(n>len(str)-10-len(c)) then
-         str(n:n+2)='...'
-         term=.true.
-      else
-         str(n:n+len(c)-1)=c
-         n=n+len(c)
-         term=.false.
-      endif
-    end function add_char
 
-    subroutine check_amp
-      logical:: junk
-      if(pm_fast_isnull(amp)) return
-      if(k>pm_fast_esize(amp)) return
-      if(amp%data%i(amp%offset+k)==i) then
-         k=k+1
-         junk=add_char('&')
-      endif
-    end subroutine check_amp
-    
   end subroutine print_proc_details
 
 

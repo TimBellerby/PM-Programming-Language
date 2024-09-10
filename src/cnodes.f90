@@ -169,7 +169,9 @@ module pm_cnodes
   integer,parameter:: pr_keys=cnode_args+12
   integer,parameter:: pr_keycall=cnode_args+13
   integer,parameter:: pr_argcall=cnode_args+14
-  integer,parameter:: pr_node_size=15
+  integer,parameter:: pr_when= cnode_args+15
+  integer,parameter:: pr_whenvar= cnode_args+16
+  integer,parameter:: pr_node_size=17
 
   ! Offsets into builtin nodes only
   integer,parameter:: bi_opcode=cnode_args+7
@@ -466,8 +468,6 @@ contains
                write(iunit,'(a)') '  [dcomm]'
           if(cnode_flags_set(cnode,cnode_args+2,proc_is_file)) &
                write(iunit,'(a)') '  [file]'
-          if(cnode_flags_set(cnode,cnode_args+2,proc_needs_par)) &
-               write(iunit,'(a)') '  [needs par]'
           call print_proc_cnode(context,iunit,cnode_arg(cnode,2),&
                sig_cache,cnode_arg(cnode,1))
           write(iunit,'(a)') '}'
@@ -480,24 +480,16 @@ contains
           write(iunit,'(a)') '}'
        case(cnode_is_arglist)
           write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'{'
-          if(cnode_flags_set(cnode,cnode_args+1,proc_is_var)) then
-             do i=5,cnode_numargs(cnode),2
-                write(iunit,'(a)') trim(pm_name_as_string(context,&
-                     cnode_get_name(cnode,cnode_args+i-1)))//' --> ['//&
-                     trim(pm_int_as_string(cnode_get_num(cnode,cnode_args+i)))//']'
-             enddo
-          else
-             do i=3,cnode_numargs(cnode),2
-                write(iunit,'(a)') '  '//&
-                     trim(pm_name_as_string(context,&
-                     key%data%i(key%offset+pm_fast_esize(key))))//&
-                     trim(pm_type_as_string(context,&
-                     cnode_num_arg(cnode,i)))//' {'
-                call print_proc_cnode(context,iunit,pm_null_obj,&
-                     sig_cache,cnode_arg(cnode,i+1))
-                write(iunit,'(a)') '  }'
-             enddo
-          endif
+          do i=3,cnode_numargs(cnode),2
+             write(iunit,'(a)') '  '//&
+                  trim(pm_name_as_string(context,&
+                  key%data%i(key%offset+pm_fast_esize(key))))//&
+                  trim(pm_type_as_string(context,&
+                  cnode_num_arg(cnode,i)))//' {'
+             call print_proc_cnode(context,iunit,pm_null_obj,&
+                  sig_cache,cnode_arg(cnode,i+1))
+             write(iunit,'(a)') '  }'
+          enddo
           write(iunit,'(a)') '}'
        case(cnode_is_any_sig)
           write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'Any{'
@@ -535,6 +527,8 @@ contains
 
     write(iunit,'(a)') '  '//&
          trim(pm_name_as_string(context,cnode_get_num(cnode,pr_name)))//&
+         merge('.',merge(merge('''','%',cnode_flags_set(cnode,pr_flags,proccall_is_general)),' ',&
+         cnode_flags_set(cnode,pr_flags,proccall_is_comm)),cnode_flags_set(cnode,pr_flags,proccall_is_ref))//&
          trim(pm_type_as_string(context,cnode_get_num(cnode,pr_ptype)))//' {'
     
     if(cnode_get_kind(cnode)==cnode_is_builtin) then
@@ -542,23 +536,10 @@ contains
             op_names(cnode_get_num(cnode,bi_opcode))//&
             pm_int_as_string(cnode_get_num(cnode,bi_opcode2))
     else
- 
         write(iunit,'(A,i2,A,i2,A,i2,A,i3,A)') &
             '   [nargs=',&
             cnode_get_num(cnode,pr_nargs),',nret=',cnode_get_num(cnode,pr_nret),&
             ',ncalls=',cnode_get_num(cnode,pr_ncalls),']'
-       if(cnode_flags_set(cnode,pr_flags,proc_is_comm)) &
-            write(iunit,'(a)') '   [loop]'
-       if(cnode_flags_set(cnode,pr_flags,proc_is_each_proc)) &
-            write(iunit,'(a)') '   [each]'
-       if(cnode_flags_set(cnode,pr_flags,proc_is_dup_each)) &
-            write(iunit,'(a)') '   [dup-each]'
-       if(cnode_flags_set(cnode,pr_flags,proc_is_thru_each)) &
-            write(iunit,'(a)') '   [thru-each]'
-       if(cnode_flags_set(cnode,pr_flags,proc_is_empty_each)) &
-            write(iunit,'(a)') '   [empty-each]'
-       flags=cnode_get_kind(cnode)
-       !write(*,*) 'Kind=',flags
        call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_get(cnode,pr_cblock),4)
     endif
 
@@ -600,7 +581,11 @@ contains
           endif
        endif
     elseif(signo==0) then
-       call append_to_line(iunit,str,i,' VAR-CALL ',.false.,depth)
+       str=repeat(' ',depth)//'var-call'
+       i=len_trim(str)+1
+       call print_value_cnode(context,iunit,rvec,sig_cache,&
+            cnode_get(cnode,call_var),depth,str,i)
+       call append_to_line(iunit,str,i,': ',.false.,depth)
     else
        p=pm_dict_key(context,sig_cache,&
             int(signo,pm_ln))
@@ -653,9 +638,14 @@ contains
     k=0
     do j=nret+1,nargs
        if(.not.pm_fast_isnull(amps)) then
-          if(amps%data%i(amps%offset+k)==i-nret) then
-             call append_to_line(iunit,str,i,'&',.false.,depth)
-             k=min(k+1,pm_fast_esize(amps))
+          if(pm_fast_vkind(amps)/=pm_int) then
+             call append_to_line(iunit,str,i,'?AMPS?',.false.,depth)
+             exit
+          else
+             if(amps%data%i(amps%offset+k)==i-nret) then
+                call append_to_line(iunit,str,i,'&',.false.,depth)
+                k=min(k+1,pm_fast_esize(amps))
+             endif
           endif
        endif
        call print_value_cnode(context,iunit,rvec,sig_cache,cnode_arg(args,j),depth,str,i)
@@ -682,6 +672,7 @@ contains
   contains
     include 'fesize.inc'
     include 'fisnull.inc'
+    include 'fvkind.inc'
   end subroutine print_call_cnode
 
   recursive subroutine print_value_cnode(context,iunit,rvec,sig_cache,cnode,depth,str,i)
@@ -769,10 +760,16 @@ contains
     integer,intent(in):: flags
     logical,intent(in):: proc_flags
     integer,intent(in):: depth
-    if(iand(flags,call_is_comm)/=0) then
-       call append_to_line(iunit,str,i,'%',.false.,depth)
+    if(iand(flags,proccall_is_comm)/=0) then
+       if(iand(flags,proccall_is_general)/=0) then
+          call append_to_line(iunit,str,i,'''',.false.,depth)
+       elseif(iand(flags,proccall_is_ref)/=0) then
+          call append_to_line(iunit,str,i,'.',.false.,depth)
+       else
+          call append_to_line(iunit,str,i,'%',.false.,depth)
+       endif
     endif
-    if(flags/=iand(flags,call_is_comm)) then
+    if(flags/=iand(flags,proccall_is_comm)) then
        call append_to_line(iunit,str,i,'<',.false.,depth)
        if(iand(flags,proc_run_complete)/=0) then
           call append_to_line(iunit,str,i,'C',.false.,depth)
@@ -786,18 +783,15 @@ contains
        if(iand(flags,proc_run_always)/=0) then
           call append_to_line(iunit,str,i,'A',.false.,depth)
        endif
-       if(iand(flags,proc_inline)/=0) then
+       if(iand(flags,proccall_is_inline)/=0) then
           call append_to_line(iunit,str,i,'I',.false.,depth)
        endif
-       if(iand(flags,proc_no_inline)/=0) then
+       if(iand(flags,proccall_is_no_inline)/=0) then
           call append_to_line(iunit,str,i,'N',.false.,depth)
        endif
        if(proc_flags) then
           if(iand(flags,proc_is_open)/=0) then
              call append_to_line(iunit,str,i,'o',.false.,depth)
-          endif
-          if(iand(flags,proc_is_each_proc)/=0) then
-             call append_to_line(iunit,str,i,'e',.false.,depth)
           endif
           if(iand(flags,proc_is_cond)/=0) then
              call append_to_line(iunit,str,i,'c',.false.,depth)

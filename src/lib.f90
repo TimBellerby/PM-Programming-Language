@@ -299,10 +299,18 @@ contains
     integer:: n,j,k,m,d
     n=num
     m=1
+    j=1
+    if(n==0) then
+       str='0'
+       return
+    elseif(n<0) then
+       str(j:j)='-'
+       j=2
+       n=-n
+    endif
     do while(m<=n)
        m=m*10
     enddo
-    j=1
     do while(m>1.and.j<=field_width)
        m=m/10
        d=n/m

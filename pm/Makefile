@@ -83,7 +83,7 @@ array.o : ../src/array.f90 types.o lib.o symbol.o opts.o hash.o memory.o kinds.o
 parlib.o : ../src/parlib.f90 array.o types.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(PC) $(PFLAGS) -c $<
 
-linker.o : ../src/linker.f90  ast.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+linker.o : ../src/linker.f90  parser.o ast.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 cnodes.o : ../src/cnodes.f90 ast.o symbol.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o

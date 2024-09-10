@@ -53,7 +53,7 @@ PM__intrinsic abs(literal(int))->(literal(int)) : "abs_fold"
 PM__intrinsic ~(literal(int))->(literal(int)) : "bnot_fold"
 PM__intrinsic &(literal(int),literal(int))->(literal(int)) : "band_fold"
 PM__intrinsic |(literal(int),literal(int))->(literal(int)) : "bor_fold"
-PM__intrinsic xor(literal(int),literal(int))->(literal(int)) : "bxor_fold"
+PM__intrinsic ~(literal(int),literal(int))->(literal(int)) : "bxor_fold"
 PM__intrinsic shift(literal(int),literal(int))->(literal(int)) : "bshift_fold"
 PM__intrinsic pdiff(literal(int),literal(int))->(literal(int)) : "pdiff_fold"
 PM__intrinsic sign(literal(int),literal(int))->(literal(int)) : "sign_fold"
@@ -86,7 +86,7 @@ PM__intrinsic abs(fix(int))->(fix(int)) : "abs_fold"
 PM__intrinsic ~(fix(int))->(fix(int)) : "bnot_fold"
 PM__intrinsic &(fix(int),fix(int))->(fix(int)) : "band_fold"
 PM__intrinsic |(fix(int),fix(int))->(fix(int)) : "bor_fold"
-PM__intrinsic xor(fix(int),fix(int))->(fix(int)) : "bxor_fold"
+PM__intrinsic ~(fix(int),fix(int))->(fix(int)) : "bxor_fold"
 PM__intrinsic shift(fix(int),fix(int))->(fix(int)) : "bshift_fold"
 PM__intrinsic pdiff(fix(int),fix(int))->(fix(int)) : "pdiff_fold"
 PM__intrinsic sign(fix(int),fix(int))->(fix(int)) : "sign_fold"
@@ -151,7 +151,7 @@ PM__intrinsic abs(sint)->(sint) : "abs_i"
 PM__intrinsic bit_not(sint)->(sint) : "bnot_i"
 PM__intrinsic &(sint,sint)->(sint) : "band_i"
 PM__intrinsic |(sint,sint)->(sint) : "bor_i"
-PM__intrinsic xor(sint,sint)->(sint) : "bxor_i"
+PM__intrinsic ~(sint,sint)->(sint) : "bxor_i"
 PM__intrinsic shift(sint,sint)->(sint) : "bshift_i"
 PM__intrinsic pdiff(sint,sint)->(sint) : "pdiff_i"
 PM__intrinsic sign(sint,sint)->(sint) : "sign_i"
@@ -188,7 +188,7 @@ PM__intrinsic abs(int)->(int) : "abs_ln"
 PM__intrinsic ~(int)->(int) : "bnot_ln"
 PM__intrinsic &(int,int)->(int) : "band_ln"
 PM__intrinsic |(int,int)->(int) : "bor_ln"
-PM__intrinsic xor(int,int)->(int) : "bxor_ln"
+PM__intrinsic ~(int,int)->(int) : "bxor_ln"
 PM__intrinsic shift(int,int)->(int) : "bshift_ln"
 PM__intrinsic pdiff(int,int)->(int) : "pdiff_ln"
 PM__intrinsic sign(int,int)->(int) : "sign_ln"
@@ -232,7 +232,7 @@ PM__intrinsic abs(lint)->(lint) : "abs_offset"
 PM__intrinsic ~(lint)->(lint) : "bnot_offset"
 PM__intrinsic &(lint,lint)->(lint) : "band_offset"
 PM__intrinsic |(lint,lint)->(lint) : "bor_offset"
-PM__intrinsic xor(lint,lint)->(lint) : "bxor_offset"
+PM__intrinsic ~(lint,lint)->(lint) : "bxor_offset"
 PM__intrinsic shift(lint,lint)->(lint) : "bshift_offset"
 PM__intrinsic pdiff(lint,lint)->(lint) : "pdiff_offset"
 PM__intrinsic sign(lint,lint)->(lint) : "sign_offset"
@@ -275,7 +275,7 @@ PM__intrinsic abs(int8)->(int8) : "abs_i8"
 PM__intrinsic ~(int8)->(int8) : "bnot_i8"
 PM__intrinsic &(int8,int8)->(int8) : "band_i8"
 PM__intrinsic |(int8,int8)->(int8) : "bor_i8"
-PM__intrinsic xor(int8,int8)->(int8) : "bxor_i8"
+PM__intrinsic ~(int8,int8)->(int8) : "bxor_i8"
 PM__intrinsic shift(int8,int8)->(int8) : "bshift_i8"
 PM__intrinsic pdiff(int8,int8)->(int8) : "pdiff_i8"
 PM__intrinsic sign(int8,int8)->(int8) : "sign_i8"
@@ -318,7 +318,7 @@ PM__intrinsic abs(int16)->(int16) : "abs_i16"
 PM__intrinsic ~(int16)->(int16) : "bnot_i16"
 PM__intrinsic &(int16,int16)->(int16) : "band_i16"
 PM__intrinsic |(int16,int16)->(int16) : "bor_i16"
-PM__intrinsic xor(int16,int16)->(int16) : "bxor_i16"
+PM__intrinsic ~(int16,int16)->(int16) : "bxor_i16"
 PM__intrinsic shift(int16,int16)->(int16) : "bshift_i16"
 PM__intrinsic pdiff(int16,int16)->(int16) : "pdiff_i16"
 PM__intrinsic sign(int16,int16)->(int16) : "sign_i16"
@@ -361,7 +361,7 @@ PM__intrinsic abs(int32)->(int32) : "abs_i32"
 PM__intrinsic ~(int32)->(int32) : "bnot_i32"
 PM__intrinsic &(int32,int32)->(int32) : "band_i32"
 PM__intrinsic |(int32,int32)->(int32) : "bor_i32"
-PM__intrinsic xor(int32,int32)->(int32) : "bxor_i32"
+PM__intrinsic ~(int32,int32)->(int32) : "bxor_i32"
 PM__intrinsic shift(int32,int32)->(int32) : "bshift_i32"
 PM__intrinsic pdiff(int32,int32)->(int32) : "pdiff_i32"
 PM__intrinsic sign(int32,int32)->(int32) : "sign_i32"
@@ -405,7 +405,7 @@ PM__intrinsic abs(int64)->(int64) : "abs_i64"
 PM__intrinsic ~(int64)->(int64) : "bnot_i64"
 PM__intrinsic &(int64,int64)->(int64) : "band_i64"
 PM__intrinsic |(int64,int64)->(int64) : "bor_i64"
-PM__intrinsic xor(int64,int64)->(int64) : "bxor_i64"
+PM__intrinsic ~(int64,int64)->(int64) : "bxor_i64"
 PM__intrinsic shift(int64,int64)->(int64) : "bshift_i64"
 PM__intrinsic pdiff(int64,int64)->(int64) : "pdiff_i64"
 PM__intrinsic sign(int64,int64)->(int64) : "sign_i64"
@@ -568,10 +568,12 @@ PM__intrinsic im(cpx)->(real) : "imag_dc"
 PM__intrinsic conj(cpx)->(cpx) : "conj_dc"
 
 
+
 //  Cannot convert real to int (must use nint or trunc)
 proc sint(x:any_real)=sint(0) :test "Cannot convert real to integer" => fix(false)
 proc int(x:any_real)=0 :test "Cannot convert real to integer" => fix(false)
 proc lint(x:any_real)=lint(0) :test "Cannot convert real to integer" => fix(false)
+
 
 //  Some numeric conversions not hard-coded
 proc cpx(x:real_num)=cpx(real(x))
@@ -579,6 +581,7 @@ proc scpx(x:real_num)=cpx(sreal(x))
 proc string(x:any_int)=string(int64(x))
 proc string(x:any_cpx)= string(re(x))++if(im>=0=>"+"++string(im),"-"++string(-im))++"i" where im=im(x) 
 proc int(x:fix(int))=x
+
 
 //  Abstract numeric types
 type any_int is sint,int,lint,int8,int16,int32,int64
@@ -588,6 +591,7 @@ type int_num is any_int
 type real_num is int_num, any_real
 type cpx_num is real_num,any_cpx
 type num is cpx_num
+
 
 //  Numeric type conversion
 proc convert(x,y)=x
@@ -614,6 +618,8 @@ proc as(x:real_num,y:<real>)=real(x)
 proc as(x:real_num,y:<scpx>)=scpx(x)
 proc as(x:real_num,y:<cpx>)=cpx(x)
 
+
+
 //  Auto-conversion on assignment
 proc PM__assign(&x:num,y:num) {
   _assign_element(&x,convert(y,x))
@@ -622,6 +628,7 @@ proc PM__assign(&x:num,y:num) {
 proc PM__assign_var(&x:num,y:num) {
   PM__assign(&x,convert(y,x))
 }
+
 
 //  Mixed arithmatic
 type _to_sint is int
@@ -682,10 +689,11 @@ proc /(x:num,y:num)=xx/yy where xx,yy=balance(x,y)
 proc **(x:num,y:num)=xx**yy where xx,yy=balance(x,y)
 proc &(x:num,y:num)=xx&yy where xx,yy=balance(x,y)
 proc |(x:num,y:num)=xx|yy where xx,yy=balance(x,y)
-proc xor(x:num,y:num)=xx xor yy where xx,yy=balance(x,y)
+proc ~(x:num,y:num)=xx ~ yy where xx,yy=balance(x,y)
 proc shift(x:num,y:num)=xx shift yy where xx,yy=balance(x,y)
 proc max(x:num,y:num)=max(xx,yy) where xx,yy=balance(x,y)
 proc min(x:num,y:num)=min(xx,yy) where xx,yy=balance(x,y)
+
 
 //  bool type
 PM__intrinsic PM__assign_var(&bool,bool): "assign_l"
@@ -695,8 +703,6 @@ PM__intrinsic or(bool,bool)->(bool) : "or"
 PM__intrinsic not(bool)->(bool) : "not"
 PM__intrinsic ==(bool,bool)->(bool) : "eq_l"
 PM__intrinsic /=(bool,bool)->(bool) : "ne_l"
-
-/*
 
 //  Masked types
 type masked(x) is rec {_val:x,_there:bool}
@@ -723,6 +729,8 @@ proc get(&x,y:masked(x)) {
   return y._there
 }
 
+
+
 //  Polymorphic types
 PM__intrinsic get(x:*any,y:any)->(=y) : "as"
 PM__intrinsic<<needs_type>> get(&x:any,y:*any): "get_poly"
@@ -731,6 +739,7 @@ PM__intrinsic<<needs_type>> |(x:*any,y:any)->(=y) : "get_poly_or"
 
 //  val function having null effect
 proc val(x)=x
+
 
 //  ********************************************
 //  TUPLES
@@ -1062,6 +1071,7 @@ proc string(x:tuple5d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++" 
 proc string(x:tuple6d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++", "++x.6++" ]"
 proc string(x:tuple7d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++", "++x.6++", "++x.7++" ]"
 
+
 //  *****************************************************
 //  LISTS
 //  *****************************************************
@@ -1073,7 +1083,8 @@ type _list_end is unique
 proc _cons(a,b)=new _list_node{_head=a,_tail=b}
 
 proc list(a)<<inline>>=_cons(a,_list_end)
-proc list(a,arg...)<<inline>>=_cons(a,list(arg...))
+proc list(a,...)<<inline>>=_cons(a,list(...))
+
 
 proc reduce(p,a:_list_node)=p.(a._head,reduce(p,a._tail))
 proc reduce(p,a:_list_node(,_list_end))=a._head
@@ -1081,8 +1092,12 @@ proc reduce(p,a:_list_node(,_list_end))=a._head
 proc map(p,&a:_list_node){p.(a._head);map(p,a._tail)}
 proc map(p,&a:_list_node(,_list_end)):p.(a._head)
 
+
 proc map(p,&a:_list_node(,_list_node),b:_list_node(,_list_node)){p.(&a._head,b._head);map(p,&a._tail,b._tail)}
+
+
 proc map(p,&a:_list_node(,_list_end),b:_list_node(,_list_end)):p.(&a._head,b._head)
+
 proc map(p,&a:_list_node,b:_list_node): test "List lengths do not match"=>fix(false)
 
 proc map_const(p,&a:_list_node(,_list_node),b){p.(&a._head,b);map_const(p,&a._tail,b)}
@@ -1112,6 +1127,9 @@ proc _list_elem(a:_list_node(,_list_end),b:fix(int),c:fix(int)) {
     test "List element out of range"=>a==b
     return a._head
 }
+
+
+/*
 
 //  *****************************************************
 //  RANGES AND SEQUENCES
@@ -1519,7 +1537,7 @@ proc _size(x:stretch_dim or null)=fix(1)
 proc _size(x)=size(x)
 PM__intrinsic _act(x:single_point)->(PM__tinyint) : "miss_arg"
 proc _act(x)=x
-proc _sliceit(arg...)=tuple(arg...)
+proc _sliceit(...)=tuple(...)
 proc active_dims(x:iterable_grid)=map_apply($_act,$_sliceit,x)
 proc active_dims(x:single_point)=null
 PM__intrinsic _act(x:single_point,y:any)->(PM__tinyint) : "miss_arg"
@@ -1533,8 +1551,8 @@ proc element(x:iterable_grid,y:index){
   t=_tup(y)
   return _ges(head(x),tail(x),head(t),tail(t),fix(false))
 }
-proc element(x:grid_slice,arg...:grid_slice){
-  t=_tup(arg...)
+proc element(x:grid_slice,...:grid_slice){
+  t=_tup(...)
   return _ges(head(x),tail(x),head(t),tail(t),fix(true)) 
 }
  
@@ -1585,6 +1603,7 @@ proc overlap(x:grid_slice_dim,y:grid_slice_dim)=u,v where u,v=overlap(map_seq(x)
 proc expand(x:grid_slice,y:grid)=map($expand,x,y)
 proc contact(x:grid_slice,y:grid)=map($contract,x,y)
 PM__intrinsic gcd(x:int,y:int)->(int) : "gcd"
+
 //  *****************************************************
 //  SHAPES
 //  *****************************************************
@@ -1604,17 +1623,19 @@ type mshape4d is mshape(extent4d)
 type mshape5d is mshape(extent5d)
 type mshape6d is mshape(extent6d)
 type mshape7d is mshape(extent7d)
+
 //  Create array, vector and matrix shapes
 proc _low(x)=low(x)
 proc _low(x:null)=fix(0)
 proc _off(x)=-index(dims(x),map($_low,x))
-proc PM__array(arg...)=shape(map($_extnt,[arg...]))
+proc PM__array(...)=shape(map($_extnt,[...]))
 proc _extnt(n:any_int)=0..int(n)-1
 proc _extnt(n:null)=null
 proc _extnt(n:range(any_int))=int(n)
 proc shape(extent:extent)=new mshape {
   _extent=extent,_n=size(extent),_o=_off(extent)
 }
+
 //  Conforming mshapes
 proc check_conform(x,y) {
   check_conform(#x,#y)
@@ -1628,36 +1649,48 @@ proc _conform(x:null,y)=size(y)==fix(1)
 proc _conform(x,y:null)=fix(true)
 proc _conform(x:null,y:null)=fix(true)
 proc conform(x:mshape,y:mshape)=map_reduce($_conform,$and,x,y) or size(x)==0 or size(y)==0check "Values of different ranks cannot conform"=>rank(x)==rank(y)
+
 //  Local size of a mshape
 proc _local_size(x:mshape)=size(x._extent)
+
 //  Convert an extent to have a zero base
 proc zero_base(x:range)=0..size(x)-1
 proc zero_base(x:extent)=map($zero_base,x)
+
 //  Extent of a mshape
 proc extent(x:shape)=x._extent
+
 //  Dimensions of a mshape
 proc dims(x:mshape)=map($size,x._extent)
+
 //  Size from dimensions
 proc size(x:tuple(int))=reduce($*,x)
+
 //  Empty mshape
 proc _empty(x)=1..0
 proc empty(x:extent)=map($_empty,x)
+
 //  Slice of mshape
 proc [](x:mshape,s:index)=x._extent[s]
 proc [](x:mshape,s:subs)=shape(#active_dims(fill_in(x,s,fix(true)))):check_contains(x,s)
+
+
 //  *****************************************************
 //  INDEXING AND SLICING
 //  *****************************************************
+
 //  Generic types supporting indexing and mapping
 type iterable is iterable_grid,grid_slice,grid,grid_slice_dim,cyclic_range,array,...
-proc [](x:iterable,arg...){
+proc [](x:iterable,...){
   d=#x
-  y=_tup(arg...)
+  y=_tup(...)
   check_contains(d,y)
   return element(x,fill_in(d,y,fix(false)))
 }
+
 //  Index type
 type index is any_int,tuple(any_int)
+
 //  Slice and subscript types
 type range_below(x) is rec {_t:x}
 type range_above(x) is rec {_t:x}
@@ -1668,6 +1701,7 @@ type slice_dim is range(any_int),strided_range(any_int),range_above(any_int), ra
 type slice is slice_dim,tuple(slice_dim)
 type subs_dim is slice_dim,any_int
 type subs is index,slice,subs_dim,tuple(subs_dim)
+
 //  Partial ranges/sequences mainly used in subscripts
 proc ..._(x)=new range_below {
   _t=x
@@ -1696,6 +1730,7 @@ proc high(x:strided_range_below)=x._t
 proc step(x:range_above or range_below)=fix(1)
 proc step(x:strided_range_above or strided_range_below)=x._st
 proc width(x:strided_range_above or strided_range_below or range_above or range_below)=fix(1)
+
 //  Stretch dimension in subscript
 type stretch_dim is unique{PM__strdim}
 proc string(x:stretch_dim)="_"
@@ -1713,18 +1748,19 @@ proc intersect(x:stretch_dim,y:stretch_dim)=x
 proc overlap(x:grid_slice_dim,y:stretch_dim)=#x
 proc overlap(x:stretch_dim,y:grid_slice_dim)=fix(0)..fix(0)
 proc overlap(x:stretch_dim,y:stretch_dim)=fix(0)..fix(0)
+
 //  Check subscript is in range
-proc check_contains(a:extent,arg...) {
-  test "Index "++t++" out of bounds "++a=>contains(a,t) where t=_tup(arg...)
+proc check_contains(a:extent,...) {
+  test "Index "++t++" out of bounds "++a=>contains(a,t) where t=_tup(...)
 }
-proc check_contains(a:mshape,arg...) {
-  check_contains(a._extent,arg...)
+proc check_contains(a:mshape,...) {
+  check_contains(a._extent,...)
 }
-proc check_contains(a,arg...) {
-  check_contains(#a,arg...)
+proc check_contains(a,...) {
+  check_contains(#a,...)
 }
-proc check_contains(a:dshape,arg...) {
-  check_contains(a._mshape._extent,arg...)
+proc check_contains(a:dshape,...) {
+  check_contains(a._mshape._extent,...)
 }
 proc _contains(x:null,y)=fix(true)
 proc _contains(x:range(int),y:any_int)=yy>=x._lo and yy<=x._hi where yy=int(y)
@@ -1738,7 +1774,8 @@ PM__intrinsic _rgd(x:stretch_dim)->(PM__tinyint) : "miss_arg"
 proc _rgd(x)=x
 proc _rigid_dims(x:grid_slice or tuple(subs_dim))=map_apply($_rgd,$_sliceit,x)
 proc contains(x:extent,y:tuple(subs_dim) and contains(stretch_dim))=contains(x,_rigid_dims(y))
-proc contains(x:extent,y,arg...)=contains(x,[y,arg...])
+proc contains(x:extent,y,...)=contains(x,[y,...])
+
 //  Complete a subscript using a base mshape
 proc fill_in(x:null,y,t)=y :test "Cannot use incomplete subscript on null dimension" => fix(false)
 proc fill_in(x:seq(int) or null,y:any_int,t:fix(true))=single_point(int(y))
@@ -1761,6 +1798,7 @@ proc _fill_in(x,y:stretch_dim,z,t:fix(false))=prepend(y,_fill_in(x,head(z),tail(
 proc _fill_in(x:null,y:empty_head,z,t)=null
 proc _fill_in(x:empty_head,y:stretch_dim,z,t)=prepend(null,_fill_in(x,head(z),tail(z),t))
 proc _fill_in(x:empty_head,y,z,t)=error_type() :test "Rank mismatch in slice" => fix(false)
+
 //  *******************************************************
 //  SUBSCRIPT INTERSECTION AND ALIASING
 //  *******************************************************
@@ -1808,17 +1846,19 @@ proc intersects(x:tuple(subs_dim),y:null)=fix(true)
 proc intersects(x:null,y:tuple(subs_dim))=fix(true)
 proc _intersects(x:subs,y:subs)=intersects(x,y)
 proc _intersects(x,y)=fix(false)
+
 //  Alias checking
-proc PM__check_alias(arg...)=false
+proc PM__check_alias(...)=false
 proc PM__check_alias(i,j,x,y) {
   test "Aliasing error between arguments #"++i++" and #"++j=>not _intersects(x,y) 
 }
-proc PM__check_alias(i,j,x,y,arg...) {
-  if _intersects(x,y):PM__check_alias(i,j,arg...)
+proc PM__check_alias(i,j,x,y,...) {
+  if _intersects(x,y):PM__check_alias(i,j,...)
 }
+
 //  Combining subscripts
 proc PM__cmbidx(x,y)=_cmb(x,y)
-proc PM__cmbidx(x,y,arg...)=PM__cmbidx(_cmb(x,y),arg...)
+proc PM__cmbidx(x,y,...)=PM__cmbidx(_cmb(x,y),...)
 type _cmb_error is unique
 proc _cmb(x,y)=_cmb_error
 proc _cmb(x:subs except index,y:subs)=_cmb1(x,y)
@@ -1827,6 +1867,7 @@ proc _cmb1(x:subs_dim,y:subs_dim)=x[y]
 proc _cmb1(x:tuple,y:tuple)=_cmb2(x,y,rank(x)==rank(y))
 proc _cmb2(x,y,z:fix(true))=x[y]
 proc _cmb2(x,y,z:fix(false))=_cmb_error
+
 //  *******************************************************
 //  ITERATION - SEQUENTIAL AND CONCURRENT
 //  *******************************************************
@@ -1840,6 +1881,7 @@ proc PM__first(d:tuple4d)=[j1,j2,j3,j4],[s1,s2,s3,s4],e1 and e2 and e3 and e4 wh
 proc PM__first(d:tuple5d)=[j1,j2,j3,j4,j5], [s1,s2,s3,s4,s5],e1 and e2 and e3 and e4 and e5 where j1,s1,e1=PM__first(d.1),j2,s2,e2=PM__first(d.2),j3,s3,e3=PM__first(d.3),j4,s4,e4=PM__first(d.4), j5,s5,e5=PM__first(d.5)
 proc PM__first(d:tuple6d)=[j1,j2,j3,j4,j5,j6],[s1,s2,s3,s4,s5,s6],e1 and e2 and e3 and e4 and e5 and e6 where j1,s1,e1=PM__first(d.1),j2,s2,e2=PM__first(d.2),j3,s3,e3=PM__first(d.3),j4,s4,e4=PM__first(d.4), j5,s5,e5=PM__first(d.5),j6,s6,e6=PM__first(d.6)
 proc PM__first(d:tuple7d)=[j1,j2,j3,j4,j5,j6,j7],[s1,s2,s3,s4,s5,s6,s7],e1 and e2 and e3 and e4 and e5 and e6 and e7 where j1,s1,e1=PM__first(d.1),j2,s2,e2=PM__first(d.2),j3,s3,e3=PM__first(d.3),j4,s4,e4=PM__first(d.4), j5,s5,e5=PM__first(d.5),j6,s6,e6=PM__first(d.6),j7,s7,e7=PM__first(d.7)
+
 //  - subsequent elements
 proc PM__next(d:int,g,i)=ii,null,ii<d where ii=i+1 
 proc PM__next(d:tuple1d,g,i)=j,s,e where j,s,e=PM__next(d.1,g,i)
@@ -2154,7 +2196,7 @@ proc dims(a:array_template(,mshape,))=dims(a._d)
 proc size(a:array_template)=a._s
 proc redim(a:array_template,d:mshape)= new array_template {
 _a=a,_d=d,_s=size(d),_v=a._v} check "New dshape does not have same size in redim"=> size(d)==a._s 
-proc element(a:array_template,arg...:subs)=a._a
+proc element(a:array_template,...:subs)=a._a
 //  Array creation from template
 proc PM__dup(a:array_template(,shape,))=_array(PM__dup(a._a),a._d,int(a._s),a._v)
 proc PM__dup(a:array_template(,shape,fix(true)))=_array(PM__dup(a._a),PM__dup(a._d),PM__dup(int(a._s)),a._v)
@@ -2332,12 +2374,12 @@ proc dims(dd:any^dshape)=dims((#dd)._mshape)
 proc PM__redim(a,d)=_redim(a,d)
 proc PM__local(a:any^dshape)=_redim(a,(#a)._tilesz)
 proc PM__local(a:any^mshape)=a
-proc PM__local%(x:shared) shared =PM__local(x)
+proc PM__local%(x:shrd) shrd =PM__local(x)
 proc element(a:any^dshape,t) {
   p,i=node_and_index((#a).dist,(#a)._mshape#_tup(t))
   var r=_arb(a)
   if p==_this_node():r=_get_aelem(a,i)
-  _bcast_shared(&r,p)
+  _bcast_shrd(&r,p)
   return r
 }
   
@@ -2496,13 +2538,13 @@ proc _copy_array(&a:_non_d,x:any^dshape) {
     if i==_shrd_node() {
       forall kk in PM__local(x),j in tile {
         var k=kk
-        _bcast_shared(&k,i)
+        _bcast_shrd(&k,i)
         _set_elem(&a,k,(#a)[j] <<PM__ignore>>) 
       }
     } else {
       forall j in tile {
         var k=_arb(a)
-        _bcast_shared(&k,i)
+        _bcast_shrd(&k,i)
         _set_elem(&a,k,(#a)[j] <<PM__ignore>>)
       }
     }
@@ -2521,13 +2563,13 @@ proc _copy_array(&v:_non_d,x:array_slice(any^dshape,)) {
     if i==_shrd_node() {
       forall j in utile, jj in elem {
         var k=element(PM__local(x._a),j)
-        _bcast_shared(&k,i)
+        _bcast_shrd(&k,i)
         _set_elem(&v,k,element(#v,active_dims(x._s,jj)) <<PM__ignore>>) 
       }
     } else {
       forall j in elem {
         var k=_arb(x._a)
-        _bcast_shared(&k,i)
+        _bcast_shrd(&k,i)
         _set_elem(&v,k,element(#v,active_dims(x._s,j)) <<PM__ignore>>) 
       }
     }
@@ -2543,7 +2585,7 @@ proc _copy_array(&x:any^dshape,y:array_template) {
   _set_array(&^(PM__local(^(&x))),y._a)
   return fix(false)
 }
-type _comp is contains(array or *any or ^*(,,,,))
+type _comp is contains(array or *any or PM__anyref(,,,,))
 proc _copy_array(&xx:array_slice(any^dshape,),x:array_slice(any^dshape)) {
   _copy_darray_slice(&^(PM__local(^(&xx._a))),xxd,xxd._mshape#xx._s, PM__local(x._a),xd,xd._mshape#x._s,xd._tile) where xxd=#(xx._a),xd=#(x._a)
   return fix(true)
@@ -2641,7 +2683,7 @@ proc _xp(x,y)=y
 //  REFERENCES (SUBSCRIPTS AND SLICES)
 // *************************************************
 //  Reference type for & args
-type PM__reftype(x) is x,^shared(x,,,,)
+type PM__reftype(x) is x,PM__drefi(x,,,,)
 //  Support for internal ^(...) reference type
 PM__intrinsic _v1(x:any)->(PM__d1 x) : "elem"(1)
 PM__intrinsic _v2(x:any)->(PM__d2 x) : "elem"(2)
@@ -2662,7 +2704,7 @@ proc PM__subref(x,t:subs){
   return _subref(x,tt) 
 }
 proc PM__subref(x,t:null)=PM__subref(x,map($_make_null,#x))
-proc PM__subref(x:^*(,,,,),t:null)=PM__subref(x,map($_make_null,#_v1(x)))
+proc PM__subref(x:PM__anyref(,,,,),t:null)=PM__subref(x,map($_make_null,#_v1(x)))
 proc _subref(x:any^mshape,t:index)=element(x,t)
 proc _subref(x:any^any,t:subs)=new array_slice {
   _a=x,_s=fill_in(#x,t,fix(true))
@@ -2673,9 +2715,9 @@ proc _subref(x:array_slice,t:subs)=new array_slice {
 }
 proc _subref(x:any^dshape,t:index)= PM__ref(_arb(x),x,i,p,_s_ref) where p,i=node_and_index((#x).dist,(#x)._mshape#_tup(t))
 proc _subref(x:array_slice(any^dshape,),t:index)=_subref(x._a,x._s[t])
-proc _subref(a:^*(,,,,),t)=PM__ref(_arb(_v1(a)),a,_tup(t),_v4(a),_v5(a))
+proc _subref(a:PM__anyref(,,,,),t)=PM__ref(_arb(_v1(a)),a,_tup(t),_v4(a),_v5(a))
 proc _subref(a,t)=$[](a,t)
-proc [](a:array,arg...)=PM__getref(PM__subref(a,_tup(arg...)))
+proc [](a:array,...)=PM__getref(PM__subref(a,_tup(...)))
 //  Left hand side references
 proc PM__sublhsamp(x,t)=error_type() check "Incorrect type in subscript"=>fix(false)
 proc PM__sublhsamp(x,t:subs) {
@@ -2694,12 +2736,12 @@ proc PM__sublhs(x,t:subs) {
   check_contains(#x,tt)
   return _sublhs(x,tt)
 }
-proc PM__sublhs(x:^!(,,,,),t:subs) {
+proc PM__sublhs(x:PM__ref(,,,,),t:subs) {
   tt=_tup(t)
   return _sublhs(x,tt)
 }
 proc PM__sublhs(x,t:null)=PM__sublhs(x,map($_make_null,#x))
-proc PM__sublhs(x:^!(,,,,),t:null)=PM__sublhs(x,map($_make_null,#_v1(x)))
+proc PM__sublhs(x:PM__ref(,,,,),t:null)=PM__sublhs(x,map($_make_null,#_v1(x)))
 proc _sublhs(x:any^mshape,t:index)=_make_subref(x,t)
 proc _sublhs(x:any^any,t:subs)=new array_slice {
   _a=x,_s=fill_in(#x,t,fix(true))
@@ -2709,31 +2751,35 @@ proc _sublhs(x:array_slice,t:subs)=new array_slice {
   _a=x._a,_s=x._s[t]
 }
 proc _sublhs(x:any^dshape,t:index)= PM__ref(_arb(x),x,i,p,_s_ref) where p,i=node_and_index((#x).dist,(#x)._mshape#_tup(t))
-proc _sublhs(a:^!(,,,,),t)=PM__ref(_arb(_v1(a)),a,_tup(t),_v4(a),_v5(a))
-proc [](&a:array,v,arg...){
-  PM__assign(&^(PM__sublhs(^(&a),_tup(arg...))),v)
+proc _sublhs(a:PM__ref(,,,,),t)=PM__ref(_arb(_v1(a)),a,_tup(t),_v4(a),_v5(a))
+proc [](&a:array,v,...){
+  PM__assign(&^(PM__sublhs(^(&a),_tup(...))),v)
 }
+
+*/
  
 //  Realise a reference
 proc PM__valref(x)=x
-proc PM__valref(x:^*(,,,,)) {
+
+/*
+proc PM__valref(x:PM__anyref(,,,,)) {
   var v=_v1(x)
   if _v4(x)==_shrd_node() {
     v=_getref(x,null)
   }
-  _bcast_shared(&v,_v4(x))
+  _bcast_shrd(&v,_v4(x))
   return v 
 }
    
 //  Assign to a reference
-proc PM__assign(&x:^*(,,,,),y) {
+proc PM__assign(&x:PM__anyref(,,,,),y) {
   check_assign_types(_v1(^(&x)),y)
   if _v4(^(&x))==_shrd_node() {
     PM__assign(&^(_getlhs(^(&x),null)),y) 
   }
 }
  
-proc PM__assign(&x:^*(,,,,),y,p:assignment_operator) {
+proc PM__assign(&x:PM__anyref(,,,,),y,p:assignment_operator) {
   if _v4(^(&x))==_shrd_node() {
     PM__assign(&^(_getlhs(^(&x),null)),p.(PM__valref(x),y)) 
   }
@@ -2765,7 +2811,7 @@ proc PM__sublhsamp%(x:any^dshape,t:subs) {
 }
  
 proc PM__sublhs%(x,y)=PM__subref%(x,y)
-proc PM__sublhs%(x:priv ^*(,,,,),y)=PM__subref%(x,y)
+proc PM__sublhs%(x:priv PM__anyref(,,,,),y)=PM__subref%(x,y)
 proc PM__sublhs%(x:priv,y)=PM__sublhs(x,y):test """sync"" assignment updating a private variable"=>fix(false)
 proc PM__subref%(x:priv,y)=PM__subref(x,y)
 proc PM__sublhs%(x:priv,y:invar indexed)=PM__sublhs(x,*y)
@@ -2793,100 +2839,100 @@ proc PM__subref%(x:invar any^mshape,t:invar indexed)=PM__subref%(x,_dmap(t,here)
 proc PM__subref%(x:invar array_slice,t,m)=PM__subref%(x._a,x._s[t])
 proc PM__subref%(x,t)=PM__dref($[](x,t),x,t,null,null)
 //  Subscript or slice of distributed array
-proc PM__subref%(x:shared any^dshape,t:invar index) complete <<always>>{
+proc PM__subref%(x:shrd any^dshape,t:invar index) complete <<always>>{
   tt=_tup(t)
   check_contains(#(x),tt)
   return PM__dref(_arb(x),x,i,p,_s_ref) where p,i=node_and_index((#x).dist,(#x)._mshape#tt)
 }
-proc PM__subref%(x:shared any^dshape,t:index){
+proc PM__subref%(x:shrd any^dshape,t:index){
   tt=_tup(t)
   check_contains(#(x),tt)
   return PM__dref(_arb(x),x,i,p,_p_ref) where p,i=node_and_index((#x).dist,(#x)._mshape#tt)
 }
-proc PM__subref%(x:shared any^dshape,t:subs){
+proc PM__subref%(x:shrd any^dshape,t:subs){
   tt=_tup(t)
   check_contains(#(x),tt)
   var xx=varray(_arb(x),empty(#x))
   return PM__drefs(xx,x,tt,p,_p_ref) where p=nodes_for_grid((#x).dist,tt)
 }
-proc PM__subref%(x:shared any^dshape,t:invar indexed) cond =PM__subref%(x,*t)
-proc PM__subref%(region:shape(,blocked_distr),x:shared any^dshape(,blocked_distr),t:invar indexed) uncond {
+proc PM__subref%(x:shrd any^dshape,t:invar indexed) cond =PM__subref%(x,*t)
+proc PM__subref%(region:shape(,blocked_distr),x:shrd any^dshape(,blocked_distr),t:invar indexed) uncond {
   check_contains(#x,_dmap(t,here))
   return PM__drefi(_arb(x),x,tt,[tt,#x],_d_ref) where tt=_tup(t)
 }
-proc PM__subref%(x:shared any^dshape,t:invar indexed) uncond =PM__subref%(x,*t)
+proc PM__subref%(x:shrd any^dshape,t:invar indexed) uncond =PM__subref%(x,*t)
 //  Subscript or slice of non-distristuted array which is itself result of variant slice
-proc PM__subref%(x:priv ^*(any^mshape,,,null,null),t:index){
+proc PM__subref%(x:priv PM__anyref(any^mshape,,,null,null),t:index){
   tt=_tup(t)
   check_contains(#_v1%(x),tt)
   i=index(#(_v1%(x)),tt)return PM__dref(_get_aelem(_v1%(x),i),x,i,null,null)
 }
-proc PM__subref%(x:priv ^*(any^mshape,,,null,null),t:invar index){
+proc PM__subref%(x:priv PM__anyref(any^mshape,,,null,null),t:invar index){
   tt=_tup%(t)
   check_contains(#_v1%(x),tt)
   i=index(#(_v1%(x)),tt)
   return PM__drefi(_get_aelem(_v1%(x),i),x,t,null,null)
 }
-proc PM__subref%(x:priv ^*(any^mshape,,,null,null),t:subs) {
+proc PM__subref%(x:priv PM__anyref(any^mshape,,,null,null),t:subs) {
   tt=_tup(t)
   check_contains(#(_v1%(x)),tt)
   return PM__drefs(PM__import_val(_v1%(x)),x,tt,null,null)
 }
-proc PM__subref%(x:priv ^*(any^mshape,,,null,null),t:invar indexed)=PM__subref%(x,_dmap(t,here))
+proc PM__subref%(x:priv PM__anyref(any^mshape,,,null,null),t:invar indexed)=PM__subref%(x,_dmap(t,here))
 //  Subscript or slice of darray which is itself the result of a priv subscript
-proc PM__subref%(x:priv ^*(any^dshape,,,null,null),t:index){
+proc PM__subref%(x:priv PM__anyref(any^dshape,,,null,null),t:index){
   tt=_tup(t)
   check_contains(#_v1%(x),tt)
   return PM__dref(_arb(_v1%(x)),_v2%(x),i,p,_p_ref) where p,i=node_and_index((#_v1%(x)).dist,(#_v1%(x))._mshape#tt)
 }
-proc PM__subref%(x:priv ^*(any^dshape,,,null,null),t:subs){
+proc PM__subref%(x:priv PM__anyref(any^dshape,,,null,null),t:subs){
   tt=_tup(t)
   check_contains(#_v1%(x),tt)
   return PM__drefs(PM__import_val(_v1%(x)),x,tt,p,_p_ref) where p=nodes_for_grid((#_v1%(x)).dist,tt)
 }
-proc PM__subref%(x:priv ^*(any^dshape,,,null,null),t:invar indexed)=PM__subref%(x,_dmap(t,here))
+proc PM__subref%(x:priv PM__anyref(any^dshape,,,null,null),t:invar indexed)=PM__subref%(x,_dmap(t,here))
 //  Subscript of a priv slice
-proc PM__subref%(x:priv ^#(,,,null,null),t:subs)=PM__subref%(_v2%(x),_v3%(x)[_tup(t)])
-proc PM__subref%(x:priv ^#(,,,null,null),t:invar indexed)=PM__subref%(_v2%(x),_v3%(x)[tt]) where tt=_dmap(t,here)
+proc PM__subref%(x:priv PM__drefs(,,,null,null),t:subs)=PM__subref%(_v2%(x),_v3%(x)[_tup(t)])
+proc PM__subref%(x:priv PM__drefs(,,,null,null),t:invar indexed)=PM__subref%(_v2%(x),_v3%(x)[tt]) where tt=_dmap(t,here)
 //  Subscript of distributed reference
 proc _arb%(x:partial)=_arb(x)
 proc _arb%(x:complete) complete <<always>>=_arb(x)
 proc _arb%(x:chan) complete <<always>>=_arb(x)
 proc _arb%(x:invar) complete <<always>>=_arb(x)
-proc PM__subref%(x:priv ^*(any^any,,,,),t:invar subs)=PM__drefi(_arb%(_v1%(x)),x,_tup%(t))
-proc PM__subref%(x:priv ^*(any^any,,,,),t:priv subs)=PM__dref(_arb%(_v1%(x)),x,_tup(t))
-proc PM__subref%(x:priv ^*(any^any,,,,_s_ref),t:priv subs)=PM__dref(_arb%(_v1%(x)),x,_tup(t),_v4%(x),_sp_ref)
-proc PM__subref%(x:priv ^*(any^any,,,,),t:invar indexed)=PM__subref%(x,_dmap(_tup(t),here))
-proc PM__subref%(x:priv ^*(any^any,,,,_s_ref),t:invar indexed)=PM__drefi(_arb%(_v1%(x)),x,_tup(t))
-proc PM__subref%(x:priv ^*(any^any,,,,_d_ref),t:invar indexed)=PM__drefi(_arb%(_v1%(x)),x,_tup(t))
-proc PM__subref%(x:priv ^*(any^any,,,,_d_ref),t:invar subs)=PM__drefi(_arb%(_v1%(x)),x,_tup%(t))
-proc PM__subref%(x:priv ^*(any^any,,,,_d_ref),t:priv subs)=PM__dref(_arb%(_v1%(x)),x,_tup(t),_v4%(x),_dp_ref)
+proc PM__subref%(x:priv PM__anyref(any^any,,,,),t:invar subs)=PM__drefi(_arb%(_v1%(x)),x,_tup%(t))
+proc PM__subref%(x:priv PM__anyref(any^any,,,,),t:priv subs)=PM__dref(_arb%(_v1%(x)),x,_tup(t))
+proc PM__subref%(x:priv PM__anyref(any^any,,,,_s_ref),t:priv subs)=PM__dref(_arb%(_v1%(x)),x,_tup(t),_v4%(x),_sp_ref)
+proc PM__subref%(x:priv PM__anyref(any^any,,,,),t:invar indexed)=PM__subref%(x,_dmap(_tup(t),here))
+proc PM__subref%(x:priv PM__anyref(any^any,,,,_s_ref),t:invar indexed)=PM__drefi(_arb%(_v1%(x)),x,_tup(t))
+proc PM__subref%(x:priv PM__anyref(any^any,,,,_d_ref),t:invar indexed)=PM__drefi(_arb%(_v1%(x)),x,_tup(t))
+proc PM__subref%(x:priv PM__anyref(any^any,,,,_d_ref),t:invar subs)=PM__drefi(_arb%(_v1%(x)),x,_tup%(t))
+proc PM__subref%(x:priv PM__anyref(any^any,,,,_d_ref),t:priv subs)=PM__dref(_arb%(_v1%(x)),x,_tup(t),_v4%(x),_dp_ref)
 //  Node .[] subscript of distributed array
 type _lcl is unique{_LCL}
 proc PM__nodelhs%(x,y)=PM__noderef%(x,y)
-proc PM__noderef%(region:dshape,x:shared any^dshape,y:invar null)=^(PM__import_val(PM__local(x)),coherent)
-proc PM__noderef%(region:dshape,x:shared any^dshape,y:invar any_int){
+proc PM__noderef%(region:dshape,x:shrd any^dshape,y:invar null)=^(PM__import_val(PM__local(x)),coherent)
+proc PM__noderef%(region:dshape,x:shrd any^dshape,y:invar any_int){
   xd=#((#x).dist)
   check_contains(xd,y)
   return PM__drefi(PM__local(x),x,_LCL,p,_s_ref)where p=index(xd,int(y))
 }
-proc PM__noderef%(region:dshape,x:shared any^dshape,y:priv any_int){
+proc PM__noderef%(region:dshape,x:shrd any^dshape,y:priv any_int){
   xd=#((#x).dist)
   check_contains(xd,y)
   return PM__drefi(PM__local(x),x,_LCL,p,_p_ref)where p=index(xd,y)
 }
-proc PM__noderef%(region:dshape,x:shared any^dshape,y:shared indexed)=PM__noderef%(x,*y)
-proc PM__noderef%(x:priv ^*(any^dshape,,,null,null),y:invar any_int){
+proc PM__noderef%(region:dshape,x:shrd any^dshape,y:shrd indexed)=PM__noderef%(x,*y)
+proc PM__noderef%(x:priv PM__anyref(any^dshape,,,null,null),y:invar any_int){
   xd=#((#x).dist)
   check_contains(xd,y)
   return PM__drefi(PM__local(_v1%(x)),x,_LCL,p,_sp_ref)where p=index(xd,int(y))
 }
-proc PM__noderef%(x:priv ^*(any^dshape,,,null,null),y:priv any_int){
+proc PM__noderef%(x:priv PM__anyref(any^dshape,,,null,null),y:priv any_int){
   xd=#((#x).dist)
   check_contains(xd,y)
   return PM__drefi(PM__local(_v1%(x)),x,_LCL,p,_p_ref)where p=index(xd,int(y))
 }
-proc PM__noderef%(x:priv ^*(any^dshape,,,null,null),y:shared indexed)=PM__noderef%(x,*y)
+proc PM__noderef%(x:priv PM__anyref(any^dshape,,,null,null),y:shrd indexed)=PM__noderef%(x,*y)
 proc PM__noderef%(x,y)=error_type() {
   if not region is <dshape> {
   test """.[]"" subscript in non-distributed region"=>fix(false)} elseif x is <any^mshape> {
@@ -2915,12 +2961,12 @@ type _di(n) is indexed_dim(fix(1),fix(1),,n) or int
 type _dr is [_di(fix(1))],[_di(fix(1)),_di(fix(2))],[_di(fix(1)),_di(fix(2)),_di(fix(3))],[_di(fix(1)),_di(fix(2)),_di(fix(3)),_di(fix(4))],[_di(fix(1)),_di(fix(2)),_di(fix(3)),_di(fix(4)),_di(fix(5))],[_di(fix(1)),_di(fix(2)),_di(fix(3)),_di(fix(4)),_di(fix(5)),_di(fix(6))],[_di(fix(1)),_di(fix(2)),_di(fix(3)),_di(fix(4)),_di(fix(5)),_di(fix(6)),_di(fix(7))]
 //  Resolve a distributed reference
 proc PM__getref%(x,at)=x
-proc PM__getref%(x:priv ^*(,,,null,null),at)=_v1%(x)
-proc PM__getref%(x:priv ^*(,,,int,_p_ref),at) {
+proc PM__getref%(x:priv PM__anyref(,,,null,null),at)=_v1%(x)
+proc PM__getref%(x:priv PM__anyref(,,,int,_p_ref),at) {
   PM__recv pp,xx,v,_cap%(x,here),_v4%(x),at,_getref(xx,null)
   return v
 }
-proc PM__getref%(x:priv ^*(,,,int,_sp_ref),at) {
+proc PM__getref%(x:priv PM__anyref(,,,int,_sp_ref),at) {
   PM__serve pp,xx,v,_cap%(x,here),_v4%(x),at,_getref(xx,null)
   return v
 }
@@ -2935,10 +2981,10 @@ proc _scatter(x,region) {
   }
 }
       
-proc PM__getref%(x:complete ^*(,,,int,_s_ref),at:invar) complete <<always>> {
+proc PM__getref%(x:complete PM__anyref(,,,int,_s_ref),at:invar) complete <<always>> {
   chan var xx=_v1%(x)
   _getref_s%(&xx!,^^(x),at)
-  _bcast_shared(&xx)
+  _bcast_shrd(&xx)
   return xx
 }
 proc _getref_s%(&xx:invar,x:invar,at:invar) PM__node {
@@ -2948,10 +2994,10 @@ proc _getref_s%(&xx:invar,x:invar,at:invar) PM__node {
   _scatter(x,region)
   _sync_messages(xx,x)
 }
-proc PM__getref%(x:complete ^*(_comp,,,int,_s_ref),at:invar) complete <<always>>{
+proc PM__getref%(x:complete PM__anyref(_comp,,,int,_s_ref),at:invar) complete <<always>>{
   chan var xx=_v1%(x)
   _getref_sc%(&xx!,^^(x),at)
-  _bcast_shared(&xx)
+  _bcast_shrd(&xx)
   return xx
 }
 proc _getref_sc%(&xx:invar,x:invar,at:invar) PM__node {
@@ -2961,20 +3007,20 @@ proc _getref_sc%(&xx:invar,x:invar,at:invar) PM__node {
   }
   _sync_messages(xx,x)
 }
-proc PM__getref%(x:complete ^*(,^*(,,,,),,,_d_ref),at:invar) complete <<always>> {
+proc PM__getref%(x:complete PM__anyref(,PM__anyref(,,,,),,,_d_ref),at:invar) complete <<always>> {
   chan var a=_v1%(x)
   _getref_d%(&^(PM__local%(^(&a!))),^^(x),at <<PM__ignore>>)
-  _bcast_shared(&a)
+  _bcast_shrd(&a)
   return a
 }
  
 proc _getref_d%(&a:invar,x:invar,at:invar) PM__node {
   _get_dindex_from_dref(&a,x,t.2,_local_region(region._tile,subregion(schedule)),region,t.1,_drat(at,region._tile,t.1)) where t=_v4(x)
 }
-proc PM__getref%(x:complete ^*(,,,,_d_ref),at:invar) complete <<always>> {
+proc PM__getref%(x:complete PM__anyref(,,,,_d_ref),at:invar) complete <<always>> {
   chan var a=_arb(_v2%(x))
   _getref_dc%(&a!,^^(x),at <<PM__ignore>>)
-  _bcast_shared(&a)
+  _bcast_shrd(&a)
   return a
 }
 proc _getref_dc%(&a:invar,x:invar,at:invar) PM__node {
@@ -2983,10 +3029,10 @@ proc _getref_dc%(&a:invar,x:invar,at:invar) PM__node {
   }
 }
  
-proc PM__getref%(x:complete ^*(,,,,_dp_ref),at:invar) complete <<always>> {
+proc PM__getref%(x:complete PM__anyref(,,,,_dp_ref),at:invar) complete <<always>> {
   chan var a=_v1%(x)
   _getref_dp%(&^(^^(^(&a))),^^(_cap%(x,here)),at,^^(^??),_v4(x) <<PM__ignore>>)
-  _bcast_shared(&a)
+  _bcast_shrd(&a)
   return a
 }
 proc _getref_dp%(&a:invar,x:invar,at:invar,atq:invar,t:invar) PM__node {
@@ -2994,7 +3040,7 @@ proc _getref_dp%(&a:invar,x:invar,at:invar,atq:invar,t:invar) PM__node {
     _get_dindex_from_ref(&a,x,t.2, _local_region(region._tile,subregion(schedule)),region, t.1,atq,_drat(at,region._tile,t.1))
   }
 }
-proc PM__getref%(x:priv ^#(,,,,),at) {
+proc PM__getref%(x:priv PM__drefs(,,,,),at) {
   var v=varray(_arb(_v1%(x)),#_v3%(x))
   var vv=varray(_arb(_v1%(x)),empty(#_v1%(x)))
   foreach p in _v4%(x) {
@@ -3010,14 +3056,14 @@ proc PM__getref%(x:priv ^#(,,,,),at) {
 //  Resolve reference locally (once communicated)
 proc _getref_elem(x:any^mshape,i)=_get_aelem(x,i)
 proc _getref_elem(x:any^dshape,i)=_get_aelem(PM__local(x),i)
-proc _getref(x:^*(,,int,,),y)=_getref_elem(_getref(_v2(x),y),_v3(x))
-proc _getref(x:^*(,,_here,,),y:null)<<inline>>=_getref(_v2(x),_v3(x).here)
-proc _getref(x:^*(,,subs,,),y)<<inline>>=_getref(_v2(x),y)[_v3(x)]
-proc _getref(x:^*(,,null,,),y)<<inline>>=_getref(_v2(x),y)
-proc _getref(x:^*(,,_lcl,,),y)<<inline>>=PM__local(_getref(_v2(x),y))
+proc _getref(x:PM__anyref(,,int,,),y)=_getref_elem(_getref(_v2(x),y),_v3(x))
+proc _getref(x:PM__anyref(,,_here,,),y:null)<<inline>>=_getref(_v2(x),_v3(x).here)
+proc _getref(x:PM__anyref(,,subs,,),y)<<inline>>=_getref(_v2(x),y)[_v3(x)]
+proc _getref(x:PM__anyref(,,null,,),y)<<inline>>=_getref(_v2(x),y)
+proc _getref(x:PM__anyref(,,_lcl,,),y)<<inline>>=PM__local(_getref(_v2(x),y))
 proc _getref(x:^.(,,,,),y)<<inline>>=_getref(_v2(x),y).^(x)
-proc _getref(x:^shared(,null,null,null,null),y)<<inline>>=_v1(x)
-proc _getref(x:^#(,,,,),y)<<inline>>=_getslice(_getref(_v2(x),y),_v3(x))
+proc _getref(x:PM__drefi(,null,null,null,null),y)<<inline>>=_v1(x)
+proc _getref(x:PM__drefs(,,,,),y)<<inline>>=_getslice(_getref(_v2(x),y),_v3(x))
 proc _getslice(x:any^dshape,tt) {
   t=overlap((#x)._tile,tt)
   var v=varray(_arb(x),#t)
@@ -3030,16 +3076,16 @@ proc _getslice(x:any^mshape,t) {
   return v
 }
 proc _getref(x:any^any,y)=x
-proc _getref(x:^shared(,,indexed,,),y)<<inline>>=_getref(_v2(x),y)[_dmap(_v3(x),y)]
-proc _getref(x:^shared(,any^dshape,indexed,,),y)<<inline>>=element(PM__local(_v2(x)),ms._tile#_dmap(_correct(_v3(x),ms._mshape._extent),y)) where ms=#_v2(x)
-proc _getref(x:^shared(,,indexed,,),y:null)<<inline>>=_v1(x) :test "Internal error - uncapped dref" => fix(false)
+proc _getref(x:PM__drefi(,,indexed,,),y)<<inline>>=_getref(_v2(x),y)[_dmap(_v3(x),y)]
+proc _getref(x:PM__drefi(,any^dshape,indexed,,),y)<<inline>>=element(PM__local(_v2(x)),ms._tile#_dmap(_correct(_v3(x),ms._mshape._extent),y)) where ms=#_v2(x)
+proc _getref(x:PM__drefi(,,indexed,,),y:null)<<inline>>=_v1(x) :test "Internal error - uncapped dref" => fix(false)
 PM__if_compiling
 PM__intrinsic _sync%(any,any,any,&x:any): "sync"
 PM__else
 proc _sync%(&x:any){
 }
 PM__endif
-//  Assignment of distributed and/or shared or uniform references
+//  Assignment of distributed and/or shrd or uniform references
 proc PM__assign%(&x:priv,y,at) {
   _sync%(&x)
   PM__assign(&x,y <<PM__ignore>>)
@@ -3052,7 +3098,7 @@ proc _assign_to_invar%(&x:uniform,y:invar) complete {
   PM__assign(&x,y <<PM__ignore>>) 
 }
  
-proc _assign_to_invar%(&x:shared,y:invar) shared{
+proc _assign_to_invar%(&x:shrd,y:invar) shrd{
   PM__assign(&x,y) 
 }
  
@@ -3060,7 +3106,7 @@ proc _assign_to_invar%(&x:invar,y:priv) {
   test "Can only assign an ""invar"" value to an ""invar"" variable" => fix(false) 
 }
  
-proc PM__assign%(&x:priv ^*(,,,int,_p_ref),y,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,int,_p_ref),y,at) {
   PM__send p,xx,yy,_cap%(x,here),_v4%(x),y,at {
     PM__assign(&^(_getlhs(^(&xx),null)),yy)
   }
@@ -3069,13 +3115,13 @@ proc PM__assign%(&x:priv ^*(,,,int,_p_ref),y,at) {
   }
 }
        
-proc PM__assign%(&x:priv ^*(,,,int,_p_ref),y:invar,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,int,_p_ref),y:invar,at) {
   PM__send p,xx,yy,_cap%(x,here),_v4%(x),null,at {
     PM__assign(&^(_getlhs(^(&xx),null)),y) 
   }
 }
  
-proc PM__assign%(&x:priv ^*(,,,null,null),y,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,null,null),y,at) {
   foreach invar p in 0..size(#region.dist)-1 {
     PM__bcast xx,yy,_cap%(x,here),y,p {
       PM__assign(&^(_getlhs(^(&xx),null)),yy) 
@@ -3088,16 +3134,16 @@ proc PM__assign%(&x:priv ^*(,,,null,null),y,at) {
   }
 }
                      
-proc PM__assign%(&x:priv ^*(,,,null,null),y:invar,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,null,null),y:invar,at) {
   _sync%(&x)
   var xx=_import_dref%(x)
   PM__assign(&^(_getlhs(^(&xx),here)),y)
 }
-proc PM__assign%(&x:priv ^*(,null,null,null,null),y:invar,at) {
+proc PM__assign%(&x:priv PM__anyref(,null,null,null,null),y:invar,at) {
   _sync%(&x)
   PM__assign(&^(_v1%(^(&x))),y)
 }
-proc PM__assign%(&x:priv ^*(,,,int,_sp_ref or _s_ref),y,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,int,_sp_ref or _s_ref),y,at) {
   PM__collect p,xx,yy,_cap%(x,here),_v4%(x),y,at {
     PM__assign(&^(_getlhs(^(&xx),null)),yy)
   }
@@ -3106,13 +3152,13 @@ proc PM__assign%(&x:priv ^*(,,,int,_sp_ref or _s_ref),y,at) {
   }
 }
       
-proc PM__assign%(&x:priv ^*(,,,int,_sp_ref or _s_ref),y:invar,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,int,_sp_ref or _s_ref),y:invar,at) {
   PM__collect p,xx,yy,_cap%(x,here),_v4%(x),null,at {
     PM__assign(&^(_getlhs(^(&xx),null)),PM__import_val(y))
   }
 }
  
-proc PM__assign%(&x:priv ^*(,,,,_d_ref or _dp_ref),y,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,,_d_ref or _dp_ref),y,at) {
   _set_ref_dp%(&^(^^(_cap%(^(&x),here))),^(^^(y)), $_just_assign,^^(^??),at,_v4(x) <<PM__ignore>>)
 }
 */
@@ -3137,26 +3183,26 @@ proc _assign_to_invar%(&x:uniform,y:invar,pr:uniform,at:uniform) complete{
   PM__assign(&x,y,pr <<PM__ignore>>) 
 }
  
-proc _assign_to_invar%(&x:shared,y:invar,pr:uniform,at:uniform) shared {
+proc _assign_to_invar%(&x:shrd,y:invar,pr:uniform,at:uniform) shrd {
   PM__assign(&x,y,pr) 
 }
  
 proc _assign_to_invar%(&x:invar,y:priv,pr,at){
   _assign_to_invar%(&x,_reduce_for_assign%(pr,y,x),pr,at)
 }
-proc PM__assign%(&x:priv ^*(,,,int,_p_ref),y,pr,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,int,_p_ref),y,pr,at) {
   PM__send p,xx,yy,_cap%(x,here),_v4%(x),y,at {
     PM__assign(&^(_getlhs(^(&xx),null)),yy,pr)
   }
 }
  
-proc PM__assign%(&x:priv ^*(,,,int,_p_ref),y:invar,pr,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,int,_p_ref),y:invar,pr,at) {
   PM__send p,xx,yy,_cap%(x,here),_v4%(x),null,at {
     PM__assign(&^(_getlhs(^(&xx),null)),y,pr) 
   }
 }
  
-proc PM__assign%(&x:priv ^*(,,,null,null),y:priv,pr,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,null,null),y:priv,pr,at) {
   foreach invar p in 0..size(region.dist)-1 {
     PM__bcast xx,yy,_cap%(x,here),y,p {
       PM__assign(&^(_getlhs(^(&xx),null)),yy,pr) 
@@ -3164,47 +3210,47 @@ proc PM__assign%(&x:priv ^*(,,,null,null),y:priv,pr,at) {
   }
 }
        
-proc PM__assign%(&x:priv ^*(,,,null,null),y:invar,pr,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,null,null),y:invar,pr,at) {
   var xx=_import_dref%(x)
   PM__assign(&^(_getlhs(^(&xx),here)),y,pr)
 }
-proc PM__assign%(&x:priv ^*(,null,null,null,null),y:invar,pr,at) {
+proc PM__assign%(&x:priv PM__anyref(,null,null,null,null),y:invar,pr,at) {
   PM__assign(&^(_v1%(^(&x))),y,pr)
 }
-proc PM__assign%(&x:priv ^*(,,,int,_sp_ref or _s_ref),y:priv,pr,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,int,_sp_ref or _s_ref),y:priv,pr,at) {
   PM__collect p,xx,yy,_cap%(x,here),_v4%(x),y,at {
     PM__assign(&^(_getlhs(^(&xx),null)),yy,pr)
   }
 }
  
-proc PM__assign%(&x:priv ^*(,,,int,_sp_ref),y:invar,pr,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,int,_sp_ref),y:invar,pr,at) {
   PM__collect p,xx,yy,_cap%(x,here),_v4%(x),null,at {
     PM__assign(&^(_getlhs(^(&xx),null)),y,pr)
   }
 }
  
-proc PM__assign%(&x:priv ^*(,,,,_d_ref or _dp_ref),y:priv,pr,at) {
+proc PM__assign%(&x:priv PM__anyref(,,,,_d_ref or _dp_ref),y:priv,pr,at) {
   _set_dindex_of_ref%(&^(^^(_cap%(^(&x),here))),^^(y),t.2,_local_region(region._tile,subregion(schedule)),region,t.1,pr,^^(^??),at <<PM__ignore>>)where t=_v4%(x)
 }
 //  Resolve LHS reference (locally after communication)
-proc _getlhs(x:^*(,,_here,,),y)=_getlhs(_v2(x),_v3(x).here)
-proc _getlhs(x:^*(,,_lcl,,),y)=_getlhs(_v2(x),y)
-proc _getlhs(x:^(,,int,,),y)=_make_subref(_getlhs(_v2(x),y),int(_v3(x)))
-proc _getlhs(x:^shared(,,null,,),y)=_getlhs(_v2(x),y)
-proc _getlhs(x:^shared(,,int,,),y)=_make_subref(_getlhs(_v2(x),y),int(_v3(x)))
-proc _getlhs(x:^(,,subs,,),y)=PM__sublhs(_getlhs(_v2(x),y),_v3(x))
-proc _getlhs(x:^shared(,,subs,,),y)=PM__sublhs(_getlhs(_v2(x),y),_v3(x)) 
+proc _getlhs(x:PM__anyref(,,_here,,),y)=_getlhs(_v2(x),_v3(x).here)
+proc _getlhs(x:PM__anyref(,,_lcl,,),y)=_getlhs(_v2(x),y)
+proc _getlhs(x:PM__dref(,,int,,),y)=_make_subref(_getlhs(_v2(x),y),int(_v3(x)))
+proc _getlhs(x:PM__drefi(,,null,,),y)=_getlhs(_v2(x),y)
+proc _getlhs(x:PM__drefi(,,int,,),y)=_make_subref(_getlhs(_v2(x),y),int(_v3(x)))
+proc _getlhs(x:PM__dref(,,subs,,),y)=PM__sublhs(_getlhs(_v2(x),y),_v3(x))
+proc _getlhs(x:PM__drefi(,,subs,,),y)=PM__sublhs(_getlhs(_v2(x),y),_v3(x)) 
 proc _local_ref(x,t)=PM__subref(x,overlap((#x)._tile,t))
-proc _getlhs(x:^#(,,subs,,),y)<<inline>>=_local_ref(x,_v3(x))
-proc _getlhs(x:^#shared(,,subs,,),y)<<inline>>=_local_ref(x,_v3(x))
+proc _getlhs(x:PM__drefs(,,subs,,),y)<<inline>>=_local_ref(x,_v3(x))
+proc _getlhs(x:PM__dref_is(,,subs,,),y)<<inline>>=_local_ref(x,_v3(x))
 proc _getlhs(x:^.(,,,,),y)<<inline>>=_getlhs(_v2(x),y).^&(x)
-proc _getlhs(x:^shared(,null,null,null,null),y)<<inline>>=_v1(x)
-proc _getlhs(x:^(,null,null,null,null),y)<<inline>>=_v1(x)
+proc _getlhs(x:PM__drefi(,null,null,null,null),y)<<inline>>=_v1(x)
+proc _getlhs(x:PM__dref(,null,null,null,null),y)<<inline>>=_v1(x)
 proc _getlhs(x:any^any,y)=x
 proc _getlhs(x:any^dshape,y)=PM__local(x)
-proc _getlhs(x:^shared(,,indexed,,),y)<<inline>>=_make_subref(_getlhs(_v2(x),y),_dmap(_v3(x),y))
-proc _getlhs(x:^shared(,any^dshape,indexed,,),y)<<inline>>=_make_subref(PM__local(_v2(x)),ms._tile#_dmap(_correct(_v3(x),ms._mshape._extent),y)) where ms=#_v2(x)
-proc _getlhs(x:^shared(,,indexed,,),y:null)=_v1(x) :test "Internal error -- uncapped indexed ref" => fix(false)
+proc _getlhs(x:PM__drefi(,,indexed,,),y)<<inline>>=_make_subref(_getlhs(_v2(x),y),_dmap(_v3(x),y))
+proc _getlhs(x:PM__drefi(,any^dshape,indexed,,),y)<<inline>>=_make_subref(PM__local(_v2(x)),ms._tile#_dmap(_correct(_v3(x),ms._mshape._extent),y)) where ms=#_v2(x)
+proc _getlhs(x:PM__drefi(,,indexed,,),y:null)=_v1(x) :test "Internal error -- uncapped indexed ref" => fix(false)
 // **************************************************************
 //  INDEXED VARIABLES
 // **************************************************************
@@ -3445,7 +3491,7 @@ proc _get_dindex_rs(&a:_comp^any,x,shapex,local_tile,local_region,t:indexed,at) 
             PM__head_node{
               _recv_slice_sync(i,&b,active_dims(src_range,portion_to_send))
             }
-            if at:_bcast_slice_shared(&b,active_dims(src_range,portion_to_send))
+            if at:_bcast_slice_shrd(&b,active_dims(src_range,portion_to_send))
           }
         }
       }
@@ -3471,7 +3517,7 @@ proc _copy_dmapped_ref(&a,a_tile,a_extent,b,b_tile,t) {
   }
 }
  
-//  Resolve x[ indexed ][ indexed or shared ] ... 
+//  Resolve x[ indexed ][ indexed or shrd ] ... 
 proc _get_dindex_from_dref(&a:any^any,x,shapex,local_tile,local_region,tt:indexed,at) {
   t=_correct(tt,shapex._mshape)
   shapexx=#shapex._mshape
@@ -3510,7 +3556,7 @@ proc _get_dindex_from_dref(&a:any^any,x,shapex,local_tile,local_region,tt:indexe
   _sync_messages(a,x)
 }
                                             
-//  Resolve x[ indexed ][ indexed or shared ] ... 
+//  Resolve x[ indexed ][ indexed or shrd ] ... 
 proc _get_dindex_from_dref_s(&a:_comp^any,x,shapex,local_tile,local_region,tt:indexed,at) {
   t=_correct(tt,shapex._mshape)
   shapexx=#shapex._mshape
@@ -3546,7 +3592,7 @@ proc _get_dindex_from_dref_s(&a:_comp^any,x,shapex,local_tile,local_region,tt:in
           PM__head_node{
             _recv_slice_sync(i,&a,portion_to_recv)
           }
-          if at:_bcast_slice_shared(&a,portion_to_recv)
+          if at:_bcast_slice_shrd(&a,portion_to_recv)
         }
       }
     }
@@ -3649,12 +3695,12 @@ proc string(x:envelope)=string(x.cross++" ortho "++x.corner)
 // **************************************************************
 type _nhd is rec{_nbhd,_tile,_tilesz,_interior,_limits}
 type nbhd(t) is struct^{_array:farray(t),_nbhd,_index,_here}
-proc PM__nhd%(x:invar envelope or extent,bound:invar) shared <<always>>=new _nhd {
+proc PM__nhd%(x:invar envelope or extent,bound:invar) shrd <<always>>=new _nhd {
 _nbhd=x,_tile=t,_tilesz=#t,_interior=overlap(t,region._tile),_limits=_expand_limits(region._extent,envelope(x),bound)} where t=_get_halo(region,region._tile,envelope(x))
 proc PM__nhd%(x,bound:invar)=^(new _nhd {
   _nbhd=n,_tile=t,_tilesz=#t,_interior=t,_limits=region._extent
 }
-,shared) where t=region._tile where n=xx where xx=spread(0..0,here){
+,shrd) where t=region._tile where n=xx where xx=spread(0..0,here){
   _check_nhd%(x)
 }
 proc _check_nhd%(n:invar envelope or extent) {
@@ -3688,7 +3734,7 @@ proc PM__nhd_join(x,y)=new _join{
   head=x,tail=y._array
 }
 proc PM__nhd_var%(x,n:_nhd,i,h)<<inline>>=new nbhd{
-  _array=_make_nhd%(^(x,shared),n._tilesz),_nbhd=n,_index=i,_here=h
+  _array=_make_nhd%(^(x,shrd),n._tilesz),_nbhd=n,_index=i,_here=h
 }
 proc PM__nhd_active(region,nbhd,bound:null)=region._extent
 proc PM__nhd_active(region,nbhd,bound:tuple)=map($_nhd_active,region._extent,nbhd,bound)
@@ -3699,7 +3745,7 @@ proc PM__nhd_active(region,nbhd,bound){
 proc _nhd_active(r,n,b:CYCLE or null)=r
 proc _nhd_active(r,n,b:range)=low(r)-min(0,low(b))..high(r)-max(0,high(b))
 proc _nhd_active(r,n,b:EXCLUDED)=_nhd_active(r,n,n)
-proc _make_nhd%(x:invar,d:invar) shared <<always>>{
+proc _make_nhd%(x:invar,d:invar) shrd <<always>>{
   var v=array(x,d)
   return v
 }
@@ -3726,7 +3772,7 @@ proc PM__blocking%(x:tuple(any_int)){
   test "Block sizes must be positive"=>map_reduce($_positive,$and,x)
 }
 proc _positive(x)=x>0
-proc PM__send_nhd%(&a:invar,nbhd:invar,b:invar boundary) shared <<always>> {
+proc PM__send_nhd%(&a:invar,nbhd:invar,b:invar boundary) shrd <<always>> {
   PM__head_node{
     this_tile=region._tile
     this_tile_x=nbhd._tile
@@ -3757,7 +3803,7 @@ proc PM__send_nhd%(&a:invar,nbhd:invar,b:invar boundary) shared <<always>> {
   }
 }
                                                                                  
-proc PM__send_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) shared <<always>> {
+proc PM__send_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) shrd <<always>> {
   PM__head_node{
     this_tile=region._tile
     this_tile_x=nbhd._tile
@@ -3783,13 +3829,13 @@ proc outside_edge(x:range(int),y:int)=if(y==0=>x,if(y<0=>lo+y..lo,hi..hi+y)) whe
 proc outside_edge(x:extent,y:tuple(int))=map($outside_edge,x,y)
 proc _foot(d,n:envelope)=if(_crss(d)=>n.cross,n.corner)
 proc _foot(d,n:extent)=n
-proc PM__recv_nhd%(&a:invar,nbhd:invar,b:invar) shared <<always>> {
+proc PM__recv_nhd%(&a:invar,nbhd:invar,b:invar) shrd <<always>> {
   PM__head_node{
     _apply_boundaries(&a,region,envelope(nbhd._nbhd),nbhd._tile,extent(region), envelope(nbhd._nbhd),b,rank(extent(region)),fix(true))
   }
 }
   
-proc PM__recv_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) shared <<always>> {
+proc PM__recv_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) shrd <<always>> {
   PM__head_node{
     this_tile=region._tile
     this_tile_x=nbhd._tile
@@ -3809,11 +3855,11 @@ proc PM__recv_nhd%(&a:invar _comp^any,nbhd:invar,b:invar boundary) shared <<alwa
   }
 }
                                             
-proc PM__bcast_nhd%(&a:invar,nbhd:invar,b:invar) shared <<always>> {
+proc PM__bcast_nhd%(&a:invar,nbhd:invar,b:invar) shrd <<always>> {
   if shrd_nnode()>1 {
     foreach i in 1..chunks(region,envelope(nbhd._nbhd))-1 {
       chunk=chunk(region,envelope(nbhd._nbhd),i,b)
-      _bcast_slice_shared(&a,chunk)
+      _bcast_slice_shrd(&a,chunk)
     }
   }
 }
@@ -3916,9 +3962,9 @@ proc _recv_slice_sync(p,&a:_join,o){
   _recv_slice_sync(p,&a.head,o)
   _recv_slice_sync(p,&a.tail,o)
 }
-proc _bcast_slice_shared(&a:_join,o) {
-  _bcast_slice_shared(&a.head,o)
-  _bcast_slice_shared(&a.tail,o)
+proc _bcast_slice_shrd(&a:_join,o) {
+  _bcast_slice_shrd(&a.head,o)
+  _bcast_slice_shrd(&a.tail,o)
 }
 proc _sync_messages(x:_join):_sync_messages(x.head,x.tail)
 proc _not_zero(x)=if(x/=0=>1,0)
@@ -4079,7 +4125,7 @@ proc _get_external_chunk(t:tuple(range(any_int)),n:extent,i:int) {
 type disp_index is any_int,tuple(any_int)
 type disp_sub is disp_index,tuple(any_int or range(any_int))
 //  *** Default ***
-proc nbr%(x:chan,t:shared disp_index,v:shared){
+proc nbr%(x:chan,t:shrd disp_index,v:shrd){
   test "Default and chan values must have same type in ""nbr"""=>same_type(x,v)
   j=displace(region._mshape,here,t)
   var y=v
@@ -4089,7 +4135,7 @@ proc nbr%(x:chan,t:shared disp_index,v:shared){
   return y
 }
      
-proc nbhd%(x:chan,t:shared disp_sub,v:shared) {
+proc nbhd%(x:chan,t:shrd disp_sub,v:shrd) {
   test "Default and chan values must have same type in ""nbr"""=>same_type(x,v)
   var a=array(v,#t)
   foreach invar i in t {
@@ -4102,14 +4148,14 @@ proc nbhd%(x:chan,t:shared disp_sub,v:shared) {
 }
            
 //  *** Blocked distributions ***
-proc nbr%(region:dshape(,blocked_distr),x:chan,t:shared disp_index,v:shared) {
+proc nbr%(region:dshape(,blocked_distr),x:chan,t:shrd disp_index,v:shrd) {
   test "Default and chan values must have same type in ""nbr"""=>same_type(x,v)
   var j=displace(region._mshape,here,t)
   a,ad=tile_with_halo%(x,t,v)
   return a[ad#j]
 }
     
-proc nbhd%(region:dshape(,blocked_distr),x:chan,t:shared disp_sub,v:shared){
+proc nbhd%(region:dshape(,blocked_distr),x:chan,t:shrd disp_sub,v:shrd){
   test "Default and chan values must have same type in ""nbr"""=>same_type(x,v)
   a=displace(region._mshape,here,t)
   y,yd=tile_with_halo%(x,t,v)
@@ -4422,11 +4468,11 @@ proc PM__set_elem%(&x:invar,v:complete,i,h){
   PM__setelem(&x,v,h <<PM__ignore>>)
   _assemble%(&x,region)
 }
-proc PM__get_elem%(x:shared any^dshape,i,h)=element(PM__local(x),i)
+proc PM__get_elem%(x:shrd any^dshape,i,h)=element(PM__local(x),i)
 proc PM__set_elem%(&x:invar any^dshape,v:complete,i,h) {
   _set_elem(&^(PM__local(^(&x))),v,i <<PM__ignore>>)
 }
-proc PM__get_elem%(x:shared array_slice(any^dshape),j,h)=_get_aelem(x._a,i) check p==_this_node() where p,i=node_and_index((#x._a).dist,(#x._a)._mshape._extent#x._s[h])  
+proc PM__get_elem%(x:shrd array_slice(any^dshape),j,h)=_get_aelem(x._a,i) check p==_this_node() where p,i=node_and_index((#x._a).dist,(#x._a)._mshape._extent#x._s[h])  
 proc PM__set_elem%(&x:invar array_slice(any^dshape),v:complete,j,h){
   PM__setaelem(&x._a,i,v <<PM__ignore>>) check p==_this_node() where p,i=node_and_index((#x._a).dist,(#x._a)._mshape._extent#x._s[h]) 
 }
@@ -4435,7 +4481,7 @@ proc _assemble%(&a:invar any^mshape,xregion:invar mshape) {
 }
 proc _assemble%(&a:invar array_slice(any^shape,),xregion:invar mshape) {
 }
-proc _assemble%(&a:invar any^mshape,xregion:invar) shared <<always>> {
+proc _assemble%(&a:invar any^mshape,xregion:invar) shrd <<always>> {
   dist=xregion.dist
   foreach p in #(dist) {
     tile=dist[p]
@@ -4455,7 +4501,7 @@ proc _assemble%(&a:invar any^mshape,xregion:invar) shared <<always>> {
   }
 }
                                                                              
-proc _assemble%(&a:invar array_slice(any^shape,),xregion:invar) shared <<always>> {
+proc _assemble%(&a:invar array_slice(any^shape,),xregion:invar) shrd <<always>> {
   dist=xregion.dist
   foreach p in #(dist) {
     tile=intersect((#(a._a))#a._s,dist[p])
@@ -4482,12 +4528,12 @@ proc PM__get_tilesz(d:mshape)=d,size(d)
 PM__if_compiling
 proc PM__makearray%(x:chan) complete <<always>>=_makearray(x,region,size(region))
 proc PM__makearray%(x:priv)=_makearray(x,region,size(region)):test "Can only apply ""!"" to a ""chan"" " => fix(false)
-proc PM__makearray%(x:invar)=_makearray(x,region,size(region)):test "Cannot apply ""!"" to a ""shared"" or ""uniform"" value" => fix(false)
+proc PM__makearray%(x:invar)=_makearray(x,region,size(region)):test "Cannot apply ""!"" to a ""shrd"" or ""uniform"" value" => fix(false)
 PM__intrinsic<<needs_type>> _makearray(x:any,y:any,z:any)->(PM__invar_dim x,y) : "make_array"
 PM__else
 proc PM__makearray%(x:chan) complete <<always>>=_makearray(x,region)
 proc PM__makearray%(x:priv)=_makearray(x,region):test "Can only apply ""!"" to a ""chan"" " => fix(false)
-proc PM__makearray%(x:invar)=_makearray(x,region):test "Cannot apply ""!"" to a ""shared"" or ""uniform"" value" => fix(false)
+proc PM__makearray%(x:invar)=_makearray(x,region):test "Cannot apply ""!"" to a ""shrd"" or ""uniform"" value" => fix(false)
 PM__intrinsic<<needs_type>> _makearray(x:any,y:any)->(PM__dim x,y) : "make_array"
 PM__endif
 //  active%() intrinsic
@@ -4508,17 +4554,17 @@ proc PM__impscalar(x) {
   PM__checkimp(x)
   return _import_scalar(x)
 }
-proc PM__import_val(x:^*(,,,,)) {
+proc PM__import_val(x:PM__anyref(,,,,)) {
   test "Compiler internal error:importing reference" => fix(false)
   return x
 }
-proc PM__impscalar(x:^*(,,,,)) {
+proc PM__impscalar(x:PM__anyref(,,,,)) {
   test "Compiler internal error:importing reference" => fix(false)
   return x
 }
-proc PM__checkimp(x,arg...) {
+proc PM__checkimp(x,...) {
   PM__checkimp(x)
-  PM__checkimp(arg...)
+  PM__checkimp(...)
 }
 proc PM__checkimp(x) {
 }
@@ -4530,14 +4576,14 @@ proc subregion(schedule:schedule)=schedule._subregion
 proc subregion(schedule:null)=null
 proc subtile(schedule:schedule)=schedule._subtile
 //  Over statements
-proc PM__over%(schedule:null,x:invar,block:invar) shared <<always>>=new schedule{
+proc PM__over%(schedule:null,x:invar,block:invar) shrd <<always>>=new schedule{
   _subregion=x,_subtile=overlap(region._tile,x),_blocking=_blocking(block,region)
 }
-proc PM__over%(x:invar,block:invar) shared <<always>>=new schedule{
+proc PM__over%(x:invar,block:invar) shrd <<always>>=new schedule{
 _subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}where s=intersect(x,schedule._subregion)
-proc PM__make_over%(schedule:null,x:invar tuple(subs_dim except stretch_dim),block:invar) shared <<always>>=new schedule{
+proc PM__make_over%(schedule:null,x:invar tuple(subs_dim except stretch_dim),block:invar) shrd <<always>>=new schedule{
 _subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}check "Value"++s++" in ""over"" out of bounds: "++region._extent=>region._extent inc s where s=fill_in(region._extent,x,null)
-proc PM__make_over%(x:invar tuple(subs_dim except stretch_dim),block:invar) shared <<always>>=new schedule{
+proc PM__make_over%(x:invar tuple(subs_dim except stretch_dim),block:invar) shrd <<always>>=new schedule{
 _subregion=s,_subtile=overlap(region._tile,s),_blocking=_blocking(block,region)}where s=intersect(map($norm,fill_in(region._extent,x,fix(true))),schedule._subregion)
 proc PM__make_over%(x:invar,block)=x check "Expression in an ""over"" statement must be a subscript tuple"=>fix(false)
 proc PM__make_over%(x,block)=x check "Expression in an ""over"" statement must be ""invar"""=>fix(false)
@@ -4573,7 +4619,7 @@ proc PM__do_over%(x:invar grid) complete <<always>>{
 }
   
 proc PM__do_over%(x:invar tuple(seq or block_seq),h:complete)=h in x
-proc _in%(x:invar,&t:invar) shared <<always>>{
+proc _in%(x:invar,&t:invar) shrd <<always>>{
   forall i in x {
     sync t[i]=true
   }
@@ -4585,15 +4631,15 @@ PM__intrinsic sys_nnode()->(int) : "sys_nnode"
 PM__intrinsic _this_node()->(int) : "this_node"(1)
 PM__intrinsic this_node%(r:any,s:any,h:any)->(int) : "this_node"(2)
 PM__intrinsic this_nnode()->(int) : "this_nnode"
-PM__intrinsic _shrd_node()->(int) : "shared_node"
-PM__intrinsic shrd_nnode()->(int) : "shared_nnode"
+PM__intrinsic _shrd_node()->(int) : "shrd_node"
+PM__intrinsic shrd_nnode()->(int) : "shrd_nnode"
 PM__intrinsic _root_node()->(int) : "root_node"
-PM__intrinsic is_shrd()->(bool) : "is_shared"
-PM__intrinsic is_shrd(any)->(bool) : "is_shared"
+PM__intrinsic is_shrd()->(bool) : "is_shrd"
+PM__intrinsic is_shrd(any)->(bool) : "is_shrd"
 PM__intrinsic is_par()->(bool) : "is_par"
 proc _head_node()=_shrd_node()==0
 //  Parallel system nested contexts
-PM__intrinsic<<is_impure,has_for>> _push_node_grid(arg...:any): "push_node_grid"
+PM__intrinsic<<is_impure,has_for>> _push_node_grid(...:any): "push_node_grid"
 proc _push_node(d:int,t:int){
   _push_node_grid(false,t)
 }
@@ -4760,11 +4806,11 @@ proc write(&f:file,x:io_type^dshape) {
 }
 //  Distributed I/O
 proc partition%(f:filesystem)=f:test "Partition not yet implemented"=>fix(false)
-proc read%(&f:shared file,&x:complete io_type){
+proc read%(&f:shrd file,&x:complete io_type){
   err=_read_file_tile%(f._f,&x,index(dims(region._mshape),here),size(region._mshape))
   return _make_file_error(err)
 }
-proc write%(&f:shared file,x:complete io_type){
+proc write%(&f:shrd file,x:complete io_type){
   err=_write_file_tile%(f._f,x,index(dims(region._mshape),here),size(region._mshape))
   return _make_file_error(err)
 }
@@ -4792,11 +4838,11 @@ proc seek(&f:file,x:lint) {
   error=seek(&f,x)
   test "Error on seek:"++error=>not(error)
 }
-proc read%(&f:shared file,&x) {
+proc read%(&f:shrd file,&x) {
   error=read%(&f,&x)
   test "Error reading from file:"++error=>not(error)
 }
-proc write%(&f:shared file,x) {
+proc write%(&f:shrd file,x) {
   error=write%(&f,x)
   test "Error writing to file:"=>not(error)
 }
@@ -4898,8 +4944,8 @@ proc _recv_slice_sync(p,&x,d) {
   _recv_offset(_norm(dims(x),d),p,&x) 
 }
  
-proc _bcast_slice_shared(&x,d){
-  _bcast_shared_offset(_norm(dims(x),d),&x)
+proc _bcast_slice_shrd(&x,d){
+  _bcast_shrd_offset(_norm(dims(x),d),&x)
 }
 proc _send_recv_slice_req(p,x:_comp,&a,sx,d,c:^^(fix(true))) {
   forall i in d {
@@ -4954,8 +5000,8 @@ PM__intrinsic<<is_impure,is_dcomm>> _irecv_offset%(r:any,s:any,h:any,j:any,p:any
 PM__intrinsic<<is_impure,is_dcomm>> _irecv_offset(j:any,p:any,&x:any): "irecv_grid"
 PM__intrinsic<<is_impure,is_dcomm>> _recv_offset%(r:any,s:any,h:any,j:any,p:any,&x:any): "recv_offset"
 PM__intrinsic<<is_impure,is_dcomm>> _recv_offset(j:any,p:any,&x:any): "recv_grid"
-PM__intrinsic<<is_impure,is_dcomm>> _bcast_shared_offset%(r:any,s:any,h:any,j:any,&x:any): "bcast_shared_offset"
-PM__intrinsic<<is_impure,is_dcomm>> _bcast_shared_offset(j:any,&x:any): "bcast_shared_grid"
+PM__intrinsic<<is_impure,is_dcomm>> _bcast_shrd_offset%(r:any,s:any,h:any,j:any,&x:any): "bcast_shrd_offset"
+PM__intrinsic<<is_impure,is_dcomm>> _bcast_shrd_offset(j:any,&x:any): "bcast_shrd_grid"
 PM__intrinsic<<is_impure,is_dcomm>> _isend(p:any,x:any): "isend"
 PM__intrinsic<<is_impure,is_dcomm>> _irecv(p:any,&x:any): "irecv"
 PM__intrinsic<<is_impure,is_dcomm>> _recv(p:any,&x:any): "recv"
@@ -4968,9 +5014,9 @@ PM__intrinsic<<is_impure,is_dcomm>> _isend_assn%(r:any,s:any,h:any,j:any,p:any,x
 PM__intrinsic<<is_impure,is_dcomm>> _recv_reply%(r:any,s:any,h:any,j:any,p:any,&x:any,c:any): "recv_reply"
 PM__intrinsic<<is_impure,is_dcomm>> _recv_reply%(r:any,s:any,h:any,j:any,p:any,&x:any): "recv_reply"
 PM__intrinsic<<is_impure,is_dcomm>> _recv_reply(j:any,p:any,&x:any): "recv_reply"
-PM__intrinsic<<is_impure>> _bcast_shared(&x:any): "broadcast_shared"
-PM__intrinsic<<is_impure>> _bcast_shared(&x:any,p:int): "broadcast_shared"
-type _ct is array_slice,^*(,,,,),any^any,^^(any)
+PM__intrinsic<<is_impure>> _bcast_shrd(&x:any): "broadcast_shrd"
+PM__intrinsic<<is_impure>> _bcast_shrd(&x:any,p:int): "broadcast_shrd"
+type _ct is array_slice,PM__anyref(,,,,),any^any,^^(any)
 proc PM__sync_messages(x)<<inline>>:_sync_messages(x)
 PM__if_compiling
 proc _sync_messages(x:_ct):_do_sync_messages(_core(x))
@@ -4978,19 +5024,19 @@ proc _sync_messages(x:_ct,y:_ct):_do_sync_messages(_core(x),_core(y))
 proc _core(x:any^any)=x
 proc _core(x:^^(any))=x
 proc _core(x:array_slice)=_core(x._a)
-proc _core(x:^*(,,,,))=_core(_v2(x))
-PM__intrinsic<<is_impure,is_dcomm>> _do_sync_messages(arg...:^^(any) or any^any): "sync_mess"
+proc _core(x:PM__anyref(,,,,))=_core(_v2(x))
+PM__intrinsic<<is_impure,is_dcomm>> _do_sync_messages(...:^^(any) or any^any): "sync_mess"
 PM__else
-PM__intrinsic<<is_impure,is_dcomm>> _sync_messages(arg...:_ct): "sync_mess"
+PM__intrinsic<<is_impure,is_dcomm>> _sync_messages(...:_ct): "sync_mess"
 PM__endif
 proc _tup(x:tuple)=x
-proc _tup(arg...)=tuple(arg...)
+proc _tup(...)=tuple(...)
 proc _tup(x:null)=x
-proc _tup%(x:invar) shared=_tup(x)
+proc _tup%(x:invar) shrd=_tup(x)
 PM__intrinsic<<is_impure,is_dcomm>> PM__broadcast(&b:any,a:int): "broadcast"
 PM__intrinsic<<is_impure,is_dcomm>> PM__broadcast(b:any,a:int)->(=b) : "broadcast_val"
-PM__intrinsic<<is_impure,is_dcomm>> get_remote%(r:any,s:any,h:any,a:shared any^dshape,b:int,c:int)->(%a) : "get_remote_distr"
-PM__intrinsic<<is_impure,is_dcomm>> put_remote%(r:any,s:any,h:any,a:shared any^dshape,b:any,c:int,d:int): "put_remote_distr"
+PM__intrinsic<<is_impure,is_dcomm>> get_remote%(r:any,s:any,h:any,a:shrd any^dshape,b:int,c:int)->(%a) : "get_remote_distr"
+PM__intrinsic<<is_impure,is_dcomm>> put_remote%(r:any,s:any,h:any,a:shrd any^dshape,b:any,c:int,d:int): "put_remote_distr"
 //  ********************************************************
 //  OTHER COMMUNICATING & ARRAY OPERATIONS
 //  ********************************************************
@@ -5039,7 +5085,7 @@ proc pack(vv:array,mm:array) {
 }
    
 //  Reduction
-type associative_proc is $+,$*,$max,$min,$&,$|,$xor,$++,$==,...
+type associative_proc is $+,$*,$max,$min,$&,$|,$~,$++,$==,...
 PM__if_compiling
 proc reduce(p:proc,x:array(,mshape)) {
   var s=_get_aelem(x,0)
@@ -5086,7 +5132,7 @@ proc _reduce(p:proc,y) {
   var n=this_nnode()
   var i=1
   until i>n-1 {
-    other=_this_node() xor i
+    other=_this_node() ~ i
     if other<n {
       _isend(other,x)
       _recv(other,&z)
@@ -5149,7 +5195,7 @@ proc PM__switch(w,x,y,z) check "Incompatible types in different ""switch"" branc
 proc PM__switch(w:fix(int),x:fix(int),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w:fix(string),x:fix(string),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w:fix(bool),x:fix(bool),y,z)=PM__if(w==x,y,z)
-proc PM__switch(w,x,y,arg...)=PM__switch(w,x,y,PM__switch(w,arg...))
+proc PM__switch(w,x,y,...)=PM__switch(w,x,y,PM__switch(w,...))
 
 //  Assignment
 proc PM__assign_or_init(a,b)<<inline>>=a {
@@ -5166,7 +5212,7 @@ proc PM__assign(&a:any,b:any) {
   _assign(&a,c) where c=b as a
 }
 
-type assignment_operator is $_just_assign,$+,$*,$&,$|,$xor,$and,$or,$++,...
+type assignment_operator is $_just_assign,$+,$*,$&,$|,$~,$and,$or,$++,...
 
 proc PM__assign(&a:any,b:any,c:assignment_operator) {
   PM__assign(&a,c.(a,b)) 
@@ -5187,25 +5233,34 @@ proc _assign(&a,b) {
 proc _assign(&a:contains(farray),b) {
   _assign_structure(&a,b)
 }
-*/
 proc _assign_structure(&a,b)<<foreach^(a,b)>>{
   _assign_element(&a,b)
 }
 proc _assign_structure(&a:farray,b){
   _array_assign(&a,b,fix(true))
 }
+*/
 PM__intrinsic _assign_element(&any,any): "assign"
 
 
 //  Other variable operations
 PM__intrinsic PM__clone(x:any)->(=x) : "clone"
-proc PM__dup(PM__dup) <<foreach^(PM__dup)>>=PM__clone(PM__dup)
+//proc PM__dup(PM__dup) <<foreach^(PM__dup)>>=PM__clone(PM__dup)
+proc PM__dup(PM__dup)=PM__clone(PM__dup)
+/*
 PM__intrinsic PM__dup(x:fix(int))->(int) : "clone"
 PM__intrinsic PM__dup(x:fix(real))->(real) : "clone"
 PM__intrinsic PM__dup(x:fix(string))->(string) : "clone"
 PM__intrinsic PM__dup(x:fix(bool))->(bool) : "clone"
+PM__intrinsic PM__dup(x:literal(int))->(int) : "clone"
+PM__intrinsic PM__dup(x:literal(real))->(real) : "clone"
+PM__intrinsic PM__dup(x:literal(string))->(string) : "clone"
+PM__intrinsic PM__dup(x:literal(bool))->(bool) : "clone"
+*/
 PM__intrinsic PM__getref(x:any)->(=x) : "get_rf"
 PM__intrinsic<<needs_type>> same_type(x:any,y:any)->(==x,y) : "logical_return"
+
+/*
 proc ==(x:any,y:any) {
   test "Cannot apply ""=="" to different types"=> same_type(x,y)
   var ok=true
@@ -5221,13 +5276,14 @@ proc /=(x:any,y:any) {
 proc _eq(x:any,y:any,&ok) <<foreach^(x,y)>> {
   ok=ok and x==y 
 }
+*/
  
 PM__intrinsic PM__copy_out(x:any)->(=x) : "clone"
 PM__intrinsic PM__copy_back(x:any)->(=x) : "assign"
 proc next_enum(x:int)=x+convert(1,x)
 proc next_enum(x:int,y:int)=x+convert(y,x)
 
-PM__intrinsic<<needs_type>> PM__element_at(x:any,y:literal(int))->(|x):"elem"
+PM__intrinsic<<needs_type>> .element_at_index(o:any,r:any,s:any,h:any,m:any,&x:any,y:fix(int))->(|x):"elem"
 
 proc elements(x)=_elements(x,1)
 proc _elements(x,i:literal(int)) {
@@ -5254,6 +5310,7 @@ PM__intrinsic<<needs_type>> error_type()->(?0) : "call"
 PM__intrinsic<<is_impure>> _dump(any,any): "new_dump"
 proc PM__dump(x)<<no_inline>>:_dump("Value:",x)
 proc PM__dump(y,x)<<no_inline>>:if y:_dump("Value:",x)
+/*
 proc PM__dump%(x)<<no_inline>>{
   print("$"++here)
   _dump(string(here),x)
@@ -5265,6 +5322,7 @@ proc PM__dump%(y,x){
   test "Selection expression in ""$$dump"" not ""bool""" => fix(false)
   $$infer_type(y)
 }
+*/
 PM__intrinsic<<is_impure>> old_dump(any): "dump"
 proc old_dumpit(a) {
   old_dump(a)
@@ -5273,4 +5331,4 @@ proc old_dumpit(a) {
  
 PM__intrinsic<<is_impure>> old_dump_id(any): "dump_id"
 
-proc PM__filesys()=1
+proc PM__filesys()=1234

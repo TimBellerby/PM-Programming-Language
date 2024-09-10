@@ -54,38 +54,37 @@ module pm_symbol
   integer,parameter:: sym_ddollar = 10
   integer,parameter:: sym_comma = 11
   integer,parameter:: sym_dot = 12
-  integer,parameter:: sym_assign = 13
-  integer,parameter:: sym_underscore = 14 
-  integer,parameter:: sym_open_attr = 15
-  integer,parameter:: sym_close_attr = 16
-  integer,parameter:: sym_query = 17
-  integer,parameter:: sym_arrow = 18
-  integer,parameter:: sym_pct = 19
-  integer,parameter:: sym_pling = 20
-  integer,parameter:: sym_dash = 21
-  integer,parameter:: sym_caret = 22
-  integer,parameter:: sym_dcaret = 23
-  integer,parameter:: sym_dcolon = 24
-  integer,parameter:: sym_damp = 25
-  integer,parameter:: sym_define = 26
-  integer,parameter:: sym_cond = 27
-  integer,parameter:: sym_string = 28
-  integer,parameter:: sym_number = 29
+  integer,parameter:: sym_underscore = 13 
+  integer,parameter:: sym_open_attr = 14
+  integer,parameter:: sym_close_attr = 15
+  integer,parameter:: sym_query = 16
+  integer,parameter:: sym_arrow = 17
+  integer,parameter:: sym_pct = 18
+  integer,parameter:: sym_pling = 19
+  integer,parameter:: sym_dash = 20
+  integer,parameter:: sym_caret = 21
+  integer,parameter:: sym_dcaret = 22
+  integer,parameter:: sym_dcolon = 23
+  integer,parameter:: sym_assign = 24
+  integer,parameter:: sym_cond = 25
+  integer,parameter:: sym_string = 26
+  integer,parameter:: sym_number = 27
 
   ! Operators
   integer,parameter:: sym1 = sym_number
   integer,parameter:: sym_open = sym1 + 1
   integer,parameter:: sym_close = sym1 + 2
-  integer,parameter:: sym_le = sym1 + 3
-  integer,parameter:: sym_lt = sym1 + 4
-  integer,parameter:: sym_ustar = sym1 + 5
-  integer,parameter:: sym_uhash = sym1 + 6
+  integer,parameter:: sym_open_smiley = sym1 + 3
+  integer,parameter:: sym_close_smiley = sym1 + 4
+  integer,parameter:: sym_le = sym1 + 5
+  integer,parameter:: sym_lt = sym1 + 6
+  integer,parameter:: sym_ustar = sym1 + 7
+  integer,parameter:: sym_uhash = sym1 + 8
   
-  integer,parameter:: sym_from_range = sym1 + 7
-  integer,parameter:: first_operator = sym_from_range
-  integer,parameter:: sym_to_range = sym1 + 8
-  integer,parameter:: sym2 = sym_to_range
+  integer,parameter:: sym2 = sym_uhash
+  
   integer,parameter:: sym_concat = sym2 + 1
+  integer,parameter:: first_operator = sym_concat
   integer,parameter:: sym_eq = sym2 + 2
   integer,parameter:: sym_ne = sym2 + 3
   integer,parameter:: sym_ge = sym2 + 4
@@ -107,56 +106,46 @@ module pm_symbol
   integer,parameter:: sym_not_in = first_key + 2
   integer,parameter:: sym_and = first_key + 3
   integer,parameter:: sym_or = first_key + 4
-  integer,parameter:: sym_xor = first_key + 5
-  integer,parameter:: sym_shift = first_key + 6
-  integer,parameter:: sym_fmt = first_key + 7
-  integer,parameter:: sym_by = first_key + 8
-  integer,parameter:: sym_mod = first_key + 9
-  integer,parameter:: sym_div = first_key + 10
-  integer,parameter:: sym_except = first_key + 11
-  integer,parameter:: sym_includes = first_key + 12
-  integer,parameter:: sym_not_includes = first_key + 13
-  integer,parameter:: sym_ortho = first_key + 14
-  integer,parameter:: sym_is = first_key + 15
-  integer,parameter:: sym_is_not = first_key + 16 
-  integer,parameter:: sym_as = first_key + 17
+  integer,parameter:: sym_shift = first_key + 5
+  integer,parameter:: sym_fmt = first_key + 6
+  integer,parameter:: sym_by = first_key + 7
+  integer,parameter:: sym_mod = first_key + 8
+  integer,parameter:: sym_div = first_key + 9
+  integer,parameter:: sym_except = first_key + 10
+  integer,parameter:: sym_includes = first_key + 11
+  integer,parameter:: sym_not_includes = first_key + 12
+  integer,parameter:: sym_ortho = first_key + 13
+  integer,parameter:: sym_is = first_key + 14
+  integer,parameter:: sym_is_not = first_key + 15 
+  integer,parameter:: sym_as = first_key + 16
 
   ! Unary operators 
-  integer,parameter:: sym_not = first_key + 18
+  integer,parameter:: sym_not = first_key + 17
   integer,parameter:: last_operator = sym_not
 
   ! Statement / expression general keywords
   integer,parameter:: sym_null = last_operator + 1
-  integer,parameter:: sym_key = last_operator + 2
-  integer,parameter:: sym_arg = last_operator + 3
-  integer,parameter:: sym_true = last_operator + 4
-  integer,parameter:: sym_false = last_operator + 5
-  integer,parameter:: sym_struct = last_operator + 6
-  integer,parameter:: sym_rec = last_operator + 7
-  integer,parameter:: sym_any = last_operator + 8
-  integer,parameter:: sym_present = last_operator + 9
-  integer,parameter:: sym_unique = last_operator + 10
-  integer,parameter:: sym_fix = last_operator + 11
-  integer,parameter:: sym_new = last_operator + 12
-  integer,parameter:: sym_of = last_operator + 13
-  integer,parameter:: sym_bounds = last_operator + 14
-  integer,parameter:: last_expr = sym_bounds
+  integer,parameter:: sym_true = last_operator + 2
+  integer,parameter:: sym_false = last_operator + 3
+  integer,parameter:: sym_struct = last_operator + 4
+  integer,parameter:: sym_rec = last_operator + 5
+  integer,parameter:: sym_any = last_operator + 6
+  integer,parameter:: sym_present = last_operator + 7
+  integer,parameter:: sym_unique = last_operator + 8
+  integer,parameter:: sym_fix = last_operator + 9
+  integer,parameter:: sym_new = last_operator + 10
+  integer,parameter:: sym_when = last_operator + 11
+  integer,parameter:: last_expr = sym_when
   integer,parameter:: last_word = last_expr
 
   ! Modes
-  
-  
   integer,parameter:: sym_private  =      last_word + 1
   integer,parameter:: first_mode = sym_private
-  integer,parameter:: sym_invar    =      last_word + 2
-  integer,parameter:: sym_complete =      last_word + 3
-  integer,parameter:: sym_universal=      last_word + 4
-  integer,parameter:: sym_local    =      last_word + 5
-  integer,parameter:: sym_partial  =      last_word + 6
-  integer,parameter:: sym_coherent =      last_word + 7
-  integer,parameter:: sym_chan     =      last_word + 8
-  integer,parameter:: sym_mirrored =      last_word + 9
-  integer,parameter:: sym_shared   =      last_word + 10
+  integer,parameter:: sym_chan     =      last_word + 2
+  integer,parameter:: sym_local    =      last_word + 3
+  integer,parameter:: sym_joint     =     last_word + 4
+  integer,parameter:: sym_invar    =      last_word + 5
+  integer,parameter:: sym_shared   =      last_word + 6
   integer,parameter:: last_mode =         sym_shared
   integer,parameter:: last_key =          sym_shared
   
@@ -189,7 +178,7 @@ module pm_symbol
   integer,parameter:: sym_return = last_decl + 14
   integer,parameter:: sym_also = last_decl + 15
   integer,parameter:: sym_do = last_decl + 16
-  integer,parameter:: sym_nhd = last_decl + 17
+  integer,parameter:: sym_yield = last_decl + 17
   integer,parameter:: sym_test = last_decl + 18
   integer,parameter:: sym_default = last_decl + 19
   integer,parameter:: sym_task = last_decl + 20
@@ -226,13 +215,15 @@ module pm_symbol
   integer,parameter:: sym_pm_dref_shared_slice = last_resv + 11
   integer,parameter:: sym_pm_dref_here = last_resv + 12
   integer,parameter:: sym_pm_ref = last_resv + 13
-  integer,parameter:: sym_pm_head_node = last_resv + 14
-  integer,parameter:: sym_pm_do_at = last_resv + 15
-  integer,parameter:: sym_pm_do = last_resv + 16
-  integer,parameter:: sym_pm_intrinsic = last_resv + 17
-  integer,parameter:: sym_pm_if_compiling = last_resv + 18
-  integer,parameter:: sym_pm_else = last_resv + 19
-  integer,parameter:: sym_pm_endif = last_resv + 20
+  integer,parameter:: sym_pm_dref_any = last_resv + 14 
+  integer,parameter:: sym_pm_dref_any_slice = last_resv + 15
+  integer,parameter:: sym_pm_head_node = last_resv + 16
+  integer,parameter:: sym_pm_do_at = last_resv + 17
+  integer,parameter:: sym_pm_do = last_resv + 18
+  integer,parameter:: sym_pm_intrinsic = last_resv + 19
+  integer,parameter:: sym_pm_if_compiling = last_resv + 20
+  integer,parameter:: sym_pm_else = last_resv + 21
+  integer,parameter:: sym_pm_endif = last_resv + 22
   integer,parameter:: last_stmt = sym_pm_endif
   integer,parameter:: num_sym = last_stmt
 
@@ -324,9 +315,11 @@ module pm_symbol
   integer,parameter:: sym_nested_loop = node0 + 45
   integer,parameter:: sym_assign_list = node0 + 46
   integer,parameter:: sym_case_range = node0 + 47
+  integer,parameter:: sym_dot_call = node0 + 48
+  integer,parameter:: sym_key = node0 + 49
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 48
+  integer,parameter:: hook = node0 + 50
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -354,7 +347,14 @@ module pm_symbol
   integer,parameter:: sym_invar_dim = hook + 24
   integer,parameter:: sym_fix_dim = hook + 25
   integer,parameter:: sym_sync_messages = hook + 26
-  integer,parameter:: hook1 = hook + 26
+  integer,parameter:: sym_block_inouts=hook + 27
+  integer,parameter:: sym_block_ins=hook + 28
+  integer,parameter:: sym_block_proc=hook + 29
+  integer,parameter:: sym_block_inouts_a=hook + 30
+  integer,parameter:: sym_block_ins_a=hook + 31
+  integer,parameter:: sym_block_proc_a=hook + 32
+  integer,parameter:: sym_elem_at_index=hook + 33
+  integer,parameter:: hook1 = hook + 33
   
   integer,parameter:: sym_d1= hook1 + 1
   integer,parameter:: sym_d2= hook1 + 2
@@ -416,24 +416,26 @@ module pm_symbol
   integer,parameter:: sym_shared_to_local = hook4 + 3
   integer,parameter:: sym_clone = hook4 + 4
   integer,parameter:: sym_contains = hook4 + 5
-  integer,parameter:: sym_this = hook4 + 6
+  integer,parameter:: sym_mask = hook4 + 6
   integer,parameter:: sym_here = hook4 + 7
   integer,parameter:: sym_here_in_tile = hook4 + 8
   integer,parameter:: sym_subregion = hook4 + 9
   integer,parameter:: sym_region = hook4 + 10
-  integer,parameter:: sym_distr_tag = hook4 + 11
-  integer,parameter:: sym_tag = hook4 + 12
-  integer,parameter:: sym_varray= hook4 + 13
-  integer,parameter:: sym_map_array= hook4 + 14
-  integer,parameter:: sym_map_varray= hook4 + 15
-  integer,parameter:: sym_get_val_ref = hook4 + 16
-  integer,parameter:: sym_local_distr = hook4 + 17
-  integer,parameter:: sym_pm_chan = hook4 + 18
-  integer,parameter:: sym_get_chan = hook4 + 19
-  integer,parameter:: sym_pm_local = hook4 + 20
-  integer,parameter:: sym_casts_to = hook4 + 21
-  integer,parameter:: sym_combine_indices = hook4 + 22
-  integer,parameter:: hook5 = hook4 + 22
+  integer,parameter:: sym_outer = hook4 + 11
+  integer,parameter:: sym_topology = hook4 + 12
+  integer,parameter:: sym_distr_tag = hook4 + 13
+  integer,parameter:: sym_tag = hook4 + 14
+  integer,parameter:: sym_varray= hook4 + 15
+  integer,parameter:: sym_map_array= hook4 + 16
+  integer,parameter:: sym_map_varray= hook4 + 17
+  integer,parameter:: sym_get_val_ref = hook4 + 18
+  integer,parameter:: sym_local_distr = hook4 + 19
+  integer,parameter:: sym_pm_chan = hook4 + 20
+  integer,parameter:: sym_get_chan = hook4 + 21
+  integer,parameter:: sym_pm_local = hook4 + 22
+  integer,parameter:: sym_casts_to = hook4 + 23
+  integer,parameter:: sym_combine_indices = hook4 + 24
+  integer,parameter:: hook5 = hook4 + 24
   
   integer,parameter:: sym_pm_ref_type =   hook5 + 1
   integer,parameter:: sym_pling_local =   hook5 + 2
@@ -500,7 +502,6 @@ module pm_symbol
   data sym_names(sym_ddollar)          /'$$'/
   data sym_names(sym_comma)            /','/
   data sym_names(sym_dot)              /'.'/
-  data sym_names(sym_assign)           /':='/
   data sym_names(sym_underscore)       /'_'/
   data sym_names(sym_open_attr)        /'<<'/
   data sym_names(sym_close_attr)       /'>>'/
@@ -512,8 +513,7 @@ module pm_symbol
   data sym_names(sym_caret)            /'^'/
   data sym_names(sym_dcaret)           /'^^'/
   data sym_names(sym_dcolon)           /'::'/
-  data sym_names(sym_damp)             /'&&'/
-  data sym_names(sym_define)           /'='/
+  data sym_names(sym_assign)           /'='/
   data sym_names(sym_cond)             /'=>'/
   
   data sym_names(sym_string)           /'<string>'/
@@ -522,13 +522,12 @@ module pm_symbol
   ! Operators
   data sym_names(sym_open)             /'('/
   data sym_names(sym_close)            /')'/
+  data sym_names(sym_open_smiley)      /'(:'/
+  data sym_names(sym_close_smiley)     /':)'/
   data sym_names(sym_le)               /'<='/
   data sym_names(sym_lt)               /'<'/
   data sym_names(sym_ustar)            /'unary *'/
 
-  
-  data sym_names(sym_from_range)       /'_...'/
-  data sym_names(sym_to_range)         /'..._'/
   data sym_names(sym_concat)           /'++'/
   data sym_names(sym_eq)               /'=='/
   data sym_names(sym_ne)               /'/='/
@@ -549,7 +548,6 @@ module pm_symbol
   data sym_names(sym_not_in)           /'notin'/
   data sym_names(sym_and)              /'and'/
   data sym_names(sym_or)               /'or'/
-  data sym_names(sym_xor)              /'xor'/
   data sym_names(sym_shift)            /'shift'/
   data sym_names(sym_fmt)              /'fmt'/
   data sym_names(sym_by)               /'by'/
@@ -566,8 +564,6 @@ module pm_symbol
 
   ! Statement / expression general keywords
   data sym_names(sym_null)             /'null'/
-  data sym_names(sym_key)              /'key'/
-  data sym_names(sym_arg)              /'arg'/
   data sym_names(sym_true)             /'true'/
   data sym_names(sym_false)            /'false'/
   data sym_names(sym_struct)           /'struct'/
@@ -577,20 +573,14 @@ module pm_symbol
   data sym_names(sym_unique)           /'unique'/
   data sym_names(sym_fix)              /'fix'/
   data sym_names(sym_new)              /'new'/
-  data sym_names(sym_bounds)           /'bounds'/
-  data sym_names(sym_of)               /'of'/
+  data sym_names(sym_when)             /'when'/
   
   data sym_names(sym_private)          /'priv'/
-  data sym_names(sym_invar)            /'invar'/
-  data sym_names(sym_complete)         /'complete'/
-  data sym_names(sym_universal)        /'universal'/
-  data sym_names(sym_local)            /'local'/
-  
-  data sym_names(sym_partial)          /'partial'/
-  data sym_names(sym_coherent)         /'coherent'/
   data sym_names(sym_chan)             /'chan'/
-  data sym_names(sym_mirrored)         /'uniform'/
-  data sym_names(sym_shared)           /'shared'/
+  data sym_names(sym_local)            /'lcl'/
+  data sym_names(sym_joint)            /'jnt'/
+  data sym_names(sym_invar)            /'invar'/
+  data sym_names(sym_shared)           /'shrd'/
 
   ! Declaration keywords
   data sym_names(sym_package)          /'package'/
@@ -617,7 +607,7 @@ module pm_symbol
   data sym_names(sym_while)            /'while'/
   data sym_names(sym_return)           /'return'/
   data sym_names(sym_do)               /'do'/
-  data sym_names(sym_nhd)              /'nhd'/
+  data sym_names(sym_yield)            /'yield'/
   data sym_names(sym_test)             /'test'/
   data sym_names(sym_default)          /'default'/
   data sym_names(sym_task)             /'task'/
@@ -651,6 +641,8 @@ module pm_symbol
   data sym_names(sym_pm_dref_shared_slice) /'PM__dref_is'/
   data sym_names(sym_pm_dref_here)     /'PM__drefhere'/
   data sym_names(sym_pm_ref)           /'PM__ref'/
+  data sym_names(sym_pm_dref_any)      /'PM__anyref'/
+  data sym_names(sym_pm_dref_any_slice)  /'PM__anyref_s'/
   data sym_names(sym_pm_head_node)     /'PM__head_node'/
   data sym_names(sym_pm_do_at)         /'PM__do_at'/
   data sym_names(sym_pm_do)            /'PM__do'/
@@ -743,6 +735,8 @@ module pm_symbol
   data sym_names(sym_nested_loop)      /'PM__nested_loop'/
   data sym_names(sym_assign_list)      /'<assign-list>'/
   data sym_names(sym_case_range)       /'PM__caserange'/
+  data sym_names(sym_dot_call)         /'<dot-call>'/
+  data sym_names(sym_key)              /'<key>'/
   
   ! Misc. symbols referenced by compiler
   
@@ -772,6 +766,14 @@ module pm_symbol
   data sym_names(sym_invar_dim)        /'PM__invar_dim'/
   data sym_names(sym_fix_dim)          /'PM__fix_dim'/
   data sym_names(sym_sync_messages)    /'PM__sync_messages'/
+  data sym_names(sym_block_inouts)     /'PM__inouts'/
+  data sym_names(sym_block_ins)        /'PM__ins'/
+  data sym_names(sym_block_proc)       /'PM__block_proc'/
+  data sym_names(sym_block_inouts_a)   /'PM__inouts_a'/
+  data sym_names(sym_block_ins_a)      /'PM__ins_a'/
+  data sym_names(sym_block_proc_a)     /'PM__block_proc_a'/
+  data sym_names(sym_elem_at_index)    /'element_at_index'/
+
   
   data sym_names(sym_d1)               /'PM__d1'/
   data sym_names(sym_d2)               /'PM__d2'/
@@ -832,11 +834,13 @@ module pm_symbol
   data sym_names(sym_shared_to_local)  /'PM__shared_to_local'/
   data sym_names(sym_clone)            /'PM__clone'/
   data sym_names(sym_contains)         /'contains'/
-  data sym_names(sym_this)             /'this'/
-  data sym_names(sym_here)             /'here'/
-  data sym_names(sym_here_in_tile)     /'here_in_tile'/
-  data sym_names(sym_subregion)        /'schedule'/
-  data sym_names(sym_region)           /'region'/
+  data sym_names(sym_mask)             /'PM__mask'/
+  data sym_names(sym_here)             /'PM__here'/
+  data sym_names(sym_here_in_tile)     /'PM__here_in_tile'/
+  data sym_names(sym_subregion)        /'PM__schedule'/
+  data sym_names(sym_region)           /'PM__region'/
+  data sym_names(sym_outer)            /'PM__outer'/
+  data sym_names(sym_topology)         /'PM__topology'/
   data sym_names(sym_distr_tag)        /'PM__distr_tag'/
   data sym_names(sym_tag)              /'PM__tag'/
   data sym_names(sym_varray)           /'PM__varray'/
@@ -1161,7 +1165,7 @@ contains
                       if(pm_fast_esize(ptr)>1) then
                          do i=2,pm_fast_esize(ptr)
                             call pm_name_string(context,ptr%data%i(ptr%offset+i),str2)
-                            str=trim(str)//''''//str2
+                            str=trim(str)//'::'//str2
                          enddo
                       endif
                    else
@@ -1169,7 +1173,7 @@ contains
                            -first,str)
                       call pm_name_string(context,&
                            second,str2)
-                      str=trim(str)//''''//str2
+                      str=trim(str)//'::'//str2
                    endif
                 else
                    if(pm_fast_esize(ptr)==1.and.ptr%data%i(ptr%offset)==sym_pm_system) then
@@ -1182,7 +1186,7 @@ contains
                          if(i==0) then
                             str=trim(str2)
                          else
-                            str=trim(str)//''''//trim(str2)
+                            str=trim(str)//'::'//trim(str2)
                          endif
                       enddo
                    endif

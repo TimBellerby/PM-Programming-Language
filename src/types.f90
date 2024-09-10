@@ -49,6 +49,10 @@ module pm_types
   integer,parameter:: pm_type_is_seq=32768
   integer,parameter:: pm_type_leaves=65536
 
+  integer,parameter:: pm_type_is_when=8192
+  integer,parameter:: pm_type_is_yield=16384
+  integer,parameter:: pm_type_is_list=32768
+
   ! Bitwise-or of flags which are not taints (only one so far)
   integer,parameter:: pm_type_flags_untainting = pm_type_has_embedded
 
@@ -189,7 +193,6 @@ module pm_types
   integer,public,parameter:: pm_string_literal_type = pm_last_category_type + 4
   integer,public,parameter:: pm_last_literal_type = pm_string_literal_type
   
- 
     
   ! Kind of dref type (internal type describing references)
   integer,public,parameter:: pm_dref_is_dot=0
@@ -715,6 +718,30 @@ contains
   end function pm_type_name
 
   !=====================================================
+  ! Is type tuple with when?
+  !==============================---===================
+  function pm_type_has_when(context,tno) result(ok)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    logical:: ok
+    type(pm_ptr):: tv
+    tv=pm_type_vect(context,tno)
+    ok=iand(pm_tv_flags(tv),pm_type_is_when)/=0
+  end function pm_type_has_when
+
+  !=====================================================
+  ! Return amp locs for tuple type
+  !==============================---===================
+  function pm_type_amp(context,tno) result(amp)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    integer:: amp
+    type(pm_ptr):: tv
+    tv=pm_type_vect(context,tno)
+    amp=pm_tv_name(tv)
+  end function pm_type_amp
+
+  !=====================================================
   ! Return name of element #n associated with type tno
   !==============================---===================
   function pm_type_elem_name(context,tno,n) result(name)
@@ -880,14 +907,14 @@ contains
     integer:: tk
     type(pm_ptr):: tv
     if(typ<=0) then
-       mode=sym_mirrored
+       mode=sym_invar
        return
     endif
     tv=pm_type_vect(context,typ)
     if(pm_tv_kind(tv)==pm_type_is_par_kind) then
        mode=iand(pm_tv_name(tv),mode_mask)
     else
-       mode=sym_coherent
+       mode=sym_private
     endif
   end function pm_type_get_mode
 
@@ -903,7 +930,7 @@ contains
     type(pm_ptr):: tv
     if(typ<=0) then
        typ2=typ
-       mode=merge(sym_coherent,sym_mirrored,typ==0)
+       mode=merge(sym_private,sym_invar,typ==0)
        return
     endif
     tv=pm_type_vect(context,typ)
@@ -911,49 +938,18 @@ contains
        mode=iand(pm_tv_name(tv),mode_mask)
        typ2=pm_tv_arg(tv,1)
     else
-       mode=sym_coherent
+       mode=sym_private
        typ2=typ
     endif
   end function pm_type_strip_mode
 
-  !==========================================================================
-  ! Strip mode information, mode, from type typ yielding unmoded type typ2
-  ! Return in cond whether mode indicates a conditional context
-  !==========================================================================
-  function pm_type_strip_mode_and_cond(context,typ,mode,cond) result(typ2)
-    type(pm_context),pointer:: context
-    integer,intent(in):: typ
-    integer,intent(out):: mode
-    logical,intent(out):: cond
-    integer:: typ2
-    integer:: tk
-    type(pm_ptr):: tv
-    if(typ<=0) then
-       typ2=typ
-       mode=merge(sym_coherent,sym_mirrored,typ==0)
-       cond=.false.
-       return
-    endif
-    tv=pm_type_vect(context,typ)
-    if(pm_tv_kind(tv)==pm_type_is_par_kind) then
-       mode=pm_tv_name(tv)
-       typ2=pm_tv_arg(tv,1)
-       cond=mode==sym_partial
-    else
-       mode=sym_coherent
-       typ2=typ
-       cond=.false.
-    endif
-  end function pm_type_strip_mode_and_cond
-
   !=============================================
   ! Add mode information to an unmoded type
   !=============================================
-  function pm_type_add_mode(context,typ,mode,iscond,istyp) result(typ2)
+  function pm_type_add_mode(context,typ,mode,istype) result(typ2)
     type(pm_context),pointer:: context
     integer,intent(in):: typ,mode
-    logical,intent(in):: iscond
-    logical,intent(in),optional:: istyp
+    logical,intent(in),optional:: istype
     integer:: typ2,mode2,typ3
     integer:: array(3)
     if(typ<0) then
@@ -961,28 +957,28 @@ contains
        return
     endif
     typ3=pm_type_strip_mode(context,typ,mode2)
-    if(mode2/=sym_coherent) then
-       write(*,*) trim(sym_names(mode2))
-       call pm_panic('add-mode to moded type')
+    if(pm_debug_checks) then
+       if(mode2/=sym_private) then
+          write(*,*) trim(sym_names(mode2))
+          call pm_panic('add-mode to moded type')
+       endif
     endif
-    if(mode==sym_coherent.and..not.(iscond.or.present(istyp))) then
+    if(mode==sym_private.and..not.present(istype)) then
        typ2=typ
     else
        array(1)=pm_type_new_par_kind
-       array(2)=merge(sym_partial,mode,iscond)
+       array(2)=mode
        array(3)=typ
        typ2=pm_new_type(context,array)
     endif
   end function pm_type_add_mode
 
-
   !========================================================
   ! Replace mode information in a (possibly) moded type
   !========================================================
-  function pm_type_replace_mode(context,typ1,mode,iscond) result(typ2)
+  function pm_type_replace_mode(context,typ1,mode) result(typ2)
     type(pm_context),pointer:: context
     integer,intent(in):: typ1,mode
-    logical,intent(in):: iscond
     integer:: typ2
     integer:: array(3),typ
     type(pm_ptr):: tv
@@ -997,11 +993,11 @@ contains
     else
        typ=typ1
     endif
-    if(mode==sym_coherent.and..not.iscond) then
+    if(mode==sym_private) then
        typ2=typ
     else
        array(1)=pm_type_new_par_kind
-       array(2)=merge(sym_partial,mode,iscond)
+       array(2)=mode
        array(3)=typ
        typ2=pm_new_type(context,array)
     endif
@@ -1022,7 +1018,7 @@ contains
     logical,intent(in):: shared_ok
     integer:: combined_mode
     integer:: i,mode,cmode,tno
-    cmode=sym_mirrored
+    cmode=sym_invar
     do i=1,size(array)
        tno=pm_type_strip_mode(context,array(i),mode)
        if(mode==sym_shared.and..not.shared_ok) then
@@ -1033,31 +1029,43 @@ contains
        endif
        cmode=min(cmode,mode)
     enddo
-    if(cmode==sym_chan) cmode=sym_coherent
+    if(cmode==sym_chan) cmode=sym_private
     combined_mode=cmode
   end function pm_type_combine_modes
 
+ !=====================================================================
+ ! Rules for mixing modes in a list or reference
+ !=====================================================================
+  function pm_type_mix_modes(context,array) result(mixed_mode)
+    type(pm_context),pointer:: context
+    integer,intent(in),dimension(:):: array
+    integer:: mixed_mode
+    integer:: i,mode,cmax,cmin,tno
+    cmax=sym_private
+    cmin=sym_shared
+    do i=1,size(array)
+       tno=pm_type_strip_mode(context,array(i),mode)
+       cmin=min(cmin,mode)
+       cmax=max(cmax,mode)
+    enddo
+    if(cmin>sym_joint) then
+       mixed_mode=cmin
+    elseif(cmax>=sym_joint) then
+       mixed_mode=sym_joint
+    elseif(cmin==sym_local) then
+       mixed_mode=sym_local
+    else
+       mixed_mode=sym_private
+    endif
+  end function pm_type_mix_modes
+  
   !===================================
   ! Does mode1 include mode2 ?
   !===================================
   function pm_mode_includes(mode1,mode2) result(ok)
     integer,intent(in):: mode1,mode2
     logical:: ok
-    if(mode1==mode2) then
-       ok=.true.
-    elseif(mode1==sym_private) then
-       ok=mode2>=sym_partial.and.mode2<sym_mirrored
-    elseif(mode1==sym_invar) then
-       ok=mode2>=sym_mirrored
-    elseif(mode1==sym_complete) then
-       ok=mode2>sym_partial.and.mode2<sym_mirrored
-    elseif(mode1==sym_universal) then
-       ok=mode2/=sym_partial
-    elseif(mode1==sym_local) then
-       ok=mode2/=sym_shared
-    else
-       ok=.false.
-    endif
+    ok=mode1==mode2
   end function pm_mode_includes
 
   !==========================================
@@ -1074,45 +1082,6 @@ contains
   end function pm_mode_compatable
 
   
-  !===================================================
-  ! Convert mode2 to mode1
-  ! Returns -1 if conversion never possible 
-  !         -2 if conversion not possible
-  !            in a conditional context
-  !===================================================
-  function pm_type_convert_mode(mode1,mode2,iscond) result(mode3)
-    integer,intent(in):: mode1,mode2
-    logical,intent(in):: iscond
-    integer:: mode3
-    mode3=-1
-    if(mode1==mode2) then
-       mode3=mode2
-       return
-    else
-       select case(mode1)
-       case(sym_private)
-          mode3=merge(sym_partial,sym_coherent,iscond)
-       case(sym_invar)
-          if(mode2>=sym_mirrored) mode3=mode2
-          if(iscond) mode3=-2
-       case(sym_complete)
-          mode3=mode1
-          if(mode1/=mode2.and.iscond) mode3=-2
-       case(sym_partial)
-          mode3=mode1
-       case(sym_coherent)
-          mode3=mode1
-          if(mode1/=mode2.and.iscond) mode3=-2
-       case(sym_mirrored)
-          if(mode2>=sym_mirrored) mode3=mode1
-          if(mode1/=mode2.and.iscond) mode3=-2
-       case(sym_shared)
-          if(mode2>=sym_mirrored) mode3=mode1
-          if(mode1/=mode2.and.iscond) mode3=-2
-       end select
-    endif
-  end function pm_type_convert_mode
-
   !==========================================================
   ! Remove both mode information and internal vector type
   !==========================================================
@@ -1536,6 +1505,12 @@ contains
           ok=.false.
        elseif(pm_tv_name(t)/=pm_tv_name(u)) then
           ok=.false.
+       elseif(iand(pm_tv_flags(t),pm_type_is_when)/=0.and.iand(pm_tv_flags(u),pm_type_is_when)==0) then
+          !(  when) does not include (  )
+          ok=.false.
+       elseif(iand(pm_tv_flags(t),pm_type_is_yield+pm_type_is_list)/=&
+            iand(pm_tv_flags(u),pm_type_is_yield+pm_type_is_list)) then
+          ok=.false.
        else
           nt=pm_tv_numargs(t)
           nu=pm_tv_numargs(u)
@@ -1685,7 +1660,7 @@ contains
     case(pm_type_is_par_kind)
        ! Most cases catered for by uk switch - remaining case
        ok=iand(mode,pm_type_incl_val)/=0.and.&
-            pm_mode_includes(pm_tv_name(t),sym_coherent).and.&
+            pm_mode_includes(pm_tv_name(t),sym_private).and.&
             pm_test_type_includes(context,pm_tv_arg(t,1),q,&
             mode,einfo,params,base,user,ubase)
     case(pm_type_is_undef_result)
@@ -2151,7 +2126,7 @@ contains
        endif
        call push(pm_type_new_dref)
        call push(name)
-       call push(pm_type_add_mode(context,etype,mode,.false.))
+       call push(pm_type_add_mode(context,etype,mode))
        call push(tno)
        do i=3,pm_tv_numargs(tv)
           call push(pm_tv_arg(tv,i))
@@ -2625,12 +2600,13 @@ contains
     endif
   end function  pm_type_as_string
 
-  recursive subroutine pm_type_to_string(context,typno,str,n,distr,tuple,noequiv)
+  recursive subroutine pm_type_to_string(context,typno,str,n,distr,tuple,noequiv,tuple_start)
     type(pm_context),pointer:: context
     integer,intent(in):: typno
     character(len=256),intent(inout):: str
     integer,intent(inout):: n
     logical,intent(in),optional:: distr,tuple,noequiv
+    integer,intent(in),optional:: tuple_start
     type(pm_ptr):: tv,tv2,nv,nv2
     integer:: tk,narg,tno2
     integer:: name,name2
@@ -2731,7 +2707,13 @@ contains
           endif
        endif
     case(pm_type_is_tuple,pm_type_is_vtuple)
-       if(add_char('(')) return
+       istart=1
+       if(present(tuple_start)) istart=tuple_start
+       if(iand(pm_tv_flags(tv),pm_type_is_list)/=0) then
+          if(add_char('(:')) return
+       else
+          if(add_char('(')) return
+       endif
        narg=pm_tv_numargs(tv)
        if(narg==0) then
           if(add_char(')')) return
@@ -2740,7 +2722,7 @@ contains
        if(pm_tv_name(tv)/=0) then
           amps=pm_name_val(context,pm_tv_name(tv))
           j=0
-          do i=1,narg-1
+          do i=istart,narg-1
              if(amps%data%i(amps%offset+j)==i) then
                 j=j+1
                 if(add_char('&')) return
@@ -2753,7 +2735,7 @@ contains
           endif
           call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n)
        else
-          do i=1,narg-1
+          do i=istart,narg-1
              call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
              if(add_char(',')) return
           enddo
@@ -2762,7 +2744,14 @@ contains
        if(tk==pm_type_is_vtuple) then
           if(add_char('...')) return
        endif
-       if(add_char(')')) return
+       if(iand(pm_tv_flags(tv),pm_type_is_when)/=0) then
+          if(add_char(' when')) return
+       endif
+       if(iand(pm_tv_flags(tv),pm_type_is_list)/=0) then
+          if(add_char(':)')) return
+       else
+          if(add_char(')')) return
+       endif
     case(pm_type_is_struct,pm_type_is_rec)
        nv=pm_name_val(context,pm_tv_name(tv))
        name=nv%data%i(nv%offset)
@@ -2974,10 +2963,25 @@ contains
        name=pm_tv_name(tv)
        if(name/=sym_proc) then
           if(add_char(trim(pm_name_as_string(context,name)))) return
+          istart=7
+       else
+          istart=2
        endif
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       do i=1,istart
+          if(pm_type_arg(context,pm_tv_arg(tv,1),i)/=0) then
+             if(add_char('^')) return
+             istart=1
+             exit
+          endif
+       enddo
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,tuple_start=istart)
        if(add_char('->')) return
        call pm_type_to_string(context,pm_tv_arg(tv,2),str,n)
+       if(iand(pm_tv_flags(tv),pm_type_is_yield)/=0) then
+          if(add_char('yield(')) return
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+          if(add_char(')')) return
+       endif
     case(pm_type_is_undef_result)
        name=pm_tv_name(tv)
        if(add_char('(')) return
