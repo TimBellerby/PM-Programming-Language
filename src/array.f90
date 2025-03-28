@@ -65,7 +65,9 @@ module pm_array
 
 contains
 
+  !=============================================================================
   ! Zero any unused (according to ve) elements of vector of long ints
+  !=============================================================================
   function vector_zero_unused(context,v,ve,zero) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ve
@@ -100,12 +102,14 @@ contains
     include 'fvkind.inc'
   end function vector_zero_unused
 
+  !=============================================================================
   ! Make an array, or vector of arrays
   ! Defined by four vectors:
   !  vec - vector of vectors of elements (for all arrays in array vector)
   !  dom - vector of array domain values 
   !  len - vector of array lengths (num's of elements)
   !  off - vector giving offset of first element of each array in vec
+  !=============================================================================
   function make_array(context,akind,typno,vec,dom,len,off) result(ptr)
     type(pm_context),pointer:: context
     integer(pm_p),intent(in):: akind
@@ -126,7 +130,9 @@ contains
     include 'ftypeno.inc'
   end function make_array
 
-  ! LHS value for single array element <array[index]> !!! Needs to use ve
+  !=============================================================================
+  ! LHS value for single array element <array[index]> 
+  !=============================================================================
   function make_elem_ref(context,array,aindex,ve,errno) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: array,aindex,ve
@@ -193,7 +199,9 @@ contains
     include 'fesize.inc'
   end function make_elem_ref
 
+  !=============================================================================
   ! Dereference an array element LHS reference <array[index]>
+  !=============================================================================
   function get_elem_ref(context,p,esize,errno) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: p
@@ -219,7 +227,9 @@ contains
     include 'ftypeof.inc'
   end function get_elem_ref
 
+  !=============================================================================
   ! Get element from reference to struct/rec <array[index]>.n
+  !=============================================================================
   function elem_ref_get_struct_elem(context,v,n,esize) result(w)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
@@ -252,7 +262,9 @@ contains
     include 'fnewnc.inc'
   end function elem_ref_get_struct_elem
 
+  !=============================================================================
   ! Return domain of an array / reference to array
+  !=============================================================================
   function array_dom(context,v,esize) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
@@ -289,7 +301,9 @@ contains
     include 'ftypeof.inc'
   end function array_dom
 
-  ! Return size of an array
+  !=============================================================================
+  ! Return size of an array or reference to array
+  !=============================================================================
   function array_size(context,v,esize) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
@@ -325,9 +339,11 @@ contains
     include 'ftypeof.inc'
   end function array_size
 
+  !=============================================================================
   ! Make an array with j elements having intial value val
   ! domain dom
   ! (vector inputs yield vector of arrays)
+  !=============================================================================
   function make_array_dim(context,typno,val,dom,j,ve) result(ptr)
     type(pm_context),pointer:: context
     integer,intent(in):: typno
@@ -357,10 +373,12 @@ contains
     include 'fisnull.inc'
     include 'fesize.inc'
   end function make_array_dim
-  
+
+  !=============================================================================
   ! Make an array with j elements having intial value val
   ! domain dom
   ! (vector inputs yield vector of arrays)
+  !=============================================================================
   function make_array_vdim(context,typno,val,dom,j,ve) result(ptr)
     type(pm_context),pointer:: context
     integer,intent(in):: typno
@@ -389,7 +407,9 @@ contains
     include 'fesize.inc'
   end function make_array_vdim
 
+  !=============================================================================
   ! Create array with same elements (by ref) but new domain
+  !=============================================================================
   function array_redim(context,tno,array,dom) result(ptr)
     type(pm_context),pointer:: context
     integer,intent(in):: tno
@@ -403,7 +423,9 @@ contains
          array%data%ptr(array%offset+pm_array_offset))
   end function array_redim
 
+  !=============================================================================
   ! Build array from vector of values
+  !=============================================================================
   function make_array_from_vect(context,typno,vec,dom,esize,import_vec) result(ptr)
     type(pm_context),pointer:: context
     integer,intent(in):: typno
@@ -438,7 +460,9 @@ contains
     include 'fesize.inc'
   end function make_array_from_vect
 
+  !=============================================================================
   ! Number of elements-1 in vector of arrays
+  !=============================================================================
   function array_vector_esize(array) result(size)
     type(pm_ptr),intent(in):: array
     integer(pm_ln):: size
@@ -447,7 +471,9 @@ contains
     include 'fesize.inc'
   end function array_vector_esize
 
+  !=============================================================================
   ! Size-1 of a vector
+  !=============================================================================
   recursive function vector_esize(v) result(esize)
     type(pm_ptr),intent(in):: v
     integer(pm_ln):: esize
@@ -456,7 +482,7 @@ contains
     select case(tno)
     case(pm_array_type,pm_const_array_type)
        esize=vector_esize(v%data%ptr(v%offset+pm_array_length))
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        esize=vector_esize(v%data%ptr(v%offset+2_pm_p))
     case default
        esize=pm_fast_esize(v)
@@ -466,7 +492,9 @@ contains
     include 'fesize.inc'
   end function vector_esize
 
+  !=============================================================================
   ! Number of leaves in a vector
+  !=============================================================================
   recursive function vector_num_leaves(v) result(n)
     type(pm_ptr),intent(in):: v
     integer:: n
@@ -475,7 +503,7 @@ contains
     select case(tno)
     case(pm_array_type,pm_const_array_type)
        n=vector_num_leaves(v%data%ptr(v%offset+pm_array_vect))+pm_array_size-3
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        n=0
        do i=2,pm_fast_esize(v)
           n=n+vector_num_leaves(v%data%ptr(v%offset+i))
@@ -487,8 +515,10 @@ contains
     include 'ftypeof.inc'
     include 'fesize.inc'
   end function vector_num_leaves
-  
+
+  !=============================================================================
   ! Return array element value for given index
+  !=============================================================================
   function array_index(context,array,index,ve,esize,errno) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: array,index,ve
@@ -556,6 +586,10 @@ contains
     include 'fisnull.inc'
   end function array_index
 
+  !=============================================================================
+  ! Return array element value for given index
+  ! - does the work p=array[idx] with array defined by <v,offset>
+  !=============================================================================
   recursive subroutine array_vect_index(context,p,v,idx,offset,esize)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: p,v,idx,offset
@@ -600,7 +634,7 @@ contains
              off%data%ln(off%offset+i)=0_pm_ln
           endif
        enddo
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        root=>pm_add_root(context,pm_null_obj)
        do j=2,pm_fast_esize(p)
           root%ptr=pm_new(context,pm_pointer,esize+1_pm_ln)
@@ -727,7 +761,9 @@ contains
     include 'fesize.inc'
   end subroutine array_vect_index
 
+  !=============================================================================
   ! Set array element at given index to given value (e)
+  !=============================================================================
   subroutine array_set_index(context,array,index,e,ve,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: array,index,e,ve
@@ -786,6 +822,10 @@ contains
     include 'ftypeof.inc'
   end subroutine  array_set_index
 
+  !=============================================================================
+  ! Set array element
+  ! - does the work array[idx]=p with array defined by <v,offset>
+  !=============================================================================
   recursive subroutine array_vect_set_index(context,v,idx,offset,p,esize,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: p,v,idx,offset
@@ -822,7 +862,7 @@ contains
                   p,i,errno)
           endif
        enddo
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        root=>pm_add_root(context,pm_null_obj)
        do j=2,pm_fast_esize(p)
           root%ptr=pm_new(context,pm_pointer,esize+1_pm_ln)
@@ -961,6 +1001,9 @@ contains
     include 'fesize.inc'
   end subroutine array_vect_set_index
 
+  !=============================================================================
+  ! Pack array v 
+  !=============================================================================
   function array_pack(context,v,t,m,n,d) result(ptr)
     type(pm_context),pointer:: context
     integer:: t
@@ -989,6 +1032,10 @@ contains
     include 'fesize.inc'
   end function array_pack
 
+  !=============================================================================
+  ! Pack array v using boolean vector m
+  ! !!! Incomplete
+  !=============================================================================
   recursive function vector_pack(context,v,m,n) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,m
@@ -1017,7 +1064,7 @@ contains
             int(v%data%ptr(v%offset+pm_array_typeof)%offset),&
             vv,dv,lv,ov)
        call pm_delete_register(context,reg)
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        reg=>pm_register(context,'vpack2',vv)
        vv=pm_fast_new(context,pm_usr,int(pm_fast_esize(v),pm_p))
        vv%data%ptr(vv%offset)=v%data%ptr(v%offset)
@@ -1043,6 +1090,7 @@ contains
        ptr%data%i(ptr%offset:ptr%offset+esize)=&
             pack(v%data%i(v%offset:v%offset+esize2),&
             m%data%l(m%offset:m%offset+esize2))
+       
     end select
   contains
     include 'fesize.inc'
@@ -1050,6 +1098,9 @@ contains
     include 'fnew.inc'
   end function vector_pack
 
+  !=============================================================================
+  ! Create a new polymorphic vector  (ve must be shrunk)
+  !=============================================================================
   function poly_new(context,v,ve,esize) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ve
@@ -1076,6 +1127,10 @@ contains
     include 'fnewnc.inc'
   end function  poly_new
 
+
+  !=============================================================================
+  ! Assign polymorphic values from w into existing vector v 
+  !=============================================================================
   subroutine poly_get(context,v,w,ve,esize,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,w,ve
@@ -1110,6 +1165,9 @@ contains
     include 'fesize.inc'
   end subroutine poly_get
 
+  !=============================================================================
+  ! Return vector of bool for which polymorphic type is equal to tno
+  !=============================================================================
   function poly_check_type(context,v,tno,ve,esize) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ve
@@ -1144,13 +1202,15 @@ contains
     include 'fvkind.inc'
     include 'fesize.inc'
   end function poly_check_type
-     
+
+  !=============================================================================   
   ! Import vector using information in import_vec
   ! import_vec(0)  : esize of imported vector
   ! import_vec(1)  : offset into vector being imported
   ! import_vec(2)  : offset into element
   ! import_vec(3)  : total size of imported vector
   ! import_vec(4:) : size of each segment
+  !=============================================================================
   function import_vector(context,v,import_vec) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,import_vec
@@ -1166,8 +1226,10 @@ contains
   contains
     include 'fesize.inc'
   end function import_vector
-    
+ 
+  !=============================================================================
   ! Re-export elements of imported vector e back to v
+  !=============================================================================
   recursive subroutine export_vector(context,v,e,import_vec)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,e,import_vec
@@ -1184,7 +1246,7 @@ contains
     select case(tno)
     case(pm_array_type,pm_const_array_type)
        continue
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        do k=2,n
           call export_vector(context,&
                v%data%ptr(v%offset+k),&
@@ -1342,7 +1404,10 @@ contains
     include 'ftypeof.inc'
     include 'fesize.inc'
   end subroutine export_vector
-  
+
+  !=============================================================================
+  ! Export vector v, creating a new vector
+  !=============================================================================
   function export_vector_as_new(context,v,import_vec,ve) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,import_vec,ve
@@ -1395,8 +1460,10 @@ contains
     include 'ftypeof.inc'
   end function export_vector_as_new
 
+  !=============================================================================
   ! For any group (defined by import_vec) if any index has a true
   ! in v then set all that group true in w (else false)
+  !=============================================================================
   function vector_if_needed(context,v,import_vec) result(w)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,import_vec
@@ -1438,8 +1505,10 @@ contains
     include 'fesize.inc'
   end function vector_if_needed
 
+  !=============================================================================
   ! For any group (defined by import_vec) if any index has a true
   ! in v then next element true in w (else false)
+  !=============================================================================
   function vector_export_if_needed(context,v,import_vec) result(w)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,import_vec
@@ -1501,8 +1570,10 @@ contains
     include 'fvkind.inc'
     include 'fesize.inc'
   end function vector_export_if_needed
-  
+
+  !=============================================================================
   ! Build a vector by replicating a scalar value
+  !=============================================================================
   recursive function make_vector(context,v,j,dispv,dispj,vsize,full_copy) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,j
@@ -1562,7 +1633,7 @@ contains
             v%data%ptr(v%offset+pm_elemref_offset),&
             j,dispv,dispj,siz,full_copy))
        call pm_delete_root(context,root)
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        root=>pm_new_as_root(context,pm_usr,pm_fast_esize(v)+1_pm_ln)
        ptr=root%ptr
        ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
@@ -1714,8 +1785,10 @@ contains
     include 'fesize.inc'
   end function make_vector
 
+  !=============================================================================
   ! Make a copy of a vector
   ! size==-1 means use source size
+  !=============================================================================
   recursive function copy_vector(context,v,ve,start,size) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ve
@@ -1803,7 +1876,10 @@ contains
     include 'ftypeof.inc'
     include 'ftiny.inc'
   end function copy_vector
-  
+
+  !=============================================================================
+  !  Copy a distributed reference
+  !=============================================================================
   recursive function copy_dref(context,v,size,same_proc,ve) result(w)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
@@ -1853,7 +1929,10 @@ contains
   contains
     include 'ftypeof.inc'
   end function copy_dref
-  
+
+  !=============================================================================
+  ! Array assignment of lhs(ix) <- rhs(iy)
+  !=============================================================================
   subroutine array_assign(context,lhs,ix,rhs,iy,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: lhs,rhs
@@ -1901,8 +1980,10 @@ contains
     include 'fesize.inc'
     include 'ftypeof.inc'
   end subroutine array_assign
-
+  
+  !=============================================================================
   ! Make an empty copy of a vector with a new length
+  !=============================================================================
   recursive function empty_copy_vector(context,v,size) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
@@ -1964,7 +2045,9 @@ contains
     include 'ftiny.inc'
   end function empty_copy_vector
 
+  !============================================================================
   ! Make a vector by replicating v[offset]
+  !============================================================================
   recursive function vector_from_scalar(context,v,offset,esize,is_const) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
@@ -2045,6 +2128,9 @@ contains
     include 'ftiny.inc'
   end function vector_from_scalar
 
+  !=============================================================================
+  ! Assign lhs <- rhs, masked by ve
+  !=============================================================================
   recursive subroutine vector_assign(context,lhs,rhs,ve,errno,esize)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: lhs,rhs,ve
@@ -2103,7 +2189,7 @@ contains
             lhs%data%ptr(lhs%offset+pm_elemref_offset),&            
             rhs,esize,errno)
        call pm_delete_root(context,root)
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        do i=2,pm_fast_esize(lhs)
           call vector_assign(context,&
                lhs%data%ptr(lhs%offset+i),&
@@ -2325,7 +2411,9 @@ contains
     include 'fvkind.inc'
   end subroutine vector_assign
 
-  ! Test element-by_element equality of two vectors
+  !=============================================================================
+  ! Test element-by_element equality of two vectors: eq <- v1 == v2
+  !=============================================================================
   recursive subroutine vector_eq(context,v1,v2,eq,esize,ve)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v1,v2,ve
@@ -2403,7 +2491,7 @@ contains
              endif
           enddo
        endif
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        do k=2,pm_fast_esize(v1)
           call vector_eq(context,v1%data%ptr(v1%offset+k),&
                v2%data%ptr(v2%offset+k),eq,esize,ve)
@@ -2736,6 +2824,9 @@ contains
     include 'fvkind.inc'
   end subroutine vector_eq
 
+  !=============================================================================
+  ! Check that all(v1(istart:+isize)==v2(istart2:+isize))
+  !=============================================================================
   recursive function vector_all_eq(context,v1,v2,istart1,istart2,isize) result(ok)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v1,v2
@@ -2780,7 +2871,7 @@ contains
                vec2%data%ptr(vec2%offset+j),start1,start2,size1)
           if(.not.ok) return
        enddo
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        do k=2,pm_fast_esize(v1)
           if(.not.vector_all_eq(context,v1%data%ptr(v1%offset+k),&
                v2%data%ptr(v2%offset+k),istart1,istart2,isize)) then
@@ -2842,9 +2933,11 @@ contains
     include 'fvkind.inc'
   end function vector_all_eq
 
+  !=============================================================================
   ! Compute a vector of indices
   ! start, start+step, .., end
   ! Each index repeated elsize times
+  !=============================================================================
   function vector_iota(context,&
        elsize,start,end,step,import_vec) result(ptr)
     type(pm_context),pointer:: context
@@ -2883,18 +2976,21 @@ contains
               if(idx>iend) idx=istart
            endif
         enddo
-    enddo
+     enddo
+     call pm_dump_tree(context,6,vec,2)
     ptr=vec
   contains
     include 'fesize.inc'
     include 'fisnull.inc'
   end function vector_iota
 
+  !=============================================================================
   ! Compute a vector of indices
   ! start, start+step, .., 
   ! Each index repeated elsize times
   ! The sequence truncated to siz elements
   ! and truncated to start first elements in
+  !=============================================================================
   function vector_iota_trunc(context,&
        elsize,start,end,step,first,siz,import_vec) result(ptr)
     type(pm_context),pointer:: context
@@ -2948,7 +3044,9 @@ contains
     include 'fisnull.inc'
   end function vector_iota_trunc
 
+  !=============================================================================
   ! Calculate indices within block cyclic tile
+  !=============================================================================
   subroutine vector_bc(context,ndim,arg,start,end,step,ostart,oend,ostep,&
        begin,finish,tot,off)
     type(pm_context),pointer:: context
@@ -3204,7 +3302,9 @@ contains
     if(k-off/=tot) call pm_panic('vector_bc')
   end subroutine vector_bc
 
-  
+  !=============================================================================
+  ! Produce vector of 1-D indices for a given import vector
+  !=============================================================================
   subroutine vector_indices(imp,idx)
     type(pm_ptr):: imp,idx
     integer(pm_ln):: i,j,k
@@ -3218,8 +3318,10 @@ contains
   contains
     include 'fesize.inc'
   end subroutine vector_indices
-  
+
+  !=============================================================================
   ! Get elements from a vector (indices start at 0)
+  !=============================================================================
   recursive function vector_get_elems(context,v,ix,errno,keeparrays) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ix
@@ -3263,7 +3365,7 @@ contains
             int(v%data%ptr(v%offset+pm_array_typeof)%offset),&
             vec,dom,len,off)
        call pm_delete_register(context,reg)
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        root=>pm_new_as_root(context,pm_usr,pm_fast_esize(v)+1)
        ptr=root%ptr
        ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
@@ -3400,7 +3502,9 @@ contains
     include 'fesize.inc'
   end function vector_get_elems
 
-  ! Set elements in a vector
+  !=============================================================================
+  ! Set elements in a vector  v[ix]=e masked by ve
+  !=============================================================================
   recursive subroutine vector_set_elems(context,v,ix,e,ve,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ix,e,ve
@@ -3437,7 +3541,7 @@ contains
              call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno)
           enddo
        endif
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        do k=2,pm_fast_esize(v)
           call vector_set_elems(context,v%data%ptr(v%offset+k),&
                ix,e%data%ptr(e%offset+k),ve,errno)
@@ -3677,6 +3781,9 @@ contains
     include 'fvkind.inc'
   end subroutine vector_set_elems
 
+  !=============================================================================
+  ! Assign single element of a vector v[j]=e
+  !=============================================================================
   recursive subroutine assign_single(context,v,j,e,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,e
@@ -3696,7 +3803,7 @@ contains
        call assign_single(context,v%data%ptr(v%offset+pm_array_dom),j,&
             e%data%ptr(e%offset+pm_array_dom),errno)
        call array_assign(context,v,j,e,0_pm_ln,errno)
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        do k=2,pm_fast_esize(v)
           call assign_single(context,v%data%ptr(v%offset+k),j,&
                e%data%ptr(e%offset+k),errno)
@@ -3739,8 +3846,9 @@ contains
     include 'fesize.inc'
   end subroutine assign_single
   
-  
-  ! Copy elements of vector e to elements of vector v
+  !=============================================================================
+  ! Copy elements of vector e to elements of vector v  v(ix) <- e(iy)
+  !=============================================================================
   recursive subroutine vector_copy_elems(context,v,e,ix,iy,n,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,e
@@ -3764,7 +3872,7 @@ contains
          call array_assign(context,v,ix(i),e,iy(i),errno)
          if(errno/=0) return
        enddo
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        do k=2,pm_fast_esize(v)
           call vector_copy_elems(context,&
                v%data%ptr(v%offset+k),&
@@ -3882,7 +3990,9 @@ contains
     include 'fesize.inc'
   end subroutine vector_copy_elems
 
+  !=============================================================================
   ! Copy a range of elements from one vector to another
+  !=============================================================================
   recursive subroutine vector_copy_range(context,v,start1,e,start2,siz,errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,e
@@ -3893,7 +4003,7 @@ contains
     type(pm_ptr):: p
     k=pm_fast_typeof(v)
     select case(k)
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        if(k/=pm_fast_typeof(e)) then
           errno=vector_type_error
           return
@@ -3963,6 +4073,9 @@ contains
     include 'fesize.inc'   
   end subroutine  vector_copy_range
 
+  !=============================================================================
+  !  Dump v to std out with indent of depth
+  !=============================================================================
   recursive subroutine vector_dump(context,v,depth)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
@@ -4000,25 +4113,28 @@ contains
           call vector_dump(context,v%data%ptr(v%offset+i),depth+1)
        enddo
        write(*,*) spaces(1:depth*2),')'
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        tno=full_type(v)
        name=pm_type_vect(context,tno)
-       name=pm_name_val(context,pm_tv_name(name))
-       tno=name%data%i(name%offset)
-       if(k==pm_struct_type) then
-          write(*,*) spaces(1:depth*2),'struct ',&
-               trim(pm_name_as_string(context,tno)),'('
+       if(pm_tv_kind(name)==pm_type_is_tuple) then
+          write(*,*) spaces(1:depth*2),'(:'
+          do i=2,pm_fast_esize(v)
+             call vector_dump(context,v%data%ptr(v%offset+i),depth+2)
+          enddo
+          write(*,*) spaces(1:depth*2),':)'
        else
+          name=pm_name_val(context,pm_tv_name(name))
+          tno=name%data%i(name%offset)
           write(*,*) spaces(1:depth*2),'rec ',&
                trim(pm_name_as_string(context,tno)),'('
+          do i=1,pm_fast_esize(name)
+             tno=name%data%i(name%offset+i)
+             write(*,*) spaces(1:depth*2+2),&
+                  trim(pm_name_as_string(context,tno)),'='
+             call vector_dump(context,v%data%ptr(v%offset+i+1),depth+2)
+          enddo
+          write(*,*) spaces(1:depth*2),')'
        endif
-       do i=1,pm_fast_esize(name)
-          tno=name%data%i(name%offset+i)
-          write(*,*) spaces(1:depth*2+2),&
-               trim(pm_name_as_string(context,tno)),'='
-          call vector_dump(context,v%data%ptr(v%offset+i+1),depth+2)
-       enddo
-       write(*,*) spaces(1:depth*2),')'
     case(pm_name)
        write(*,*) spaces(1:depth*2),'''',trim(pm_name_as_string(context,int(v%offset)))
     case(pm_proc)
@@ -4036,7 +4152,10 @@ contains
     include 'fesize.inc'
     include 'fvkind.inc'
   end subroutine vector_dump
-  
+
+  !=============================================================================
+  !  Dump v using output subroutine output  with indent of depth
+  !=============================================================================
   recursive subroutine vector_dump_to(context,v,j,output,depth)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v
@@ -4086,30 +4205,33 @@ contains
           call vector_dump_to(context,v%data%ptr(v%offset+i),j,output,depth+1)
        enddo
        call output(context,spaces(1:depth*2)//')')
-    case(pm_struct_type,pm_rec_type)
+    case(pm_rec_type)
        tno=full_type(v)
        name=pm_type_vect(context,tno)
-       name=pm_name_val(context,pm_tv_name(name))
-       tno=name%data%i(name%offset)
-       if(k==pm_struct_type) then
-          call output(context,spaces(1:depth*2)//'struct '//&
-               trim(pm_name_as_string(context,tno))//'(')
+       if(pm_tv_kind(name)==pm_type_is_tuple) then
+          call output(context,spaces(1:depth*2)//'(:')
+          do i=2,pm_fast_esize(v)
+             call vector_dump_to(context,v%data%ptr(v%offset+i),j,output,depth+2)
+          enddo
+          call output(context,spaces(1:depth*2)//':)')
        else
+          name=pm_name_val(context,pm_tv_name(name))
+          tno=name%data%i(name%offset)
           call output(context,spaces(1:depth*2)//'rec '//&
                trim(pm_name_as_string(context,tno))//'(')
+          do i=1,pm_fast_esize(name)
+             name1=name%data%i(name%offset+i)
+             if(abs(name1)>=sym_d1.and.abs(name1)<=sym_d7) then
+                call output(context,spaces(1:depth*2+2)//&
+                     achar(iachar('1')+name1-sym_d1)//'=')
+             else
+                call output(context,spaces(1:depth*2+2)//&
+                     trim(pm_name_as_string(context,name1))//'=')
+             endif
+             call vector_dump_to(context,v%data%ptr(v%offset+i+1),j,output,depth+2)
+          enddo
+          call output(context,spaces(1:depth*2)//')')
        endif
-       do i=1,pm_fast_esize(name)
-          name1=name%data%i(name%offset+i)
-          if(abs(name1)>=sym_d1.and.abs(name1)<=sym_d7) then
-             call output(context,spaces(1:depth*2+2)//&
-                  achar(iachar('1')+name1-sym_d1)//'=')
-          else
-             call output(context,spaces(1:depth*2+2)//&
-                  trim(pm_name_as_string(context,name1))//'=')
-          endif
-          call vector_dump_to(context,v%data%ptr(v%offset+i+1),j,output,depth+2)
-       enddo
-       call output(context,spaces(1:depth*2)//')')
     case(pm_name)
        call output(context,spaces(1:depth*2)//trim(pm_name_as_string(context,int(v%offset))))
     case(pm_null)
@@ -4135,8 +4257,9 @@ contains
     include 'fvkind.inc'
   end subroutine vector_dump_to
 
-  
+  !=============================================================================
   ! Calculate total array vector size from array lengths vector
+  !=============================================================================
   function total_size(v) result(siz)
     type(pm_ptr),intent(in):: v
     integer(pm_ln):: siz
@@ -4145,7 +4268,9 @@ contains
     include 'fesize.inc'
   end function total_size
 
+  !=============================================================================
   ! Check that two vectors of longs are identical
+  !=============================================================================
   function all_equal(len,len2) result(ok)
     type(pm_ptr),intent(in):: len,len2
     logical:: ok
@@ -4157,8 +4282,10 @@ contains
     include 'fesize.inc'
   end function all_equal
 
+  !=============================================================================
   ! Calculate array offsets vector for contiguous elements
   ! from array length vector
+  !=============================================================================
   function array_offsets(context,len) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: len
@@ -4169,8 +4296,10 @@ contains
     include 'fesize.inc'
   end function array_offsets
 
+  !=============================================================================
   ! Calculate array offsets vector for contiguous elements
   ! from array length vector (set pre-allocated vector)
+  !=============================================================================
   subroutine set_offsets(off,len)
     type(pm_ptr):: len,off
     integer(pm_ln):: i,s
@@ -4183,9 +4312,11 @@ contains
     include 'fesize.inc'
   end subroutine set_offsets
 
+  !=============================================================================
   ! For vector of arrays (defined by len(gth) and off(set) vectors)
   ! and vector of indices, compute vector of locations in array
   ! element vector
+  !=============================================================================
   function index_vector(context,len,off,idx,ve,errno) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: len,off,idx,ve
@@ -4209,9 +4340,11 @@ contains
     include 'fesize.inc'
   end function index_vector
 
+  !=============================================================================
   ! For vector of arrays (defined by len(gth) and off(set) vectors)
   ! and vector of indices, combined with indirection vector,
   ! compute vector of locations in array element vector
+  !=============================================================================
   function index_vector_indirect(context,len,off,idx,ind,ve,errno) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: len,off,idx,ind,ve
@@ -4237,9 +4370,11 @@ contains
     include 'ftypeof.inc'
   end function index_vector_indirect
 
+  !=============================================================================
   ! For vector of arrays (defined by len(gth) and off(set) vectors)
   ! and vector of indices, compute vector of locations in array
   ! element vector, excluding inactive locations (as defined by ve)
+  !=============================================================================
   function index_vector_used(context,len,off,idx,ve,errno) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: len,off,idx,ve
@@ -4302,7 +4437,9 @@ contains
     include 'fvkind.inc'
   end function index_vector_used
 
+  !=============================================================================
   ! Compute indices for all elements in an array
+  !=============================================================================
   function index_vector_all(context,len,off) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: len,off
@@ -4324,8 +4461,10 @@ contains
     include 'fesize.inc'
   end function index_vector_all
 
+  !=============================================================================
   ! For vector of arrays defined by (len,off) and vector of arrays of indices
-  ! defined by (len2[disp...],idx), calculate vector of array element locations 
+  ! defined by (len2[disp...],idx), calculate vector of array element locations
+  !=============================================================================
   function index_vector_nested(context,len,off,idx,import_vec,errno) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: len,off,idx,import_vec
@@ -4364,6 +4503,9 @@ contains
     include 'fesize.inc'
   end function index_vector_nested
 
+  !=============================================================================
+  !  Apply fmt to each element of v to create vector of strings
+  !=============================================================================
   function vector_make_string(context,ve,v,buf_size,fmt) result(str)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: ve,v
@@ -4403,6 +4545,10 @@ contains
     include 'fesize.inc'
   end function vector_make_string
 
+  !=================================================================================
+  ! Concatenate strings in each element of v1 and v2:  str <- v1 ++ v2 masked by ve
+  !  -- ve must be shrunk
+  !==================================================================================
   function vector_concat_string(context,ve,v1,v2) result(str)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: ve,v1,v2
@@ -4448,6 +4594,9 @@ contains
     include 'fesize.inc'
   end function vector_concat_string
 
+  !=============================================================================
+  ! Get string for v[ve[i] where ve must be shrunk
+  !=============================================================================
   subroutine vector_get_string(context,v,ve,i,str)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ve
@@ -4472,7 +4621,10 @@ contains
   contains
     include 'fesize.inc'
   end subroutine vector_get_string
-  
+
+  !=============================================================================
+  ! Make a vector of unitialised strings
+  !=============================================================================
   function make_string_vector(context,val,esize) result(str)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: val
@@ -4498,6 +4650,7 @@ contains
     include 'fesize.inc'
   end function make_string_vector
 
+  ! Integer format
   subroutine fmt_i(v,n,str)
     type(pm_ptr),intent(in):: v
     integer(pm_ln),intent(in):: n
@@ -4508,6 +4661,7 @@ contains
     str=adjustl(mess)
   end subroutine fmt_i
 
+  ! Long integer format
   subroutine fmt_ln(v,n,str)
     type(pm_ptr),intent(in):: v
     integer(pm_ln),intent(in):: n
@@ -4518,6 +4672,7 @@ contains
     str=adjustl(mess)
   end subroutine fmt_ln
 
+  
   subroutine fmt_lln(v,n,str)
     type(pm_ptr),intent(in):: v
     integer(pm_ln),intent(in):: n
@@ -4580,271 +4735,278 @@ contains
   end subroutine fmt_l
 
   
-  subroutine advance_dim(val,max,overflow,n)
-    integer(pm_ln),dimension(*),intent(inout):: val,max
-    integer(pm_ln),dimension(*),intent(inout):: overflow
-    integer(pm_ln),intent(in):: n
-    integer(pm_ln):: i
-    do i=1,n
-       val(i)=val(i)+overflow(i)
-    enddo
-    do i=1,n
-       overflow(i)=merge(1_pm_ln,0_pm_ln,val(i)>=max(i))
-       val(i)=merge(0_pm_ln,val(i),val(i)>=max(i))
-    enddo
-  end subroutine advance_dim
+!!$  subroutine advance_dim(val,max,overflow,n)
+!!$    integer(pm_ln),dimension(*),intent(inout):: val,max
+!!$    integer(pm_ln),dimension(*),intent(inout):: overflow
+!!$    integer(pm_ln),intent(in):: n
+!!$    integer(pm_ln):: i
+!!$    do i=1,n
+!!$       val(i)=val(i)+overflow(i)
+!!$    enddo
+!!$    do i=1,n
+!!$       overflow(i)=merge(1_pm_ln,0_pm_ln,val(i)>=max(i))
+!!$       val(i)=merge(0_pm_ln,val(i),val(i)>=max(i))
+!!$    enddo
+!!$  end subroutine advance_dim
+!!$
+!!$  function advance(context,val,max,ok) result(mask)
+!!$    type(pm_context),pointer:: context
+!!$    type(pm_ptr),intent(inout):: val
+!!$    type(pm_ptr),intent(in)::max
+!!$    type(pm_ptr),intent(in),optional:: ok
+!!$    type(pm_ptr):: mask
+!!$    integer(pm_ln),allocatable,dimension(:):: overflow
+!!$    integer(pm_ln):: i,esize
+!!$    integer:: j
+!!$    type(pm_ptr):: v,m
+!!$    esize=pm_fast_esize(val%data%ptr(val%offset+2))
+!!$    allocate(overflow(0:esize))
+!!$    overflow=1
+!!$    do j=2,pm_fast_esize(val)
+!!$       v=val%data%ptr(val%offset+j)
+!!$       m=max%data%ptr(max%offset+j)
+!!$       call advance_dim(v%data%ln(v%offset:),m%data%ln(m%offset:),overflow,esize+1)
+!!$    enddo
+!!$    mask=pm_new(context,pm_logical,esize+1)
+!!$    if(present(ok)) then
+!!$       do i=0,esize
+!!$          mask%data%l(mask%offset+i)=overflow(i)==0.and.ok%data%l(ok%offset+i)
+!!$       enddo
+!!$    else
+!!$       do i=0,esize
+!!$          mask%data%l(mask%offset+i)=overflow(i)==0
+!!$       enddo
+!!$    endif
+!!$    deallocate(overflow)
+!!$  contains
+!!$    include 'fesize.inc'
+!!$  end function advance
+!!$
+!!$  function init_loop(context,v) result(w)
+!!$    type(pm_context),pointer:: context
+!!$    type(pm_ptr),intent(in):: v
+!!$    type(pm_ptr):: w
+!!$    integer(pm_ln):: esize,n,i
+!!$    type(pm_ptr):: p
+!!$    type(pm_root),pointer:: root
+!!$    esize=pm_fast_esize(v%data%ptr(v%offset+2))
+!!$    n=pm_fast_esize(v)
+!!$    root=>pm_new_as_root(context,pm_usr,n)
+!!$    w=root%ptr
+!!$    w%data%ptr(w%offset)=v%data%ptr(v%offset)
+!!$    w%data%ptr(w%offset+1)=v%data%ptr(v%offset+1)
+!!$    do i=2,n
+!!$       p=pm_assign_new(context,w,i,pm_long,esize+1,.false.)
+!!$       p%data%ln(p%offset:p%offset+esize)=0
+!!$    enddo
+!!$    call pm_delete_root(context,root)
+!!$  contains
+!!$    include 'fesize.inc'
+!!$  end function init_loop
 
-  function advance(context,val,max,ok) result(mask)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(inout):: val
-    type(pm_ptr),intent(in)::max
-    type(pm_ptr),intent(in),optional:: ok
-    type(pm_ptr):: mask
-    integer(pm_ln),allocatable,dimension(:):: overflow
-    integer(pm_ln):: i,esize
-    integer:: j
-    type(pm_ptr):: v,m
-    esize=pm_fast_esize(val%data%ptr(val%offset+2))
-    allocate(overflow(0:esize))
-    overflow=1
-    do j=2,pm_fast_esize(val)
-       v=val%data%ptr(val%offset+j)
-       m=max%data%ptr(max%offset+j)
-       call advance_dim(v%data%ln(v%offset:),m%data%ln(m%offset:),overflow,esize+1)
-    enddo
-    mask=pm_new(context,pm_logical,esize+1)
-    if(present(ok)) then
-       do i=0,esize
-          mask%data%l(mask%offset+i)=overflow(i)==0.and.ok%data%l(ok%offset+i)
-       enddo
-    else
-       do i=0,esize
-          mask%data%l(mask%offset+i)=overflow(i)==0
-       enddo
-    endif
-    deallocate(overflow)
-  contains
-    include 'fesize.inc'
-  end function advance
-
-  function init_loop(context,v) result(w)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: v
-    type(pm_ptr):: w
-    integer(pm_ln):: esize,n,i
-    type(pm_ptr):: p
-    type(pm_root),pointer:: root
-    esize=pm_fast_esize(v%data%ptr(v%offset+2))
-    n=pm_fast_esize(v)
-    root=>pm_new_as_root(context,pm_usr,n)
-    w=root%ptr
-    w%data%ptr(w%offset)=v%data%ptr(v%offset)
-    w%data%ptr(w%offset+1)=v%data%ptr(v%offset+1)
-    do i=2,n
-       p=pm_assign_new(context,w,i,pm_long,esize+1,.false.)
-       p%data%ln(p%offset:p%offset+esize)=0
-    enddo
-    call pm_delete_root(context,root)
-  contains
-    include 'fesize.inc'
-  end function init_loop
-
-  recursive function ptr_vec_get_type(context,&
-       vec,disps,start,finish) result(outvec)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: vec,disps
-    integer(pm_ln):: start,finish
-    type(pm_ptr):: outvec
-    integer(pm_ln):: esize,j,k,n
-    integer:: vkind
-    type(pm_ptr):: p,pvec
-    type(pm_root),pointer:: root1,root2
-    p=vec%data%ptr(vec%offset)
-    vkind=pm_fast_vkind(p)
-    esize=finish-start
-    select case(vkind)
-    case(pm_int)
-       outvec=pm_new(context,pm_int,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%i(outvec%offset+j)=&
-               p%data%i(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_long)
-       outvec=pm_new(context,pm_long,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%ln(outvec%offset+j)=&
-               p%data%ln(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_int8)
-       outvec=pm_new(context,pm_int8,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%i8(outvec%offset+j)=&
-               p%data%i8(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_int16)
-       outvec=pm_new(context,pm_int16,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%i16(outvec%offset+j)=&
-               p%data%i16(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_int32)
-       outvec=pm_new(context,pm_int32,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%i32(outvec%offset+j)=&
-               p%data%i32(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_int64)
-       outvec=pm_new(context,pm_int64,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%i64(outvec%offset+j)=&
-               p%data%i64(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_int128)
-       outvec=pm_new(context,pm_int128,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%i128(outvec%offset+j)=&
-               p%data%i128(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_single)
-       outvec=pm_new(context,pm_single,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%r(outvec%offset+j)=&
-               p%data%r(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_double)
-       outvec=pm_new(context,pm_double,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%d(outvec%offset+j)=&
-               p%data%d(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_real32)
-       outvec=pm_new(context,pm_real32,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%r32(outvec%offset+j)=&
-               p%data%r32(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_real64)
-       outvec=pm_new(context,pm_real64,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%r64(outvec%offset+j)=&
-               p%data%r64(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_real128)
-       outvec=pm_new(context,pm_real128,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%r128(outvec%offset+j)=&
-               p%data%r128(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_single_complex)
-       outvec=pm_new(context,pm_single_complex,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%c(outvec%offset+j)=&
-               p%data%c(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_double_complex)
-       outvec=pm_new(context,pm_double_complex,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%dc(outvec%offset+j)=&
-               p%data%dc(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_complex64)
-       outvec=pm_new(context,pm_complex64,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%c64(outvec%offset+j)=&
-               p%data%c64(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_complex128)
-       outvec=pm_new(context,pm_complex128,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%c128(outvec%offset+j)=&
-               p%data%c128(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_complex256)
-       outvec=pm_new(context,pm_complex256,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%c256(outvec%offset+j)=&
-               p%data%c256(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_logical)
-       outvec=pm_new(context,pm_logical,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%l(outvec%offset+j)=&
-               p%data%l(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_packed_logical)
-       outvec=pm_new(context,pm_packed_logical,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%pl(outvec%offset+j)=&
-               p%data%pl(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_undef:pm_null,pm_pointer:pm_stack)
-       outvec=pm_new(context,pm_pointer,esize)
-       k=0
-       do j=0,esize 
-          p=vec%data%ptr(vec%offset+j+start)
-          outvec%data%ptr(outvec%offset+j)=&
-               p%data%ptr(p%offset+disps%data%ln(disps%offset+j))
-       enddo
-    case(pm_usr)
-       n=pm_fast_esize(vec%data%ptr(vec%offset))
-       root1=>pm_new_as_root(context,pm_pointer,n)
-       root2=>pm_new_as_root(context,pm_pointer,esize)
-       outvec=root1%ptr
-       pvec=root2%ptr
-       do j=1,n
-          do k=0,esize
-             p=vec%data%ptr(vec%offset+k+start)
-             pvec%data%ptr(pvec%offset+k)=p%data%ptr(p%offset+j)
-          enddo
-          call pm_ptr_assign(context,outvec,j,&
-               ptr_vec_get_type(context,pvec,disps,0_pm_ln,esize))
-       enddo
-       call pm_delete_root(context,root1)
-       call pm_delete_root(context,root2)
-    end select
-  contains
-    include 'fvkind.inc'
-    include 'fesize.inc'
-  end function  ptr_vec_get_type
   
+!!$  recursive function ptr_vec_get_type(context,&
+!!$       vec,disps,start,finish) result(outvec)
+!!$    type(pm_context),pointer:: context
+!!$    type(pm_ptr),intent(in):: vec,disps
+!!$    integer(pm_ln):: start,finish
+!!$    type(pm_ptr):: outvec
+!!$    integer(pm_ln):: esize,j,k,n
+!!$    integer:: vkind
+!!$    type(pm_ptr):: p,pvec
+!!$    type(pm_root),pointer:: root1,root2
+!!$    p=vec%data%ptr(vec%offset)
+!!$    vkind=pm_fast_vkind(p)
+!!$    esize=finish-start
+!!$    select case(vkind)
+!!$    case(pm_int)
+!!$       outvec=pm_new(context,pm_int,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%i(outvec%offset+j)=&
+!!$               p%data%i(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_long)
+!!$       outvec=pm_new(context,pm_long,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%ln(outvec%offset+j)=&
+!!$               p%data%ln(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_int8)
+!!$       outvec=pm_new(context,pm_int8,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%i8(outvec%offset+j)=&
+!!$               p%data%i8(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_int16)
+!!$       outvec=pm_new(context,pm_int16,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%i16(outvec%offset+j)=&
+!!$               p%data%i16(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_int32)
+!!$       outvec=pm_new(context,pm_int32,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%i32(outvec%offset+j)=&
+!!$               p%data%i32(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_int64)
+!!$       outvec=pm_new(context,pm_int64,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%i64(outvec%offset+j)=&
+!!$               p%data%i64(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_int128)
+!!$       outvec=pm_new(context,pm_int128,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%i128(outvec%offset+j)=&
+!!$               p%data%i128(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_single)
+!!$       outvec=pm_new(context,pm_single,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%r(outvec%offset+j)=&
+!!$               p%data%r(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_double)
+!!$       outvec=pm_new(context,pm_double,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%d(outvec%offset+j)=&
+!!$               p%data%d(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_real32)
+!!$       outvec=pm_new(context,pm_real32,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%r32(outvec%offset+j)=&
+!!$               p%data%r32(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_real64)
+!!$       outvec=pm_new(context,pm_real64,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%r64(outvec%offset+j)=&
+!!$               p%data%r64(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_real128)
+!!$       outvec=pm_new(context,pm_real128,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%r128(outvec%offset+j)=&
+!!$               p%data%r128(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_single_complex)
+!!$       outvec=pm_new(context,pm_single_complex,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%c(outvec%offset+j)=&
+!!$               p%data%c(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_double_complex)
+!!$       outvec=pm_new(context,pm_double_complex,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%dc(outvec%offset+j)=&
+!!$               p%data%dc(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_complex64)
+!!$       outvec=pm_new(context,pm_complex64,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%c64(outvec%offset+j)=&
+!!$               p%data%c64(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_complex128)
+!!$       outvec=pm_new(context,pm_complex128,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%c128(outvec%offset+j)=&
+!!$               p%data%c128(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_complex256)
+!!$       outvec=pm_new(context,pm_complex256,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%c256(outvec%offset+j)=&
+!!$               p%data%c256(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_logical)
+!!$       outvec=pm_new(context,pm_logical,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%l(outvec%offset+j)=&
+!!$               p%data%l(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_packed_logical)
+!!$       outvec=pm_new(context,pm_packed_logical,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%pl(outvec%offset+j)=&
+!!$               p%data%pl(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_undef:pm_null,pm_pointer:pm_stack)
+!!$       outvec=pm_new(context,pm_pointer,esize)
+!!$       k=0
+!!$       do j=0,esize 
+!!$          p=vec%data%ptr(vec%offset+j+start)
+!!$          outvec%data%ptr(outvec%offset+j)=&
+!!$               p%data%ptr(p%offset+disps%data%ln(disps%offset+j))
+!!$       enddo
+!!$    case(pm_usr)
+!!$       n=pm_fast_esize(vec%data%ptr(vec%offset))
+!!$       root1=>pm_new_as_root(context,pm_pointer,n)
+!!$       root2=>pm_new_as_root(context,pm_pointer,esize)
+!!$       outvec=root1%ptr
+!!$       pvec=root2%ptr
+!!$       do j=1,n
+!!$          do k=0,esize
+!!$             p=vec%data%ptr(vec%offset+k+start)
+!!$             pvec%data%ptr(pvec%offset+k)=p%data%ptr(p%offset+j)
+!!$          enddo
+!!$          call pm_ptr_assign(context,outvec,j,&
+!!$               ptr_vec_get_type(context,pvec,disps,0_pm_ln,esize))
+!!$       enddo
+!!$       call pm_delete_root(context,root1)
+!!$       call pm_delete_root(context,root2)
+!!$    end select
+!!$  contains
+!!$    include 'fvkind.inc'
+!!$    include 'fesize.inc'
+!!$  end function  ptr_vec_get_type
+
+  !=============================================================================
+  ! Shrink a ve to the list-of-indices form
+  !  - Convert logical mask to vector of active indices
+  !  - Convert null    make to vecror of consecutive indices
+  !  - Leave a list of indices alone
+  !=============================================================================
   function shrink_ve(context,mask,esize,n) result(ind)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: mask
@@ -4884,18 +5046,25 @@ contains
     include 'fisnull.inc'
     include 'ftiny.inc'
   end function shrink_ve
-  
+
+  !=============================================================================
+  ! Return the type of an interpreter object
+  !=============================================================================
   function full_type(v) result(tno)
     type(pm_ptr):: v
     integer:: tno
     tno=pm_fast_typeof(v)
-    if(tno>=pm_struct_type) then
+    if(tno>=pm_rec_type) then
        tno=v%data%ptr(v%offset+1_pm_p)%offset
     endif
   contains
     include 'ftypeof.inc'
   end function full_type
 
+  !=============================================================================
+  ! Compute intersection of two monotonic sequences a1(1:n1) and a2(1:n1)
+  ! with result stored in a3(1:n3) -- a3 must have enough space
+  !=============================================================================
   subroutine intersect_aseq(a1,n1,a2,n2,a3,n3)
     integer(pm_ln),dimension(*),intent(in):: a1,a2
     integer(pm_ln),intent(in):: n1,n2
@@ -4985,6 +5154,9 @@ contains
     endif
   end subroutine intersect_aseq
 
+  !=============================================================================
+  ! Check if monotonic sequenc a1(1:n1) includes monotonic sequence a2(1:n2)
+  !=============================================================================
   function aseq_includes(a1,n1,a2,n2) result(ok)
     integer(pm_ln),dimension(*),intent(in):: a1,a2
     integer(pm_ln),intent(in):: n1,n2
@@ -5057,6 +5229,9 @@ contains
     endif
   end function aseq_includes
 
+  !=============================================================================
+  ! Find index of v in monotonic sequence a(1:n)
+  !=============================================================================
   function aseq_index(a,n,v) result(index)
     integer(pm_ln),dimension(*),intent(in):: a
     integer(pm_ln),intent(in):: n
@@ -5095,6 +5270,10 @@ contains
     endif
   end function aseq_index
 
+  !================================================================================
+  ! a3(1:n3) is set to a vector of indices of elements of monotonic sequence
+  ! a2(1:n2) in monotic sequnce a1(1:n1), excluding elements of a2 not found in a1
+  !================================================================================
   subroutine overlap_aseq(a1,n1,a2,n2,a3,n3)
     integer(pm_ln),dimension(*),intent(in):: a1,a2
     integer(pm_ln),intent(in):: n1,n2
@@ -5184,6 +5363,10 @@ contains
     endif
   end subroutine overlap_aseq
 
+  !=============================================================================
+  ! Set a3 to overlap of a1 and a2 and a4 to overlap of a2 and a1
+  ! where overlap is as defined for overlap_aseq
+  !=============================================================================
   subroutine overlap_aseq2(a1,n1,a2,n2,a3,a4,n3)
     integer(pm_ln),dimension(*),intent(in):: a1,a2
     integer(pm_ln),intent(in):: n1,n2
@@ -5276,7 +5459,12 @@ contains
        endif
     endif
   end subroutine overlap_aseq2
-    
+
+  !=============================================================================
+  ! Intersect two blocked sequences (l1..h1 by st1 width wd1) and
+  ! (l2..h3 by st2 width wd2) giving sequence a(1:n)
+  ! - array a must have enough space
+  !=============================================================================
   subroutine intersect_bseq(l1,h1,wd1,st1,al1,l2,h2,wd2,st2,al2,a,n)
     integer(pm_ln),intent(in):: l1,h1,wd1,st1,al1,l2,h2,wd2,st2,al2
     integer(pm_ln),dimension(*),intent(out):: a
@@ -5373,6 +5561,13 @@ contains
     n=k-1
   end subroutine intersect_bseq
 
+
+  !=============================================================================
+  ! Overlap two blocked sequences (l1..h1 by st1 width wd1) and
+  ! (l2..h3 by st2 width wd2) giving sequence a(1:n) of indices of second sequence
+  ! in the first sequence
+  ! - array a must have enough space
+  !=============================================================================
   subroutine overlap_bseq(l1,h1,wd1,st1,al1,l2,h2,wd2,st2,al2,a,n)
     integer(pm_ln),intent(in):: l1,h1,wd1,st1,al1,l2,h2,wd2,st2,al2
     integer(pm_ln),dimension(*),intent(out):: a
@@ -5481,6 +5676,13 @@ contains
     n=k-1
   end subroutine overlap_bseq
 
+  !=============================================================================
+  ! Overlap two blocked sequences (l1..h1 by st1 width wd1) and
+  ! (l2..h3 by st2 width wd2) giving sequences a1(1:n) of indices of second sequence
+  ! in the first sequence and a2(1:n) of indices of first sequence in the second
+  ! sequence
+  ! - arrays a1 and a2 must have enough space
+  !=============================================================================
   subroutine overlap_bseq2(l1,h1,wd1,st1,al1,l2,h2,wd2,st2,al2,a1,a2,n)
     integer(pm_ln),intent(in):: l1,h1,wd1,st1,al1,l2,h2,wd2,st2,al2
     integer(pm_ln),dimension(*),intent(out):: a1,a2
@@ -5617,6 +5819,11 @@ contains
     n=k-1
   end subroutine overlap_bseq2
 
+  !=============================================================================
+  !  Replace each element x of a1(1:n1) by x+lo..x+hi creating sequence a2(1:n2)
+  !  eliminating any repeating elements
+  !  - a2 must have enough space
+  !=============================================================================
   subroutine expand_aseq(a1,n1,lo,hi,a2,n2)
     integer(pm_ln),dimension(*),intent(in):: a1
     integer(pm_ln),intent(in):: n1,lo,hi
@@ -5690,7 +5897,11 @@ contains
        a2(i)=k
     enddo
   end subroutine interior_index_aseq
-  
+
+  !=============================================================================
+  ! Intersecrion of  two sequences (l1..u1 by s1) with length n1 and
+  ! (l2..u2 by s2) with length n2 giving sequence (l3..u3 by s3) of length n3
+  !=============================================================================
   subroutine intersect_seq(l1,u1,s1,n1,l2,u2,s2,n2,l3,u3,s3,n3)
     integer(pm_ln),intent(in):: l1,u1,s1,n1,l2,u2,s2,n2
     integer(pm_ln),intent(out):: l3,u3,s3,n3
@@ -5741,6 +5952,10 @@ contains
     endif
   end subroutine intersect_seq
 
+  !=============================================================================
+  !  Extended GCD algorithm
+  !   find g, u and v such that ua + vb = g
+  !=============================================================================
   subroutine extended_gcd(a,b,u,v,g)
     integer(pm_ln),intent(in):: a,b
     integer(pm_ln),intent(out):: u,v,g
@@ -5769,8 +5984,6 @@ contains
     v=old_t
     g=old_r
   end subroutine extended_gcd
-
-
 
   
 end module pm_array

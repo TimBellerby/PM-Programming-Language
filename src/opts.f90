@@ -44,6 +44,7 @@ module pm_options
      logical:: check_alias
      logical:: show_all_ref
      logical:: print_immediate
+     logical:: show_hidden
      
      logical:: out_sysmod
      logical:: out_typelist
@@ -88,6 +89,7 @@ contains
     pm_opts%check_alias=.not.pm_is_compiling
     pm_opts%show_all_ref=.false.
     pm_opts%print_immediate=.false.
+    pm_opts%show_hidden=.false.
     
     pm_opts%out_sysmod=.false.
     pm_opts%out_typelist=.false.
@@ -153,17 +155,20 @@ contains
        write(*,*) '  -fno-inline      Do not inline any procedures.'
        write(*,*) '  -fno-check       Do not run "check" or "test" statements.'
        write(*,*) '  -fcheck          Run "check" and "test" statements.'
-       write(*,*) '  -fshow-elems     Show structure/record elements in error messages.'
-       write(*,*) '  -fshow-members   Show members of user defined types in error messages'
-       write(*,*) '  -fshow-variants  Show all variants for proc types'
-       write(*,*) '  -fsee-all-procs  List all alternative procedures in error messages'
-       write(*,*) '  -fproc-list=n    Maximum number of procs to list if see-all-procs not invoked'
        write(*,*) '  -fno-alias-check Do not check for argument aliasing'
        write(*,*) '  -falias_check    Check for argument aliasing'
        if(.not.pm_is_compiling) then
           write(*,*) '  -fprint-immediate'
           write(*,*) '                   Do not buffer print output by node'
        endif
+       write(*,*)
+       write(*,*) ' ERROR OR TRACE OUTPUT OPTIONS'
+       write(*,*) '  -fshow-elems     Show structure/record elements in error messages.'
+       write(*,*) '  -fshow-members   Show members of user defined types in error messages'
+       write(*,*) '  -fshow-variants  Show all variants for proc types'
+       write(*,*) '  -fshow-hidden    Show hidden procedure parameters'
+       write(*,*) '  -fsee-all-procs  List all alternative procedures in error messages'
+       write(*,*) '  -fproc-list=n    Maximum number of procs to list if see-all-procs not invoked'
        write(*,*)
        write(*,*) '  GENERAL OPTIONS'
        write(*,*) '  -N              Do not colour-highlight error messages'
@@ -294,6 +299,8 @@ contains
              pm_opts%check_alias=.false.
           elseif(arg=='-fprint-immediate'.and..not.pm_is_compiling) then
              pm_opts%print_immediate=.true.
+          elseif(arg=='-fshow-hidden') then
+             pm_opts%show_hidden=.true.
           elseif(arg(1:12)=='-fproc-list=') then
              pm_opts%proc_list=get_num_opt(arg,arg(13:))
           elseif(arg(3:4)=='tn') then

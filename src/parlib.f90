@@ -405,7 +405,7 @@ contains
           call pm_ptr_assign(context,w,j,&
                broadcast_val(context,node,w%data%ptr(w%offset+j),nn,xcomm,xthis))
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call broadcast(context,node,v%data%ptr(v%offset+i),xcomm,xthis)
        enddo
@@ -501,7 +501,7 @@ contains
           call pm_ptr_assign(context,avec,k,broadcast_val(context,&
                node,avec%data%ptr(avec%offset+k),nout,xcomm))
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call broadcast_disp(context,node,v%data%ptr(v%offset+i),off,offstart,noff,xcomm)
        enddo
@@ -642,7 +642,7 @@ contains
                broadcast_val(context,node,w%data%ptr(w%offset+j),nn,xcomm,xthis))
        enddo
        call pm_delete_root(context,root)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type,pm_dref_type,pm_dref_shared_type)
+    case(pm_rec_type,pm_polyref_type,pm_dref_type,pm_dref_shared_type)
        root=>pm_new_as_root(context,pm_usr,esize+1)
        ptr=root%ptr
        ptr%data%ptr(ptr%offset)%offset=tno
@@ -818,7 +818,7 @@ contains
                broadcast_val(context,node,w%data%ptr(w%offset+k),nn))
        enddo
        call pm_delete_root(context,root)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        root=>pm_new_as_root(context,pm_usr,esize+1)
        ptr=root%ptr
        ptr%data%ptr(ptr%offset)%offset=tno
@@ -991,7 +991,7 @@ contains
                broadcast_val(context,k,&
                v%data%ptr(v%offset+pm_array_vect),nn))
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call gather(context,v%data%ptr(v%offset+i),w%data%ptr(w%offset+i),j)
        enddo
@@ -1051,7 +1051,7 @@ contains
        do j=0,pm_fast_esize(len)
           call pm_ptr_assign(context,avec,j,recv_val(context,node,mess_tag+1))
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,esize
           call recv(context,node,v%data%ptr(v%offset+i),mess_tag)
        enddo
@@ -1141,7 +1141,7 @@ contains
        do j=0,pm_fast_esize(avec)
           call pm_ptr_assign(context,avec,j,recv_val(context,node,mess_tag+1))
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,esize
           call recv_rest(context,node,v%data%ptr(v%offset+i),mess_tag)
        enddo
@@ -1191,7 +1191,7 @@ contains
           k=off%data%ln(off%offset+offstart+j)
           call pm_ptr_assign(context,avec,k,recv_val(context,node,mess_tag+1))
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call recv_disp(context,node,v%data%ptr(v%offset+i),off,offstart,noff,mess_tag)
        enddo
@@ -1290,7 +1290,7 @@ contains
           call pm_ptr_assign(context,avec,k,recv_val(context,node,mess_tag+1))
        enddo
        if(debug_mess) call pm_dump_tree(context,6,v,2)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call recv_rest_disp(context,node,v%data%ptr(v%offset+i),off,offstart,noff,mess_tag)
        enddo
@@ -1360,7 +1360,7 @@ contains
                recv_val(context,node,mess_tag))
        enddo
        call pm_delete_root(context,root)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type,pm_dref_type,pm_dref_shared_type)
+    case(pm_rec_type,pm_polyref_type,pm_dref_type,pm_dref_shared_type)
        root=>pm_new_as_root(context,pm_usr,esize+1)
        ptr=root%ptr
        ptr%data%ptr(ptr%offset)%offset=tno
@@ -1484,7 +1484,7 @@ contains
                avec%data%ptr(avec%offset+j),&
                0_pm_ln,-1_pm_ln,mess_tag+1,xcomm)
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call isend(node,v%data%ptr(v%offset+i),mess_tag,xcomm)
        enddo
@@ -1595,7 +1595,7 @@ contains
     case(pm_array_type,pm_const_array_type)
        iserr=.true.
        return
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call irecv(node,v%data%ptr(v%offset+i),mess_tag,iserr,xcomm)
        enddo
@@ -1720,7 +1720,7 @@ contains
                off%data%ln(off%offset+j),&
                len%data%ln(len%offset+j),mess_tag,xcomm)
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type,pm_dref_type,pm_dref_shared_type)
+    case(pm_rec_type,pm_polyref_type,pm_dref_type,pm_dref_shared_type)
        do i=2,pm_fast_esize(v)
           call isend_val(node,v%data%ptr(v%offset+i),start,siz,mess_tag,xcomm)
        enddo
@@ -1853,7 +1853,7 @@ contains
                avec%data%ptr(avec%offset+k),&
                   0_pm_ln,-1_pm_ln,mess_tag+1)
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call isend_val_disp(node,v%data%ptr(v%offset+i),off,offstart,noff,mess_tag)
        enddo
@@ -1978,7 +1978,7 @@ contains
                avec%data%ptr(avec%offset+k),&
                0_pm_ln,-1_pm_ln,mess_tag+1)
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call isend_disp(node,v%data%ptr(v%offset+i),off,offstart,noff,mess_tag)
        enddo
@@ -2126,7 +2126,7 @@ contains
        call irecv_disp(context,node,&
             v%data%ptr(v%offset+pm_array_length),&
             off,offstart,noff,mess_tag,partial)
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call irecv_disp(context,node,v%data%ptr(v%offset+i),&
                off,offstart,noff,mess_tag,partial)
@@ -2240,7 +2240,7 @@ contains
           call isend_val(node,avec%data%ptr(avec%offset+j),&
                0_pm_ln,-1_pm_ln,mess_tag+1)
        enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,esize
           call rsend(context,node,v%data%ptr(v%offset+i),mess_tag)
        enddo
@@ -2333,7 +2333,7 @@ contains
           call isend_val(node,avec%data%ptr(avec%offset+k),&
                0_pm_ln,-1_pm_ln,mess_tag+1)
         enddo
-    case(pm_struct_type,pm_rec_type,pm_polyref_type)
+    case(pm_rec_type,pm_polyref_type)
        do i=2,pm_fast_esize(v)
           call rsend_disp(context,node,v%data%ptr(v%offset+i),off,offstart,noff,mess_tag)
        enddo

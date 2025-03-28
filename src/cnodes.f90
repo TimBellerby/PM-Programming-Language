@@ -116,10 +116,9 @@ module pm_cnodes
   integer,parameter:: call_nret=cnode_args+7
   integer,parameter:: call_key_names=cnode_args+8
   integer,parameter:: call_index=cnode_args+9
-  integer,parameter:: call_par_depth=cnode_args+10
-  integer,parameter:: call_var=cnode_args+11
-  integer,parameter:: call_amp=cnode_args+12
-  integer,parameter:: call_node_size=13
+  integer,parameter:: call_var=cnode_args+10
+  integer,parameter:: call_amp=cnode_args+11
+  integer,parameter:: call_node_size=12
   
   ! Offsets into var cnodes
   integer,parameter:: var_parent=cnode_args+0
@@ -127,11 +126,9 @@ module pm_cnodes
   integer,parameter:: var_flags=cnode_args+2
   integer,parameter:: var_link=cnode_args+3
   integer,parameter:: var_index=cnode_args+4
-  integer,parameter:: var_par_depth=cnode_args+5
-  integer,parameter:: var_create_depth = cnode_args + 6
-  integer,parameter:: var_lex_scope = cnode_args + 7
-  integer,parameter:: var_node_size=8
-  integer,parameter:: var_extra_info=cnode_args+8
+  integer,parameter:: var_lex_scope = cnode_args + 5
+  integer,parameter:: var_node_size=6
+  integer,parameter:: var_extra_info=cnode_args+6
 
   ! Flags for var cnodes
   integer,parameter:: var_is_var=1
@@ -145,11 +142,8 @@ module pm_cnodes
   integer,parameter:: var_is_key=512
   integer,parameter:: var_is_varg=1024
   integer,parameter:: var_is_par_var=2048
-  integer,parameter:: var_is_incomplete=4096
-  integer,parameter:: var_is_aliased=8192
-  integer,parameter:: var_is_not_inited=16384
-  integer,parameter:: var_is_no_import_export=32768
-  integer,parameter:: var_is_sync=65536
+  integer,parameter:: var_is_not_inited=4096
+  integer,parameter:: var_is_maybe_not_private=8192
 
   ! Offsets into proc & builtin nodes
   integer,parameter:: pr_ptype=cnode_args+0
@@ -179,10 +173,14 @@ module pm_cnodes
   integer,parameter:: bi_id=cnode_args+9
   integer,parameter:: bi_node_size=10
 
-  integer(pm_p),parameter:: spsig_thru=-4_pm_p
-  integer(pm_p),parameter:: spsig_dup=-5_pm_p
-  integer(pm_p),parameter:: spsig_noop=-6_pm_p
-
+   ! Special signatures
+  integer,parameter:: sp_sig_in_process=-1_pm_p
+  integer,parameter:: sp_sig_recursive=-2_pm_p
+  integer,parameter:: sp_sig_break=-3_pm_p
+  integer,parameter:: sp_sig_link=-4_pm_p
+  integer,parameter:: sp_sig_dup=-5_pm_p
+  integer,parameter:: sp_sig_noop=-6_pm_p
+  integer,parameter:: sp_sig_setval=-7_pm_p
   
 contains
 
@@ -571,7 +569,7 @@ contains
     character(len=120):: str,location
     signo=cnode_get_num(cnode,call_sig)
     if(signo<0) then
-       str=repeat(' ',depth)//trim(pm_int_as_string(cnode_get_num(cnode,call_par_depth)+1))//' '//pm_name_as_string(context,-signo)
+       str=repeat(' ',depth)//pm_name_as_string(context,-signo)
        i=len_trim(str)+1
        if(.not.pm_fast_isnull(rvec)) then
           k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
@@ -600,13 +598,13 @@ contains
           str=repeat(' ',depth)//'call '//pm_name_as_string(context,name)
        else
           k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
-          if(k==spsig_thru) then
-             str=repeat(' ',depth)//'call [thru]'//&
+          if(k==sp_sig_link) then
+             str=repeat(' ',depth)//'call [link]'//&
                   pm_name_as_string(context,name)
-          elseif(k==spsig_dup) then
+          elseif(k==sp_sig_dup) then
              str=repeat(' ',depth)//'call [dup]'//&
                   pm_name_as_string(context,name)
-          elseif(k==spsig_noop) then
+          elseif(k==sp_sig_noop) then
              str=repeat(' ',depth)//'call [noop]'//&
                   pm_name_as_string(context,name)
           elseif(k<0) then
@@ -717,6 +715,9 @@ contains
              call append_to_line(iunit,str,i,&
                   '['//trim(pm_type_as_string(context,tno))//']',.false.,depth)
           endif
+          if(cnode_flags_set(cnode,var_flags,var_is_maybe_not_private)) then
+             call append_to_line(iunit,str,i,'^',.false.,depth)
+          endif
        case(cnode_is_const)
           call append_to_line(iunit,str,i,&
                trim(pm_value_as_string(context,cnode_arg(cnode,1))),.false.,depth)
@@ -771,18 +772,6 @@ contains
     endif
     if(flags/=iand(flags,proccall_is_comm)) then
        call append_to_line(iunit,str,i,'<',.false.,depth)
-       if(iand(flags,proc_run_complete)/=0) then
-          call append_to_line(iunit,str,i,'C',.false.,depth)
-       endif
-       if(iand(flags,proc_run_local)/=0) then
-          call append_to_line(iunit,str,i,'L',.false.,depth)
-       endif
-       if(iand(flags,proc_run_shared)/=0) then
-          call append_to_line(iunit,str,i,'S',.false.,depth)
-       endif
-       if(iand(flags,proc_run_always)/=0) then
-          call append_to_line(iunit,str,i,'A',.false.,depth)
-       endif
        if(iand(flags,proccall_is_inline)/=0) then
           call append_to_line(iunit,str,i,'I',.false.,depth)
        endif

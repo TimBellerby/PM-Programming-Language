@@ -109,8 +109,10 @@ module pm_vmdefs
   integer,parameter:: op_check_logical = op_misc + 25
   integer,parameter:: op_chan_array_elem = op_misc + 26
   integer,parameter:: op_chan_array_vect = op_misc + 27
+  integer,parameter:: op_list_concat = op_misc + 28
+  integer,parameter:: op_list_splice = op_misc + 29
 
-  integer,parameter:: op_misc2=op_chan_array_vect
+  integer,parameter:: op_misc2=op_list_splice
 
   integer,parameter:: op_array_get_elem = op_misc2 + 1
   integer,parameter:: op_array_set_elem = op_misc2 + 2
@@ -240,7 +242,8 @@ module pm_vmdefs
   integer,parameter:: op_nullify = first_assign_op + 6
   integer,parameter:: op_assign = first_assign_op + 7
   integer,parameter:: op_fill = first_assign_op + 8
-  integer,parameter:: last_assign_op = first_assign_op+8
+  integer,parameter:: op_number = first_assign_op + 9
+  integer,parameter:: last_assign_op = first_assign_op+9
 
   integer,parameter:: op_eq = last_assign_op +1
   integer,parameter:: op_ne = last_assign_op +2
@@ -693,6 +696,7 @@ module pm_vmdefs
 
   integer,parameter:: num_op=op_stop_comp
 
+  integer,parameter:: last_fold=-1
   integer,parameter:: op_add_fold=-1
   integer,parameter:: op_sub_fold=-2
   integer,parameter:: op_mult_fold=-3
@@ -723,7 +727,9 @@ module pm_vmdefs
   integer,parameter:: op_concat_fold = -28
   integer,parameter:: op_num_elems_fold = -29
   integer,parameter:: op_type_include_fold = -30
-  integer,parameter:: min_op=op_type_include_fold
+  integer,parameter:: first_fold=-30
+  integer,parameter:: op_clone_var = -31
+  integer,parameter:: min_op=op_clone_var
  
   integer,dimension(0:num_op):: op_flags
   integer,parameter:: op_is_call=1
@@ -817,6 +823,8 @@ module pm_vmdefs
   data op_flags(op_extract_first)   /0/
   data op_flags(op_chan_array_elem) /0/
   data op_flags(op_chan_array_vect) /0/
+  data op_flags(op_list_concat)     /0/
+  data op_flags(op_list_splice)     /0/
 
   data op_flags(op_array_get_elem)  /0/
   data op_flags(op_array_set_elem)  /0/
@@ -940,6 +948,7 @@ module pm_vmdefs
   data op_flags(op_nullify)          /0/
   data op_flags(op_assign)           /0/
   data op_flags(op_fill)             /0/
+  data op_flags(op_number)           /0/
 
   data op_flags(op_eq)               /op_is_arith/
   data op_flags(op_ne)               /op_is_arith/
@@ -1518,6 +1527,8 @@ contains
     op_names(op_extract_first)='extract_first'
     op_names(op_chan_array_elem)='chan_array_elem'
     op_names(op_chan_array_vect)='chan_array_vect'
+    op_names(op_list_concat)='list_concat'
+    op_names(op_list_splice)='list_splice'
 
     op_names(op_array_get_elem)='array_get_elem'
     op_names(op_array_set_elem)='array_set_elem'
@@ -1641,6 +1652,7 @@ contains
     op_names(op_nullify)='nullify'
     op_names(op_assign)='assign'
     op_names(op_fill)='fill'
+    op_names(op_number)='number'
 
     op_names(op_eq)='eq'
     op_names(op_ne)='ne'
@@ -2099,6 +2111,7 @@ contains
     op_names(op_concat_fold)='concat_fold'
     op_names(op_num_elems_fold)='num_elems_fold'
     op_names(op_type_include_fold)='type_include_fold'
+    op_names(op_clone_var)='clone_var'
      
 !!$    do i=op_call,op_comm_loop_par
 !!$       if(op_names(i)=='??')then
@@ -2435,7 +2448,7 @@ contains
          call append(')')
          tno2=var(v1+2)/cvar_flag_mult
          tk=pm_type_kind(context,tno2)
-         if(tk==pm_type_is_struct.or.tk==pm_type_is_rec) then
+         if(tk==pm_type_is_rec) then
             ename=abs(pm_type_elem_name(context,tno2,v2))
             if(ename>=sym_d1.and.ename<=sym_d7) then
                call append('.'//pm_int_as_string(v2))
@@ -2477,7 +2490,7 @@ contains
             call group(index,v1,v2,'<','>',.false.)
          case(v_is_struct)
             tk=pm_type_kind(context,tno)
-            if(tk==pm_type_is_struct.or.tk==pm_type_is_rec) then
+            if(tk==pm_type_is_rec) then
                call group(index,v1,v2,trim(pm_name_as_string(context,pm_type_elem_name(context,tno,0)))//&
                     '{','}',.false.)
             else

@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2025
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -189,7 +189,7 @@ contains
        endif
     endif
     
-    if(opcode==op_comm_call) then
+    if(opcode==op_comm_call.and..false.) then
        oparg=pc%data%i16(pc%offset+4_pm_p)
        arg(2)=stack%data%ptr(stack%offset+oparg)
        ve=arg(2)%data%ptr(arg(2)%offset+1)
@@ -321,19 +321,19 @@ contains
     endif
     
     select case(opcode)
-    case(op_call)
+    case(op_call,op_comm_call)
        ! op_call #proc ve args...
        ! op_comm_call #proc ve args...
        newfunc=context%funcs%data%ptr(&
             context%funcs%offset+opcode2)
        if(run_call(newfunc)) goto 999
-    case(op_comm_call)
-       ve=arg(2)%data%ptr(arg(2)%offset+1)
-       esize=ve%data%ln(ve%offset)
-       ve=arg(2)%data%ptr(arg(2)%offset)
-       newfunc=context%funcs%data%ptr(&
-            context%funcs%offset+opcode2)
-       if(run_call(newfunc)) goto 999
+!!$    case(op_comm_call)
+!!$       ve=arg(1)%data%ptr(arg(1)%offset+1)
+!!$       esize=ve%data%ln(ve%offset)
+!!$       ve=arg(1)%data%ptr(arg(1)%offset)
+!!$       newfunc=context%funcs%data%ptr(&
+!!$            context%funcs%offset+opcode2)
+!!$       if(run_call(newfunc)) goto 999
     case(op_skip_empty)
        ! op_skip_empty #0_or_2 ve &newve
        ! op_skip_empty #1 ve &newve oldve
@@ -1181,7 +1181,12 @@ contains
           enddo
        endif
     case(op_nullify)
-       call set_arg(2,pm_null_obj)
+       do i=2,nargs
+          call set_arg(i,pm_null_obj)
+       enddo
+    case(op_number)
+       ibuffer(1)=opcode2
+       call fill_args_from_ibuffer(2,2,ibuffer)
     case(op_clone_ve)
        stack%data%ptr(stack%offset+opcode2)=arg(1)
     case(op_logical_return)
@@ -1267,18 +1272,39 @@ contains
        errno=0
        call vector_assign(context,arg(2),arg(3),ve,errno,esize)
        if(errno/=0) goto 997
-    case(op_struct)
-       v=pm_fast_newusr(context,pm_struct_type,int(nargs,pm_p))
-       call set_arg(2,v)
-       v%data%ptr(v%offset+1_pm_p)=&
-            pm_fast_tinyint(context,opcode2)
-       v%data%ptr(v%offset+2:v%offset+nargs-1)=arg(3:nargs)
-    case(op_rec)
+    case(op_struct,op_rec)
        v=pm_fast_newusr(context,pm_rec_type,int(nargs,pm_p))
        call set_arg(2,v)
        v%data%ptr(v%offset+1_pm_p)=&
             pm_fast_tinyint(context,opcode2)
        v%data%ptr(v%offset+2:v%offset+nargs-1)=arg(3:nargs)
+    case(op_list_concat)
+       j=pm_fast_esize(arg(3))
+       jj=pm_fast_esize(arg(4))
+       v=pm_fast_newusr(context,pm_rec_type,j+jj)
+       call set_arg(2,v)
+       v%data%ptr(v%offset:v%offset+j)=arg(3)%data%ptr(arg(3)%offset:arg(3)%offset+j)
+       v%data%ptr(v%offset+j+1:v%offset+pm_fast_esize(v))=&
+            arg(4)%data%ptr(arg(4)%offset+2:arg(4)%offset+jj)
+    case(op_list_splice)
+       j=pm_fast_esize(arg(3))
+       jj=pm_fast_esize(arg(4))
+       i=arg(5)%data%ln(arg(5)%offset)
+       ii=arg(6)%data%ln(arg(6)%offset)
+       v=pm_fast_newusr(context,pm_rec_type,int(j+jj-1-ii,pm_p))
+       call set_arg(2,v)
+       v%data%ptr(v%offset+1_pm_p)=&
+            pm_fast_tinyint(context,opcode2)
+       if(i>0) then
+          v%data%ptr(v%offset+2:v%offset+i+1)=&
+               arg(3)%data%ptr(arg(3)%offset+2:arg(3)%offset+i+1)
+       endif
+       v%data%ptr(v%offset+i+2:v%offset+i+jj)=&
+            arg(4)%data%ptr(arg(4)%offset+2:arg(4)%offset+jj)
+       if(i<j) then
+          v%data%ptr(v%offset+i+jj+1:v%offset+pm_fast_esize(v))=&
+               arg(3)%data%ptr(arg(3)%offset+i+3+ii:arg(3)%offset+j)
+       endif
     case(op_check)
        if(pm_fast_isnull(ve)) then
           if(.not.all(arg(3)%data%l(arg(3)%offset:&
@@ -1404,7 +1430,7 @@ contains
        if(nargs==7) then
           call set_arg(2,vector_iota(context,&
                arg(3),arg(4),arg(5),arg(6),&
-               arg(7)%data%ptr(arg(7)%offset+1)))
+               arg(1)%data%ptr(arg(1)%offset+1)))
        else
           call set_arg(2,vector_iota_trunc(context,&
                arg(3),arg(4),arg(5),arg(6),arg(7),arg(8),&
@@ -1501,8 +1527,8 @@ contains
        
     case(op_pack)
        call set_arg(2,array_pack(context,arg(3),opcode2,arg(4),arg(5),arg(6)))
-    case(op_advance)
-       call set_arg(2,advance(context,arg(3),arg(4)))
+!!$    case(op_advance)
+!!$       call set_arg(2,advance(context,arg(3),arg(4)))
       
     case(op_get_dims)
        n=(nargs-2)/2
@@ -10279,6 +10305,7 @@ contains
     n=pm_fast_esize(hash)+1_pm_ln
     if(.not.pm_fast_isnull(ve)) hash=vector_zero_unused(context,hash,ve)
     m=sum(hash%data%ln(hash%offset:hash%offset+n-1_pm_ln))-1_pm_ln
+    !!! Add something for BIG blocks
     if(m>=0) then
        newve=pm_assign_new(context,newve,1_pm_ln,pm_long,n+4_pm_ln,.false.)
        newve%data%ln(newve%offset)=m
@@ -10425,7 +10452,7 @@ contains
     t(2)=tname
     do i=1,nargs
        tno=pm_fast_typeof(args(i))
-       if(tno>=pm_struct_type.and.tno<=pm_array_type) then
+       if(tno>=pm_rec_type.and.tno<=pm_array_type) then
           tno=args(i)%data%ptr(args(i)%offset+1_pm_p)%offset
        endif
        t(i+2)=tno
@@ -10444,7 +10471,7 @@ contains
     type(pm_ptr),intent(in):: arg
     integer(pm_i16):: tno
     tno=pm_fast_typeof(arg)
-    if(tno>=pm_struct_type.and.tno<=pm_elemref_type) then
+    if(tno>=pm_rec_type.and.tno<=pm_elemref_type) then
        tno=arg%data%ptr(arg%offset+1_pm_p)%offset
     endif
   contains
