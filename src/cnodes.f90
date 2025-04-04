@@ -142,8 +142,9 @@ module pm_cnodes
   integer,parameter:: var_is_key=512
   integer,parameter:: var_is_varg=1024
   integer,parameter:: var_is_par_var=2048
-  integer,parameter:: var_is_not_inited=4096
-  integer,parameter:: var_is_maybe_not_private=8192
+  integer,parameter:: var_is_maybe_not_private=4096
+  integer,parameter:: var_is_where=8192
+  integer,parameter:: var_is_split=16384
 
   ! Offsets into proc & builtin nodes
   integer,parameter:: pr_ptype=cnode_args+0

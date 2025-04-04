@@ -119,48 +119,47 @@ module pm_symbol
   integer,parameter:: sym_ortho = first_key + 13
   integer,parameter:: sym_is = first_key + 14
   integer,parameter:: sym_is_not = first_key + 15 
-  integer,parameter:: sym_as = first_key + 16
-
-  ! Unary operators 
-  integer,parameter:: sym_not = first_key + 17
+  integer,parameter:: sym_not = first_key + 16
   integer,parameter:: last_operator = sym_not
 
   ! Statement / expression general keywords
-  integer,parameter:: sym_null = last_operator + 1
-  integer,parameter:: sym_true = last_operator + 2
-  integer,parameter:: sym_false = last_operator + 3
-  integer,parameter:: sym_struct = last_operator + 4
-  integer,parameter:: sym_rec = last_operator + 5
-  integer,parameter:: sym_any = last_operator + 6
-  integer,parameter:: sym_present = last_operator + 7
-  integer,parameter:: sym_unique = last_operator + 8
-  integer,parameter:: sym_fix = last_operator + 9
-  integer,parameter:: sym_new = last_operator + 10
-  integer,parameter:: sym_when = last_operator + 11
+  integer,parameter:: sym_as = last_operator+1
+  integer,parameter:: sym_null = last_operator + 2
+  integer,parameter:: sym_true = last_operator + 3
+  integer,parameter:: sym_false = last_operator + 4
+  integer,parameter:: sym_struct = last_operator + 5
+  integer,parameter:: sym_rec = last_operator + 6
+  integer,parameter:: sym_any = last_operator + 7
+  integer,parameter:: sym_present = last_operator + 8
+  integer,parameter:: sym_unique = last_operator + 9
+  integer,parameter:: sym_fix = last_operator + 10
+  integer,parameter:: sym_new = last_operator + 11
+  integer,parameter:: sym_when = last_operator + 12
   integer,parameter:: last_expr = sym_when
   integer,parameter:: last_word = last_expr
 
   ! Modes
-  integer,parameter:: sym_private  =  last_word + 1
-  integer,parameter:: first_mode = sym_private
-  integer,parameter:: sym_joint    =  last_word + 2
-  integer,parameter:: sym_uniform  =  last_word + 3
-  integer,parameter:: sym_indep    =  last_word + 4
+  integer,parameter:: sym_individual  =  last_word + 1
+  integer,parameter:: first_mode = sym_individual
+  integer,parameter:: sym_connected   =  last_word + 2
+  integer,parameter:: sym_constrained =  last_word + 3
+  integer,parameter:: sym_uniform     =  last_word + 4
   
-  integer,parameter:: sym_chan     =  last_word + 5
-  integer,parameter:: sym_nhd      =  last_word + 6
-  integer,parameter:: sym_indexed  =  last_word + 7
-  integer,parameter:: sym_local    =  last_word + 8
-
-  integer,parameter:: sym_invar    =   last_word + 9
-  integer,parameter:: sym_shared   =   last_word + 10
-  integer,parameter:: last_mode    =   sym_shared
-  integer,parameter:: last_key     =   sym_shared
+  integer,parameter:: sym_private     =  last_word + 5
+  integer,parameter:: sym_chan        =  last_word + 6
+  integer,parameter:: sym_nhd         =  last_word + 7
+  integer,parameter:: sym_indexed     =  last_word + 8
+  integer,parameter:: sym_joint       =  last_word + 9
+  integer,parameter:: sym_invar       =   last_word + 10
+  integer,parameter:: sym_shared      =   last_word + 11
+  
+  integer,parameter:: last_mode  =   sym_shared
+  integer,parameter:: last_key =   sym_shared
   
   ! Declaration keywords
   integer,parameter:: sym_package = last_key +1
+  integer,parameter:: first_decl = sym_package
   integer,parameter:: sym_use = last_key + 2
-  integer,parameter:: first_decl = sym_use
   integer,parameter:: sym_proc = last_key + 3
   integer,parameter:: sym_param = last_key + 4
   integer,parameter:: sym_type = last_key + 5
@@ -195,7 +194,7 @@ module pm_symbol
   integer,parameter:: sym_const = last_decl + 23
   integer,parameter:: sym_each = last_decl + 24
   integer,parameter:: sym_where = last_decl + 25
-  integer,parameter:: sym_distinct = last_decl + 26
+  integer,parameter:: sym_split = last_decl + 26
   integer,parameter:: sym_forall = last_decl + 27
   integer,parameter:: sym_interface = last_decl + 28
   integer,parameter:: sym_if_invar = last_decl + 29
@@ -203,12 +202,13 @@ module pm_symbol
   integer,parameter:: sym_until_invar = last_decl + 31
   integer,parameter:: sym_foreach_invar = last_decl + 32
   integer,parameter:: sym_switch_invar = last_decl + 33
-  integer,parameter:: sym_proceed= last_decl + 34
-  integer,parameter:: sym_after= last_decl + 35
-  integer,parameter:: sym_any_invar= last_decl + 36
-  integer,parameter:: sym_all = last_decl + 37
-  integer,parameter:: sym_sync_while = last_decl + 38
-  integer,parameter:: last_resv = sym_sync_while
+  integer,parameter:: sym_any_invar= last_decl + 34
+  integer,parameter:: sym_all = last_decl + 35
+  integer,parameter:: sym_sync_while = last_decl + 36
+  integer,parameter:: sym_while_sync = last_decl + 37
+  integer,parameter:: sym_until_sync = last_decl + 38
+  integer,parameter:: sym_foreach_sync = last_decl + 39
+  integer,parameter:: last_resv = sym_foreach_sync
 
   ! Names used by internal system
   integer,parameter:: sym_pm_send = last_resv + 1
@@ -382,29 +382,32 @@ module pm_symbol
   integer,parameter:: sym_iter_args=hook + 36
   integer,parameter:: sym_pm_foreach_stmt=hook + 37
   integer,parameter:: sym_pm_foreach_invar_stmt=hook + 38
-  integer,parameter:: sym_pm_for_stmt = hook + 39
-  integer,parameter:: sym_pm_forall_stmt = hook + 40
-  integer,parameter:: sym_pm_over_stmt = hook + 41
-  integer,parameter:: sym_lhs_and_val = hook + 42
-  integer,parameter:: sym_rhs_and_val = hook + 43
-  integer,parameter:: sym_make_var= hook + 44
-  integer,parameter:: sym_make_chan_var = hook + 45
-  integer,parameter:: sym_make_nhd_var = hook + 46
-  integer,parameter:: sym_make_lcl_var = hook + 47
-  integer,parameter:: sym_make_invar_var = hook + 48
-  integer,parameter:: sym_make_shared_var = hook + 49
-  integer,parameter:: sym_make_const = hook + 50
-  integer,parameter:: sym_chan_stmt = hook + 51
-  integer,parameter:: sym_invar_stmt = hook + 52
-  integer,parameter:: sym_shared_stmt = hook + 53
-  integer,parameter:: sym_dechan = hook + 54
-  integer,parameter:: sym_check_iter = hook + 55
-  integer,parameter:: sym_check_iter_amp = hook + 56
-  integer,parameter:: sym_check_iter_star = hook + 57
-  integer,parameter:: sym_all_stmt = hook + 58
-  integer,parameter:: sym_lhs_and_val_sync = hook + 59
-  integer,parameter:: sym_iter_ref = hook + 60
-  integer,parameter:: hook1 = hook + 60
+  integer,parameter:: sym_pm_foreach_sync_stmt= hook + 39
+  integer,parameter:: sym_pm_for_stmt = hook + 40
+  integer,parameter:: sym_pm_forall_stmt = hook + 41
+  integer,parameter:: sym_pm_over_stmt = hook + 42
+  integer,parameter:: sym_pm_par_stmt = hook + 43
+  integer,parameter:: sym_lhs_and_val = hook + 44
+  integer,parameter:: sym_rhs_and_val = hook + 45
+  integer,parameter:: sym_make_var= hook + 46
+  integer,parameter:: sym_make_chan_var = hook + 47
+  integer,parameter:: sym_make_nhd_var = hook + 48
+  integer,parameter:: sym_make_lcl_var = hook + 49
+  integer,parameter:: sym_make_invar_var = hook + 50
+  integer,parameter:: sym_make_shared_var = hook + 51
+  integer,parameter:: sym_make_const = hook + 52
+  integer,parameter:: sym_chan_stmt = hook + 53
+  integer,parameter:: sym_invar_stmt = hook + 54
+  integer,parameter:: sym_shared_stmt = hook + 55
+  integer,parameter:: sym_dechan = hook + 56
+  integer,parameter:: sym_check_iter = hook + 57
+  integer,parameter:: sym_check_iter_amp = hook + 58
+  integer,parameter:: sym_check_iter_star = hook + 59
+  integer,parameter:: sym_all_stmt = hook + 60
+  integer,parameter:: sym_lhs_and_val_sync = hook + 61
+  integer,parameter:: sym_iter_ref = hook + 62
+  integer,parameter:: sym_check_task = hook + 63
+  integer,parameter:: hook1 = hook + 63
   
   integer,parameter:: sym_d1= hook1 + 1
   integer,parameter:: sym_d2= hook1 + 2
@@ -520,7 +523,7 @@ module pm_symbol
   integer,parameter:: sym_split_param =   hook5 + 32
   integer,parameter:: sym_dim_noinit  =   hook5 + 33
   integer,parameter:: sym_pm_node     =   hook5 + 34
-  integer,parameter:: sym_init_var    =   hook5 + 35
+  integer,parameter:: sym_init_const  =   hook5 + 35
   integer,parameter:: sym_pm_dump     =   hook5 + 36
 
   integer,parameter:: hook6 = 36 + hook5
@@ -624,15 +627,17 @@ module pm_symbol
   data sym_names(sym_fix)              /'fix'/
   data sym_names(sym_new)              /'new'/
   data sym_names(sym_when)             /'when'/
+
+  data sym_names(sym_uniform)          /'unif'/
+  data sym_names(sym_individual)       /'indiv'/
+  data sym_names(sym_connected)        /'cntd'/
+  data sym_names(sym_constrained)      /'cnstr'/
   
   data sym_names(sym_private)          /'priv'/
-  data sym_names(sym_joint)            /'jnt'/
-  data sym_names(sym_uniform)          /'unif'/
-  data sym_names(sym_indep)            /'indep'/
-  data sym_names(sym_indexed)          /'idx'/
   data sym_names(sym_chan)             /'chan'/
   data sym_names(sym_nhd)              /'nhd'/
-  data sym_names(sym_local)            /'lcl'/
+  data sym_names(sym_indexed)          /'idx'/
+  data sym_names(sym_joint)            /'jnt'/
   data sym_names(sym_invar)            /'invar'/
   data sym_names(sym_shared)           /'shrd'/
 
@@ -670,7 +675,7 @@ module pm_symbol
   data sym_names(sym_const)            /'const'/
   data sym_names(sym_each)             /'foreach'/
   data sym_names(sym_where)            /'where'/
-  data sym_names(sym_distinct)         /'distinct'/
+  data sym_names(sym_split)            /'split'/
   data sym_names(sym_forall)           /'forall'/
   data sym_names(sym_interface)        /'interface'/
   data sym_names(sym_switch_invar)     /'switch invar'/
@@ -678,11 +683,12 @@ module pm_symbol
   data sym_names(sym_while_invar)      /'while invar'/
   data sym_names(sym_until_invar)      /'until invar'/
   data sym_names(sym_foreach_invar)    /'foreach invar'/
-  data sym_names(sym_proceed)          /'proceed'/
-  data sym_names(sym_after)            /'after'/
   data sym_names(sym_any_invar)        /'any invar'/
   data sym_names(sym_all)              /'all'/
-  data sym_names(sym_sync_while)       /'sync while'/
+  data sym_names(sym_sync_while)       /'sync(while)'/
+  data sym_names(sym_while_sync)       /'while sync'/
+  data sym_names(sym_until_sync)       /'until sync'/
+  data sym_names(sym_foreach_sync)     /'foreach sync'/
   
   data sym_names(sym_pm_send)          /'PM__send'/
   data sym_names(sym_pm_recv)          /'PM__recv'/
@@ -847,9 +853,11 @@ module pm_symbol
   data sym_names(sym_iter_args)        /'PM__iter_args'/
   data sym_names(sym_pm_foreach_stmt)  /'PM__foreach_stmt'/
   data sym_names(sym_pm_foreach_invar_stmt) /'PM__foreach_invar_stmt'/
+  data sym_names(sym_pm_foreach_sync_stmt)  /'PM__foreach_sync_stmt'/
   data sym_names(sym_pm_for_stmt)      /'PM__for_stmt'/
   data sym_names(sym_pm_forall_stmt)   /'PM__forall_stmt'/
   data sym_names(sym_pm_over_stmt)     /'PM__over_stmt'/
+  data sym_names(sym_pm_par_stmt)      /'PM__par_stmt'/
   data sym_names(sym_lhs_and_val)      /'PM__lhs_and_val'/
   data sym_names(sym_rhs_and_val)      /'PM__rhs_and_val'/
   data sym_names(sym_make_var)         /'PM__make_var'/
@@ -872,6 +880,7 @@ module pm_symbol
   data sym_names(sym_all_stmt)         /'PM__all_stmt'/
   data sym_names(sym_lhs_and_val_sync) /'PM__lhs_and_val_sync'/
   data sym_names(sym_iter_ref)         /'PM__iter_ref'/
+  data sym_names(sym_check_task)       /'PM__check_task'/
   
   data sym_names(sym_d1)               /'PM__d1'/
   data sym_names(sym_d2)               /'PM__d2'/
@@ -986,7 +995,7 @@ module pm_symbol
   data sym_names(sym_get_chunk)        /'chunk'/
   data sym_names(sym_pm_at)            /'PM__at'/
   data sym_names(sym_pm_node)          /'PM__node'/
-  data sym_names(sym_init_var)         /'PM__init_var'/
+  data sym_names(sym_init_const)       /'PM__init_const'/
 
   data sym_names(sym_infer_stack)      /'infer_stack'/
   data sym_names(sym_infer_type)       /'infer_type'/

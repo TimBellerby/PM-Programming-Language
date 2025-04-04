@@ -945,7 +945,7 @@ contains
           endif
           call release_var(wcd,new_ve)
        endif
-    case(sym_while)
+    case(sym_while,sym_while_invar,sym_while_sync)
        tno=check_arg_type(wcd,args,rv,2)
        if(tno==wcd%false_name) return
        if(restart) return
@@ -983,7 +983,7 @@ contains
           call wc_arg(wcd,cnode_arg(args,2),.false.,rv,ve)
           call release_var(wcd,new_ve)
        endif
-    case(sym_until)
+    case(sym_until,sym_until_invar,sym_until_sync)
        if(restart) return
        if(cblock_has_comm(cnode_arg(args,1))) then
           break=.true.
@@ -1252,6 +1252,10 @@ contains
        new_ve=alloc_var(wcd,pm_ve_type)
        call wc_call(wcd,callnode,op_chan,0,2,0,ve)
        call wc(wcd,-new_ve)
+    case(sym_task)
+       do i=3,nargs,3
+          break2=wcode_cblock(wcd,cnode_arg(args,i),rv,ve)
+       enddo
     case(sym_any)
        call any_statement
     case(sym_pm_each_index)

@@ -1049,7 +1049,7 @@ contains
        endif
        cmode=min(cmode,mode)
     enddo
-    if(cmode==sym_chan) cmode=sym_private
+    if(cmode==sym_chan.or.cmode==sym_nhd) cmode=sym_private
     combined_mode=cmode
   end function pm_type_combine_modes
 
@@ -1068,12 +1068,10 @@ contains
        cmin=min(cmin,mode)
        cmax=max(cmax,mode)
     enddo
-    if(cmin>sym_joint) then
+    if(cmin>=sym_joint) then
        mixed_mode=cmin
     elseif(cmax>=sym_joint) then
        mixed_mode=sym_joint
-    elseif(cmin==sym_local) then
-       mixed_mode=sym_local
     else
        mixed_mode=sym_private
     endif
@@ -1085,6 +1083,20 @@ contains
   function pm_mode_includes(mode1,mode2) result(ok)
     integer,intent(in):: mode1,mode2
     logical:: ok
+    if(mode1<sym_private) then
+       select case(mode1)
+       case(sym_constrained)
+          ok=mode2/=sym_private.and.mode2/=sym_individual
+       case(sym_connected)
+          ok=mode2>=sym_chan.and.mode2<=sym_joint
+       case(sym_individual) 
+          ok=mode2<sym_invar
+       case(sym_uniform) 
+          ok=mode2>=sym_invar
+       case default
+          call pm_panic('pm_mode_includes')
+       end select
+    endif
     ok=mode1==mode2
   end function pm_mode_includes
 

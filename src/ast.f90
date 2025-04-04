@@ -151,7 +151,8 @@ module pm_ast
   integer,parameter:: call_is_cond =          2**15
   integer,parameter:: call_is_no_touch =      2**16
   integer,parameter:: call_is_unlabelled =    2**17
-  integer,parameter:: call_is_uninitialised = 2**18
+  integer,parameter:: call_takes_uninit =     2**18
+  integer,parameter:: call_converts_uninit =  2**19
   
 contains
 

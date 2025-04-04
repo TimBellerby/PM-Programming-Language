@@ -569,7 +569,8 @@ contains
     do i=1,n
        call inf_cblock(coder,cnode_arg(arglist,i*2-1+n+n))
 
-       dtype = pm_type_strip_literal(coder%context,get_arg_type(coder,callnode,cnode_arg(arglist,i*2+n+n)))
+       dtype = pm_type_strip_literal(coder%context,&
+            get_arg_type(coder,callnode,cnode_arg(arglist,i*2+n+n)))
   
        if(keytypes(i)>=0) then
           ptype=proc_keys%data%i(proc_keys%offset+i-1+n)
@@ -887,7 +888,7 @@ contains
        ! Negative signatures indicate a control structure/special case
        ! call (with symbol sig)
        select case(sig)
-       case(sym_while)
+       case(sym_while,sym_while_invar,sym_while_sync)
           call check_loop_writes(4)
           list=cnode_arg(args,1)
           list2=cnode_arg(args,3)
@@ -896,7 +897,7 @@ contains
              call clear_cblock_mark(list)
              call clear_cblock_mark(list2)
              call inf_cblock(coder,list)
-             call check_logical(2)
+             call check_logical(2,sig==sym_while_invar)
              if(arg_type(2)==coder%false_fix) return
              call inf_cblock(coder,list2)
              if(.not.(cblock_marked(list).or.&
@@ -908,13 +909,8 @@ contains
                 exit
              endif
           enddo
-          if(cblock_has_comm(cnode_arg(args,1))&
-               .or.cblock_has_comm(cnode_arg(args,3))) then
-             !!! call set_call_sig(merge(1,0,coder%par_kind2<=par_mode_conc))
-          else
-             call set_call_sig(0)
-          endif
-       case(sym_until,sym_each)
+          if(sig/=sym_while) call mark_loop_cond(5)
+       case(sym_until,sym_until_invar,sym_until_sync,sym_each)
           call check_loop_writes(3)
           list=cnode_arg(args,1)
           counter=0
@@ -929,16 +925,17 @@ contains
                 exit
              endif
           enddo
-          call check_logical(2)
-          if(cblock_has_comm(list)) then
-             !!! call set_call_sig(merge(1,0,coder%par_kind<=par_mode_conc))
-          else
-             call set_call_sig(0)
-          endif
+          call check_logical(2,sig==sym_until_invar)
+          if(sig/=sym_until) call mark_loop_cond(5)
        case(sym_if,sym_if_invar)
-          call inf_if(count_updates(cnode_arg(args,4),2))
+          call inf_if(count_updates(cnode_arg(args,4),2),sig==sym_if_invar)
        case(sym_pm_for,sym_pm_over)
           call inf_cblock(coder,cnode_arg(args,2))
+       case(sym_task)
+          do i=1,nargs,3
+             call inf_cblock(coder,cnode_arg(args,i+1))
+             call inf_cblock(coder,cnode_arg(args,i+2))
+          enddo
        case(sym_do,sym_pm_shared,sym_pm_shared_always,sym_pm_chan,sym_pm_chan_always)
           call inf_cblock(coder,cnode_arg(args,1))
        case(sym_sync)
@@ -1234,7 +1231,7 @@ contains
                      'Check condition will always fail') 
              endif
           elseif(tno/=coder%true_fix) then
-             call check_logical(3)
+             call check_logical(3,.false.)
              coder%stack(coder%base-2)=ior(coder%stack(coder%base-2),proc_is_impure)
           endif
        case(sym_fix,sym_literal)
@@ -1347,12 +1344,13 @@ contains
     include 'ftiny.inc'
     include 'ftypeno.inc'
 
-    subroutine inf_if(nupdates)
+    subroutine inf_if(nupdates,isinvar)
       integer,intent(in):: nupdates
+      logical,intent(in):: isinvar
       integer,dimension(nupdates):: save_var_types
       integer:: i,tno,typ
       type(pm_ptr):: changelist,writelist,p,var
-      call check_logical(1)
+      call check_logical(1,isinvar)
       tno=arg_type(1)
       changelist=cnode_arg(args,4)
       writelist=cnode_arg(changelist,2)
@@ -1642,24 +1640,46 @@ contains
     !==================================================================
     ! Check if argument m has logical type (bool in PM)
     !==================================================================
-    subroutine check_logical(m)
+    subroutine check_logical(m,isinvar)
       integer,intent(in):: m
-      integer:: slt
-      integer:: ty
-      integer:: i
-      type(pm_ptr):: tv
-      integer:: tno
-      tno=arg_type(m)
+      logical,intent(in):: isinvar
+      integer:: tno,mode
+      tno=arg_type_with_mode(m)
       if(tno/=error_type) then
+         tno=pm_type_strip_mode(coder%context,tno,mode)
          if(tno/=pm_logical.and.tno/=coder%true_literal.and.tno/=coder%false_literal.and.&
               tno/=coder%true_fix.and.tno/=coder%false_fix) then
             call inf_error_with_trace(coder,callnode,&
                  'Expecting boolean expression, got: '//&
                  trim(pm_type_as_string(coder%context,tno)))
          endif
+         if(isinvar.and.mode/=sym_invar) then
+            call inf_error_with_trace(coder,callnode,&
+                 'Expecting "invar" expression, got: '//&
+                 trim(sym_names(mode)))
+         endif
       endif
     end subroutine check_logical
 
+        
+    !==================================================================
+    ! Set loop call signature to 1 if it is in a conditional
+    ! (incling masked) context
+    !==================================================================
+    subroutine mark_loop_cond(m)
+      integer,intent(in):: m
+      integer:: tno,mark
+      tno=arg_type(m)
+      if(tno==pm_logical) then
+         mark=1
+      elseif(cnode_flags_set(callnode,call_flags,call_is_cond)) then
+         mark=1
+      else
+         mark=0
+      endif
+      call set_call_sig(mark)
+    end subroutine mark_loop_cond
+    
     !==================================================================
     ! Check if argument m has long type (int type in PM)
     !==================================================================
@@ -1887,7 +1907,7 @@ contains
 
     do i=1,nargs
        tno=get_arg_type(coder,callnode,cnode_arg(args,i+nret),&
-            init=iand(flags,call_is_uninitialised)/=0)
+            init=flags)
        coder%wstack(coder%wtop+i)=tno
        undef_arg=undef_arg.or.tno<=0
     enddo
@@ -1938,7 +1958,6 @@ contains
        if(amps/=0.and..not.ignore_rules) then
           amplocs=pm_name_val(coder%context,amps)
           do i=0,pm_fast_esize(amplocs)
-             write(*,*) 'AMPLOC-->',amplocs%data%i(amplocs%offset+i),i,pm_fast_esize(amplocs)
              tno2=pm_type_strip_mode(coder%context,&
                   coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i)+nkey),mode2)
              if(tno2>0) then
@@ -3005,7 +3024,7 @@ contains
   function get_arg_type(coder,callnode,arg,init) result(tno)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,arg
-    logical,intent(in),optional:: init
+    integer,intent(in),optional:: init
     integer:: tno
     if(cnode_get_kind(arg)==cnode_is_var) then
        tno=get_var_type(coder,callnode,arg,init)
@@ -3019,13 +3038,16 @@ contains
     endif
   end function get_arg_type
   
-  !=================================================
+  !============================================================================
   ! Get currently resolved type (&mode) for variable
-  !=================================================
+  ! Can pass call flags through init parameter
+  !  - call_takes_init       - no error for unitialised value
+  !  - call_converts_uninit  - Convert uninitialsed value to a type value
+  !============================================================================
   function get_var_type(coder,callnode,var,init) result(tno)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,var
-    logical,intent(in),optional:: init
+    integer,intent(in),optional:: init
     integer:: tno
     integer:: tk
     tno=coder%stack(cnode_get_num(var,var_index)+coder%base)
@@ -3039,8 +3061,10 @@ contains
     tk=pm_type_kind(coder%context,tno)
     if(tk==pm_type_is_uninitialised) then
        if(present(init)) then
-          if(init) then
-             tno=pm_type_arg(coder%context,tno,1)
+          if(iand(init,call_takes_uninit)/=0) then
+             if(iand(init,call_converts_uninit)/=0) then
+                tno=pm_type_arg(coder%context,tno,1)
+             endif
              return
           endif
        endif
