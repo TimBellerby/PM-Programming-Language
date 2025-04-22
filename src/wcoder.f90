@@ -945,7 +945,7 @@ contains
           endif
           call release_var(wcd,new_ve)
        endif
-    case(sym_while,sym_while_invar,sym_while_sync)
+    case(sym_while,sym_while_invar)
        tno=check_arg_type(wcd,args,rv,2)
        if(tno==wcd%false_name) return
        if(restart) return
@@ -983,7 +983,7 @@ contains
           call wc_arg(wcd,cnode_arg(args,2),.false.,rv,ve)
           call release_var(wcd,new_ve)
        endif
-    case(sym_until,sym_until_invar,sym_until_sync)
+    case(sym_until,sym_until_invar)
        if(restart) return
        if(cblock_has_comm(cnode_arg(args,1))) then
           break=.true.
@@ -1285,18 +1285,18 @@ contains
        if(pm_is_compiling) then
           i=arg_slot(wcd,cnode_arg(args,1))
           if(cvar_kind(wcd,i)==v_is_group) then
-             do kk=4,nargs
+             do kk=5,nargs
                 call comp_alias(wcd,callnode,pm_null_obj,cnode_arg(args,kk),rv,ve,&
-                     cvar_ptr(wcd,i,kk-3))
+                     cvar_ptr(wcd,i,kk-4))
              enddo
           else
              typ=pm_type_strip_mode(wcd%context,get_arg_type(wcd,cnode_arg(args,1),rv),j)
              tv=pm_type_vect(wcd%context,typ)
-             do kk=4,nargs
-                if(pm_type_needs_storage(wcd%context,pm_tv_arg(tv,kk-3))) then
+             do kk=5,nargs
+                if(pm_type_needs_storage(wcd%context,pm_tv_arg(tv,kk-4))) then
                    slot=arg_slot(wcd,cnode_arg(args,kk))
                    call comp_assign_slots(wcd,callnode,&
-                        cvar_alloc_elem(wcd,i,kk-3),&
+                        cvar_alloc_elem(wcd,i,kk-4),&
                         slot,.true.,rv,ve)
                 endif
              enddo
@@ -1304,9 +1304,9 @@ contains
        else
           typ=check_arg_type(wcd,args,rv,1)
           call wc_call(wcd,callnode,op_rec,&
-               typ,nargs-1,1,ve)
+               typ,nargs-2,1,ve)
           call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
-          do kk=4,nargs
+          do kk=5,nargs
              arg=cnode_arg(args,kk)
              call wc_arg(wcd,cnode_arg(args,kk),.false.,rv,ve)
           enddo
@@ -1911,6 +1911,7 @@ contains
 
     !write(*,*) 'CALLVE> PRE',ve1
 
+     
     if(pm_is_compiling.and.extra_ve>0) then
        extra_ve=0
     endif
@@ -2001,6 +2002,7 @@ contains
     if(pm_is_compiling) then
        call wc_correct_call_args(wcd)
     endif
+
  
   contains
 
@@ -2165,7 +2167,7 @@ contains
          endif
       enddo
     end subroutine comp_keys
-   
+    
   end subroutine wcode_proc_call
 
   !====================================================================

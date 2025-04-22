@@ -1294,7 +1294,7 @@ contains
     
     ! Call attributes but no arguments
     if(parser%sym==sym_open_attr) then
-       if(proc_call_attr(parser,.true.,flags)) return
+       if(call_attr(parser,.true.,flags)) return
        if(parser%sym/=sym_close) then
           if(expect(parser,sym_close)) return
        endif
@@ -1408,7 +1408,7 @@ contains
     
     ! Call attributes if present
     if(parser%sym==sym_open_attr) then
-       if(proc_call_attr(parser,.true.,flags)) return
+       if(call_attr(parser,.true.,flags)) return
     endif
     
     call push_num_val(parser,flags)
@@ -1422,6 +1422,54 @@ contains
     iserr=.false.
   end function arglist
 
+   !======================================================
+  ! Procedure/call attributes
+  !======================================================
+  recursive function call_attr(parser,iscall,flags) result(iserr)
+    type(parse_state),intent(inout):: parser
+    logical,intent(in):: iscall
+    integer,intent(inout):: flags
+    logical:: iserr
+    integer:: m
+    iserr=.true.
+    call scan(parser)
+    do
+       select case(parser%sym) 
+       case(sym_inline)
+          call set_flags(proccall_is_inline)
+          call scan(parser)
+       case(sym_no_inline)
+          call set_flags(proccall_is_no_inline)
+          call scan(parser)
+       case(sym_ignore_rules)
+          call set_flags(call_ignore_rules)
+          call scan(parser)
+       case(sym_keep_literals)   !!! IS THIS TO BE USED?
+          call set_flags(call_is_fixed)
+          call scan(parser)
+       end select
+       if(parser%sym/=sym_comma) exit
+       call scan(parser)
+    enddo
+    if(iand(flags,proccall_is_inline+proccall_is_no_inline)==&
+         proccall_is_inline+proccall_is_no_inline) then
+       call parse_error(parser,&
+            'Cannot have both "<<inline>>" and "<<no_inline>>" attributes together')
+    endif
+    if(expect(parser,sym_close_attr)) return
+    iserr=.false.
+  contains
+    subroutine set_flags(new_flags)
+      integer,intent(in):: new_flags
+      if(iand(flags,new_flags)/=0) then
+         call parse_error(parser,&
+              'Cannot repeat attribute "'//trim(sym_names(parser%sym))//'"')
+      endif
+      flags=ior(flags,new_flags)
+    end subroutine set_flags
+  end function call_attr
+
+  
   !======================================================
   ! Qualifiers
   ! .name [ ]
@@ -2592,9 +2640,6 @@ contains
     if(parser%sym==sym_invar) then
        sym=sym_while_invar
        call scan(parser)
-    elseif(parser%sym==sym_sync) then
-       sym=sym_while_sync
-       call scan(parser)
     endif
     call xexpr(parser)
     if(block_or_single_stmt(parser,sym_while,0,line)) return
@@ -2615,9 +2660,6 @@ contains
     call scan(parser)
     if(parser%sym==sym_invar) then
        sym=sym_until_invar
-       call scan(parser)
-    elseif(parser%sym==sym_sync) then
-       sym=sym_until_sync
        call scan(parser)
     endif
     call xexpr(parser)
@@ -2730,9 +2772,6 @@ contains
     call scan(parser)
     if(parser%sym==sym_invar) then
        sym=sym_foreach_invar
-       call scan(parser)
-    elseif(parser%sym==sym_sync) then
-       sym=sym_foreach_sync
        call scan(parser)
     endif
     if(iter(parser,.false.,var_name)) return
@@ -4524,7 +4563,7 @@ contains
   !======================================================
   ! Procedure/call attributes
   !======================================================
-  recursive function proc_call_attr(parser,iscall,flags) result(iserr)
+  recursive function proc_attr(parser,iscall,flags) result(iserr)
     type(parse_state),intent(inout):: parser
     logical,intent(in):: iscall
     integer,intent(inout):: flags
@@ -4540,11 +4579,8 @@ contains
        case(sym_no_inline)
           call set_flags(proccall_is_no_inline)
           call scan(parser)
-       case(sym_ignore_rules)
-          call set_flags(call_ignore_rules)
-          call scan(parser)
-       case(sym_keep_literals)
-          call set_flags(call_is_fixed)
+       case(sym_always)
+          call set_flags(proc_run_always)
           call scan(parser)
        end select
        if(parser%sym/=sym_comma) exit
@@ -4566,7 +4602,7 @@ contains
       endif
       flags=ior(flags,new_flags)
     end subroutine set_flags
-  end function proc_call_attr
+  end function proc_attr
   
   !======================================================
   ! Procedure declaration
@@ -4675,10 +4711,27 @@ contains
     if(parser%sym==sym_yield) then
        if(yield_clause()) return
     endif
+
+    if(parser%sym==sym_uncond) then
+       flags=ior(flags,proc_is_uncond)
+    elseif(parser%sym==sym_cond) then
+       flags=ior(flags,proc_is_cond)
+    endif
     
+    if(parser%sym==sym_global) then
+       flags=ior(flags,proc_run_shared)
+    elseif(parser%sym==sym_pm_shared) then
+       flags=ior(flags,proc_run_local)
+    elseif(parser%sym==sym_complete) then
+       if(iand(flags,proc_is_uncond)/=0) then
+          call parse_error(parser,'Cannot combine "cplt" and "uncond"')
+       endif
+       flags=ior(flags,proc_run_complete)
+    endif
+
     ! Attributes
     if(parser%sym==sym_open_attr) then
-       if(proc_call_attr(parser,.false.,flags)) goto 999
+       if(proc_attr(parser,.false.,flags)) goto 999
        call push_null_val(parser)
     else
        call push_null_val(parser)

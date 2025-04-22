@@ -115,10 +115,10 @@ module pm_ast
 
   integer,parameter:: proc_is_cond=           256
   integer,parameter:: proc_is_uncond=         512
-!!$  integer,parameter:: proc_run_complete=      2**10
-!!$  integer,parameter:: proc_run_local=         2**11
-!!$  integer,parameter:: proc_run_shared=        2**12
-!!$  integer,parameter:: proc_run_always=        2**13
+  integer,parameter:: proc_run_complete=      2**10
+  integer,parameter:: proc_run_local=         2**11
+  integer,parameter:: proc_run_shared=        2**12
+  integer,parameter:: proc_run_always=        2**13
   integer,parameter:: proc_is_open=           2**14
   integer,parameter:: proc_is_abstract=       2**15
   integer,parameter:: proc_is_generator =     2**16

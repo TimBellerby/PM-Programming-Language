@@ -436,11 +436,11 @@ contains
                merge(sym_if_invar,sym_if,sym==sym_switch_invar))
           call drop_code(coder)
           coder%par_state=save_par_state
-       case(sym_while,sym_while_invar,sym_while_sync)
+       case(sym_while,sym_while_invar)
           lex_scope=push_lex_scope(coder)
           save_par_state=coder%par_state
           coder%par_state=loop_par_state(coder,node,&
-               sym,sym==sym_while_invar,sym==sym_while_sync)
+               sym,sym==sym_while_invar)
           cblock2=make_cblock(coder,cblock,node,sym_while)
           call trav_xexpr(coder,cblock2,node,node_arg(node,1))
           call close_cblock(coder,cblock2)
@@ -452,10 +452,10 @@ contains
           call make_sp_call(coder,cblock,node,sym,merge(4,5,sym==sym_while),0)
           call pop_lex_scope(coder)
           coder%par_state=save_par_state
-       case(sym_until,sym_until_invar,sym_until_sync)
+       case(sym_until,sym_until_invar)
           save_par_state=coder%par_state
           coder%par_state=loop_par_state(coder,node,sym,&
-               sym==sym_until_invar,sym==sym_until_sync)
+               sym==sym_until_invar)
           lex_scope=push_lex_scope(coder)
           cblock2=make_cblock(coder,cblock,node,sym_until)
           coder%lex_scope=lex_scope
@@ -493,7 +493,7 @@ contains
           call trav_mode_stmt(coder,cblock,node,sym,sym_chan_stmt)
        case(sym_for,sym_forall)
           call trav_for_stmt(coder,cblock,list,node)
-       case(sym_each,sym_foreach_invar,sym_foreach_sync)
+       case(sym_each,sym_foreach_invar)
           call trav_foreach_stmt(coder,cblock,list,node)
        case(sym_test)
           if(pm_fast_isnull(node_arg(node,1))) then
@@ -738,34 +738,28 @@ contains
   end subroutine trav_open_stmt_list
 
 
-  function loop_par_state(coder,node,sym,isinvar,issync) result(new_par_state)
+  function loop_par_state(coder,node,sym,isinvar) result(new_par_state)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: node
     integer,intent(in):: sym
-    logical,intent(in):: isinvar,issync
+    logical,intent(in):: isinvar
     integer:: new_par_state
     integer:: par_state
     par_state=coder%par_state
     if(par_state==par_state_none) then
-       if(isinvar.or.issync) then
+       if(isinvar) then
           call code_error(coder,node,&
                '"'//trim(sym_names(sym))//'" cannot be used outside of a parallel context')
        endif
     else
-       if(issync) then
-          if(par_state==par_state_cond.or.par_state==par_state_par) then
-             call code_error(coder,node,&
-                  '"'//trim(sym_names(sym))//'" cannot be used in this conditional context'//&
-                  ' without an enclosing "sync" statement')
-          endif
-       elseif(isinvar) then
+       if(isinvar) then
           if(par_state>=par_state_cond) then
              call code_error(coder,node,&
                   '"'//trim(sym_names(sym))//'" cannot be used in this conditional context')
           endif
        endif
     endif
-    coder%par_state=merge(par_state,par_state_none,issync.or.isinvar)
+    coder%par_state=merge(par_state,par_state_none,isinvar)
   end function loop_par_state
   
   !========================================================
@@ -1010,8 +1004,6 @@ contains
     sym=node_sym(node)
     if(sym==sym_foreach_invar) then
        call_sym=sym_pm_foreach_invar_stmt
-    elseif(sym==sym_foreach_sync) then
-       call_sym=sym_pm_foreach_sync_stmt
     else
        call_sym=sym_pm_foreach_stmt
     endif
@@ -1092,6 +1084,8 @@ contains
     include 'fisnull.inc'
   end subroutine trav_for_stmt
 
+  
+  !====================================================================
   !  
   !====================================================================
   subroutine trav_par_stmt(coder,cblock,pnode,node)
@@ -3624,6 +3618,8 @@ contains
        tno=pm_user_type_body(coder%context,top_word(coder))
        call code_num(coder,pop_word(coder))
     endif
+    call code_val(coder,coder%var(coder%mask))
+    
     ! At this point tno contains the body of the rec type
     
     ! Match element names and push values in correct order
@@ -3665,12 +3661,12 @@ contains
 
     ! Tidy up and create call
     if(pm_debug_checks) then
-       if(coder%vtop/=basex+n+2) then
+       if(coder%vtop/=basex+n+3) then
           write(*,*) '>>',coder%vtop,n,coder%vtop-n-2
           call pm_panic('trav_rec')
        endif
     endif
-    call make_sp_call_rtn(coder,cblock,node,sym,n+2,1)
+    call make_sp_call_rtn(coder,cblock,node,sym,n+3,1)
     coder%vstack(vbase+1)=coder%vstack(coder%vtop)
     coder%vtop=vbase+1
     
@@ -5123,21 +5119,22 @@ contains
        npars=0
        flags=node_get_num(node,proc_flags)
        pr_flags=flags
-       if(iand(flags,proccall_is_comm)/=0) then
+       if(iand(flags,proc_run_shared+proc_run_local+proc_run_complete)/=0) then
+          call code_params(cblock,.true.,argcall)
+          call export_params(cblock)
+          call code_keys(cblock,tkeys,keycall,.true.,.true.)
+          call code_special_check_body_and_result(cblock)
+       elseif(iand(flags,proccall_is_comm)/=0) then
           coder%par_state=par_state_comm_proc
           call code_params(cblock,.true.,argcall)
-          call code_keys(cblock,tkeys,keycall,.true.)
-          call code_loop_startup(cblock,cblock2)
-          call code_check(cblock2)
-          call code_body(cblock2)
-          call code_result(cblock2,flags)
-          call code_loop_finish(cblock,cblock2)
+          call code_keys(cblock,tkeys,keycall,.true.,.false.)
+          call code_loop_check_body_and_result(cblock)
        else
           coder%par_state=par_state_none
           call code_params(cblock,.false.,argcall)
           call make_state_vars(coder,cblock,node,&
                topo=coder%var(coder%proc_base+1))
-          call code_keys(cblock,tkeys,keycall,.false.)
+          call code_keys(cblock,tkeys,keycall,.false.,.false.)
           call code_check(cblock)
           call code_body(cblock)
           call code_result(cblock,flags)
@@ -5271,13 +5268,13 @@ contains
       endif
     end subroutine code_params
   
-    recursive subroutine code_keys(cblock,tkeys,key_call,iscomm)
+    recursive subroutine code_keys(cblock,tkeys,key_call,iscomm,isshrd)
       type(pm_ptr),intent(in):: cblock
       type(pm_ptr),intent(inout):: key_call
       type(pm_ptr),intent(inout),target:: tkeys
-      logical,intent(in):: iscomm
+      logical,intent(in):: iscomm,isshrd
       type(pm_ptr):: p,typ,cblock2
-      integer:: i,n,base,vname,vbase,wbase,tno,flags0
+      integer:: i,n,base,newbase,vname,vbase,wbase,tno,flags0
 
       flags0=merge(var_is_maybe_not_private,0,iscomm)
 
@@ -5299,6 +5296,18 @@ contains
          call make_var(coder,cblock,p,vname,&
               flags0+var_is_param+var_is_key+var_is_multi_access)
       enddo
+
+      ! Export parameters for a gbl proc
+      if(isshrd) then
+         newbase=coder%top
+         do i=1,node_numargs(p)/3
+            call make_var(coder,cblock,p,vname,&
+                 flags0+var_is_param+var_is_key+var_is_multi_access+var_is_shadowed)
+            call code_val(coder,coder%var(base+i))
+            call make_sys_call(coder,cblock,node,sym_export_param,1,1)
+         enddo
+         base=newbase
+      endif
 
       ! Create a vector of all key names followed by all key types
       ! and finally by largest index associated with keys
@@ -5381,6 +5390,15 @@ contains
       if(.not.pm_fast_isnull(p)) then
          base=coder%vtop
          call trav_xexpr(coder,cblock,node,p)
+         if(iand(flags,proc_run_shared+proc_run_local)/=0) then
+            do i=coder%vtop+1-nret,coder%vtop
+               call make_temp_var(coder,cblock,node)
+               call dup_code(coder)
+               call code_val(coder,coder%vstack(i))
+               call make_comm_sys_call(coder,cblock,node,sym_import_param,1,1)
+               coder%vstack(i)=pop_code(coder)
+            enddo
+         end if
          call make_sp_call(coder,cblock,node,&
               sym_result,nret,0)
          rsig=pop_word(coder)
@@ -5402,19 +5420,68 @@ contains
       endif
     end subroutine code_result
 
-    ! This sets up a par-loop structure for comm proc
-    subroutine code_loop_startup(cblock,cblock2)
+    subroutine code_special_check_body_and_result(cblock)
       type(pm_ptr),intent(in):: cblock
-      type(pm_ptr),intent(out):: cblock2
-      call code_val(coder,coder%vstack(coder%state_base+4))
-      cblock2=make_cblock(coder,cblock,node,sym_pct)
-    end subroutine  code_loop_startup
+      type(pm_ptr):: cblock2
+      integer:: sym
+      if(iand(flags,proc_run_shared+proc_run_local)/=0) then
+         sym=merge(sym_pm_shared_always,sym_pm_shared,iand(flags,proc_run_always)/=0)
+      else
+         sym=merge(sym_pm_chan_always,sym_pm_chan,iand(flags,proc_run_always)/=0)
+      endif
+      call code_val(coder,coder%var(coder%mask))
+      cblock2=make_cblock(coder,cblock,node,sym)
+      call code_check(cblock2)
+      call code_body(cblock2)
+      call code_result(cblock2,flags)
+      call import_params(cblock2)
+      call close_cblock(coder,cblock2)
+      call make_sp_call(coder,cblock,node,sym,2,0)
+    end subroutine code_special_check_body_and_result
 
-    subroutine code_loop_finish(cblock,cblock2)
-      type(pm_ptr),intent(in):: cblock,cblock2
+    subroutine export_params(cblock)
+      type(pm_ptr),intent(in):: cblock
+      integer:: i
+      type(pm_ptr):: var,p
+      p=node_get(node,proc_params)
+      call hide_vars(coder,coder%state_base+1,coder%state_base+num_comm_args)
+      do i=num_comm_args+1,npars
+         var=coder%var(coder%state_base+i)
+         call make_var(coder,cblock,p,cnode_get_num(var,var_name),&
+              ior(iand(cnode_get_num(var,var_flags),&
+              var_is_var+var_is_ref),var_is_shadowed))
+         call code_val(coder,var)
+         call make_comm_sys_call(coder,cblock,p,sym_export_param,&
+              1,1)
+      enddo
+    end subroutine export_params
+
+    subroutine import_params(cblock)
+      type(pm_ptr),intent(in):: cblock
+      integer:: i,j
+      type(pm_ptr):: amp,p
+      p=node_get(node,proc_params)
+      amp=node_get(node,proc_amplocs)
+      do j=0,pm_fast_esize(amp)
+         i=amp%data%i(amp%offset+j)
+         call code_val(coder,coder%var(coder%state_base+i))
+         call code_val(coder,coder%var(coder%state_base+npars-num_comm_args+i))
+         call make_comm_sys_call(coder,cblock,p,sym_export_param,&
+              1,1)
+      enddo
+    end subroutine import_params
+
+    subroutine code_loop_check_body_and_result(cblock)
+      type(pm_ptr),intent(in):: cblock
+      type(pm_ptr):: cblock2
+      call code_val(coder,coder%var(coder%state_base+4))
+      cblock2=make_cblock(coder,cblock,node,sym_pct)
+      call code_check(cblock2)
+      call code_body(cblock2)
+      call code_result(cblock2,flags)
       call close_cblock(coder,cblock2)
       call make_sp_call(coder,cblock,node,sym_pct,2,0)
-    end subroutine code_loop_finish
+    end subroutine code_loop_check_body_and_result
 
   end subroutine trav_proc
 
@@ -5744,6 +5811,8 @@ contains
           endif
           if(cnode_get_num(proc1,pr_nret)/=cnode_get_num(proc2,pr_nret).or.&
                iand(cnode_get_num(proc1,pr_flags),proccall_is_comm+proc_is_cond)/=&
+               iand(cnode_get_num(proc2,pr_flags),proccall_is_comm+proc_is_cond).or.&
+               iand(cnode_get_num(proc1,pr_flags),proccall_is_comm+proc_is_uncond)/=&
                iand(cnode_get_num(proc2,pr_flags),proccall_is_comm+proc_is_cond)) then
              if(debug_more_codegen) write(*,*) 'SIG DIFFERENT'
              sig%data%ptr(sig%offset+cnode_args+j-2)=proc2

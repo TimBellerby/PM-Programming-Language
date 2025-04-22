@@ -1032,10 +1032,10 @@ contains
   !        Shared distributed value not allowed for position -combined_mode
   !  shared_ok -- permissible to have an argumnet with 'shared' mode
   !============================================================================================
-  function pm_type_combine_modes(context,array,shared_ok) result(combined_mode)
+  function pm_type_combine_modes(context,array,is_cond,shared_ok) result(combined_mode)
     type(pm_context),pointer:: context
     integer,intent(in),dimension(:):: array
-    logical,intent(in):: shared_ok
+    logical,intent(in):: is_cond,shared_ok
     integer:: combined_mode
     integer:: i,mode,cmode,tno
     cmode=sym_invar
@@ -1050,6 +1050,7 @@ contains
        cmode=min(cmode,mode)
     enddo
     if(cmode==sym_chan.or.cmode==sym_nhd) cmode=sym_private
+    if(is_cond.and.cmode==sym_invar) cmode=sym_uniform
     combined_mode=cmode
   end function pm_type_combine_modes
 
@@ -1083,16 +1084,23 @@ contains
   function pm_mode_includes(mode1,mode2) result(ok)
     integer,intent(in):: mode1,mode2
     logical:: ok
-    if(mode1<sym_private) then
+    if(mode1<sym_private.or.mode1==sym_uniform) then
        select case(mode1)
-       case(sym_constrained)
-          ok=mode2/=sym_private.and.mode2/=sym_individual
-       case(sym_connected)
-          ok=mode2>=sym_chan.and.mode2<=sym_joint
-       case(sym_individual) 
-          ok=mode2<sym_invar
-       case(sym_uniform) 
+       case(sym_local)
+          ok=mode2==sym_individual.or.&
+               mode2>=sym_private.and.mode2<=sym_invar
+       case(sym_global)
           ok=mode2>=sym_invar
+       case(sym_complete)
+          ok=mode2>=sym_chan
+       case(sym_connected)
+          ok=mode2>sym_private.or.mode2==sym_global&
+               .or.mode2==sym_complete
+       case(sym_individual) 
+          ok=mode2>=sym_private.and.mode2<sym_invar&
+               .and.mode2/=sym_uniform
+       case(sym_uniform) 
+          ok=mode2==sym_uniform.or.mode2==sym_invar
        case default
           call pm_panic('pm_mode_includes')
        end select

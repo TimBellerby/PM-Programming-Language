@@ -622,7 +622,8 @@ contains
     logical:: isstatic,iscomm
 
     if(debug_inference) then
-       write(*,*) 'BUILTIN>',trim(pm_name_as_string(coder%context,cnode_get_num(procnode,pr_name)))
+       write(*,*) 'BUILTIN>',&
+            trim(pm_name_as_string(coder%context,cnode_get_num(procnode,pr_name)))
     endif
     
     rtype=cnode_get_num(procnode,pr_rtype)
@@ -888,7 +889,7 @@ contains
        ! Negative signatures indicate a control structure/special case
        ! call (with symbol sig)
        select case(sig)
-       case(sym_while,sym_while_invar,sym_while_sync)
+       case(sym_while,sym_while_invar)
           call check_loop_writes(4)
           list=cnode_arg(args,1)
           list2=cnode_arg(args,3)
@@ -910,7 +911,7 @@ contains
              endif
           enddo
           if(sig/=sym_while) call mark_loop_cond(5)
-       case(sym_until,sym_until_invar,sym_until_sync,sym_each)
+       case(sym_until,sym_until_invar,sym_each)
           call check_loop_writes(3)
           list=cnode_arg(args,1)
           counter=0
@@ -1034,11 +1035,13 @@ contains
           name=t%data%i(t%offset+2)
           call push_word(coder,pm_type_new_rec+t%data%i(t%offset+4))
           call push_word(coder,t%data%i(t%offset))
-          do i=1,nargs-2
-             call push_word(coder,arg_type_with_mode(i+3))
+          do i=1,nargs-3
+             call push_word(coder,arg_type_with_mode(i+4))
           enddo
           mode=pm_type_combine_modes(coder%context,&
-               coder%wstack(coder%wtop-nargs+3:coder%wtop),.false.)
+               coder%wstack(coder%wtop-nargs+4:coder%wtop),&
+               cnode_flags_set(callnode,call_flags,call_is_cond).or.arg_type(4)==pm_logical,&
+               .false.)
           if(mode<0) then
              if(mode>-1000) then
                 namep=pm_name_val(coder%context,pm_tv_name(t2))
@@ -1056,8 +1059,8 @@ contains
              endif
              mode=sym_invar
           endif
-          do i=1,nargs-2
-             tno2=pm_type_strip_mode(coder%context,coder%wstack(coder%wtop-nargs+2+i),mode2)
+          do i=1,nargs-3
+             tno2=pm_type_strip_mode(coder%context,coder%wstack(coder%wtop-nargs+3+i),mode2)
              tno3=pm_tv_arg(t2,i)
              if(tno2==pm_tiny_int) then
                 tno2=tno3
@@ -1072,9 +1075,9 @@ contains
                         '" needs to be initialised')
                 endif
              endif
-             coder%wstack(coder%wtop-nargs+2+i)=tno2
+             coder%wstack(coder%wtop-nargs+3+i)=tno2
           enddo
-          call make_type_if_possible(coder,nargs)
+          call make_type_if_possible(coder,nargs-1)
           tno2=pop_word(coder)
           if(tno2>0) then
              if(.not.pm_type_includes(coder%context,tno,tno2,&
@@ -1466,7 +1469,6 @@ contains
          call inf_cblock(coder,cnode_arg(args,2))
       endif
     end subroutine inf_any
-
 
     subroutine inf_each_index()
       type(pm_ptr):: p,tv
@@ -1912,11 +1914,17 @@ contains
        undef_arg=undef_arg.or.tno<=0
     enddo
 
-    if(is_comm.and.is_cond) then
-       coder%wstack(coder%wtop+num_comm_args)=pm_logical
+    if(is_comm) then 
+       if(is_cond) then
+          coder%wstack(coder%wtop+num_comm_args)=pm_logical
+       else
+          if(coder%wstack(coder%wtop+num_comm_args)/=pm_logical) then
+             is_cond=.false.
+          endif
+       endif
     endif
 
-    ! Error return for error argument in
+    ! Error return for error argument 
     if(undef_arg) then
        do i=1,nret
           call set_arg_to_error_type(i)
@@ -1940,11 +1948,12 @@ contains
        endif
        
        ! Suspend 'no shared import' rule in system module code
-       ignore_rules=ignore_rules.or.cnode_get_name(callnode,cnode_modl_name)==sym_pm_system
+       ignore_rules=ignore_rules.or.&
+            cnode_get_name(callnode,cnode_modl_name)==sym_pm_system
        
        ! Implement mode combination rule for standard procedures
        mode=pm_type_combine_modes(coder%context,&
-            coder%wstack(coder%wtop+1:coder%wtop+nargs),&
+            coder%wstack(coder%wtop+1:coder%wtop+nargs),is_cond,&
             ignore_rules)
        if(mode<0) then
           call call_error('Cannot pass a shared value to a standard procedure')
@@ -2082,7 +2091,7 @@ contains
       integer:: h,i,j,m,start,slot,pcheck,nkey_sig,jpass,nconsidered
       integer:: vbase,wbase
       type(pm_ptr):: tv,v,proc,match_proc,rtvect
-      integer:: rt,rt2,pars,mpars,apars,tno,match_pars
+      integer:: rt,rt2,pars,mpars,apars,tno,match_pars,pflags
       logical:: ok,found,visible,found_has_no_rtypes,when_no_match
       integer,dimension(1):: key
       integer:: memo
@@ -2118,9 +2127,11 @@ contains
             
             if(cnode_get_num(proc,pr_nret)/=nret) cycle
             if(cnode_get_num(proc,pr_amps)/=amps) cycle
-            if(iand(cnode_get_num(proc,pr_flags),proccall_is_comm+proccall_is_ref+proccall_is_general)/=&
+            pflags=cnode_get_num(proc,pr_flags)
+            if(iand(pflags,proccall_is_comm+proccall_is_ref+proccall_is_general)/=&
                  iand(flags,proccall_is_comm+proccall_is_ref+proccall_is_general)) cycle
-
+            if(iand(pflags,proc_is_cond)/=0.and..not.is_cond.or.&
+                 iand(pflags,proc_is_uncond)/=0.and.is_cond) cycle
             nconsidered=nconsidered+1
             
             pars=cnode_get_num(proc,pr_ptype)
