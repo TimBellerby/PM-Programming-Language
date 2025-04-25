@@ -720,8 +720,10 @@ contains
              call append_to_line(iunit,str,i,'^',.false.,depth)
           endif
        case(cnode_is_const)
+          p=cnode_arg(cnode,1)
+          if(pm_fast_vkind(p)==pm_name) p=pm_name_val(context,int(p%offset))
           call append_to_line(iunit,str,i,&
-               trim(pm_value_as_string(context,cnode_arg(cnode,1))),.false.,depth)
+               trim(pm_value_as_string(context,p)),.false.,depth)
        case(cnode_is_cblock)
           call append_to_line(iunit,str,i,'{',.true.,depth)
           call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode,min(50,depth+2))

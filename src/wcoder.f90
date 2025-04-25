@@ -214,6 +214,7 @@ contains
     init_ve=merge(0,pm_stack_nullve,pm_is_compiling)
     wcd%proc_can_inline=.true.
     ve=init_ve
+    wcd%shared_ve=ve
     break=wcode_cblock(wcd,cblock,rv,ve)
     if(pm_is_compiling) then
        call make_proc_code_comp(wcd,1_pm_ln,sym_pm_system,&
@@ -239,6 +240,7 @@ contains
     integer:: ve,k
     integer(pm_ln):: i,j,n
     integer:: nret,vev
+    vev=0
     wcd%base=0
     i=2
     do while(i<=pm_dict_size(wcd%context,wcd%code_cache))
@@ -288,7 +290,7 @@ contains
           wcd%avar=wcd%npar+1
           wcd%ref_count(1:wcd%nvar)=1
           if(wcd%loop_extra_arg/=0) then
-             wcd%shared_ve=pm_stack_locals+5
+             wcd%shared_ve=pm_stack_locals+1
           else
              wcd%shared_ve=ve
           endif
@@ -1241,13 +1243,13 @@ contains
        call pm_for(cnode_arg(args,1),cnode_arg(args,2),ve)
     case(sym_pm_shared_always)
        new_ve=wcd%shared_ve
-       break=wcode_cblock(wcd,cnode_arg(args,1),rv,new_ve)
+       break=wcode_cblock(wcd,cnode_arg(args,2),rv,new_ve)
     case(sym_pm_shared)
        new_ve=alloc_var(wcd,pm_ve_type)
        call wc_call(wcd,callnode,op_skip_empty,0,3,0,ve)
        call wc(wcd,-new_ve)
        call wc(wcd,wcd%shared_ve)
-       break=wcode_cblock(wcd,cnode_arg(args,1),rv,new_ve)
+       break=wcode_cblock(wcd,cnode_arg(args,2),rv,new_ve)
     case(sym_pm_chan,sym_pm_chan_always)
        new_ve=alloc_var(wcd,pm_ve_type)
        call wc_call(wcd,callnode,op_chan,0,2,0,ve)
@@ -3632,7 +3634,11 @@ contains
 
     n=wcd%nval+1
     wcd%nval=n
-    wcd%values(n)=val
+    if(pm_fast_vkind(val)==pm_name) then
+       wcd%values(n)=pm_name_val(wcd%context,int(val%offset))
+    else
+       wcd%values(n)=val
+    endif
     n=n+1
   contains
     include 'fvkind.inc'

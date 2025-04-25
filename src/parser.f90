@@ -59,8 +59,8 @@ module pm_parser
      integer:: ls,lineno,sym_lineno,name_lineno,old_sym_lineno
      logical:: newline,atstart
      integer:: n, sym_n, name_sym_n,old_sym_n, last, iunit
-     type(pm_ptr):: temp, lexval
-     integer:: sym, pushback
+     type(pm_ptr):: temp
+     integer:: sym, pushback, lexval
      integer,dimension(max_parse_stack):: stack
      integer:: top
      type(pm_ptr),dimension(max_parse_stack):: vstack
@@ -105,7 +105,7 @@ contains
     parser%vtop=max_parse_stack
     parser%reg=>pm_register(context,'parser',&
          parser%modl,parser%modls,parser%modl_dict,&
-         parser%temp,parser%sysmodl,parser%lexval, &
+         parser%temp,parser%sysmodl, &
          parser%visibility,parser%op_names,&
          array=parser%vstack, &
          array_size=parser%vtop)
@@ -596,7 +596,7 @@ contains
           val=pm_new_string(parser%context,buffer(1:n))
        endif
        sym=sym_string
-       parser%lexval=val
+       parser%lexval=pm_new_literal_value_type(parser%context,val)
     case('''')
        if(peekchar()=='''') then
           sym=sym_caret
@@ -670,6 +670,7 @@ contains
 
     include 'fnewnc.inc'
     include 'ftypeno.inc'
+    include 'fname.inc'
 
     ! Get next character from current line and advance
     function getchar() result(ch)
@@ -869,77 +870,18 @@ contains
               'Numeric constant out of range')
       endif
       c=peekchar()
-      if(c=='''') then
-         c=getchar()
-         c=getchar()
-         select case(c)
-         case('s')
-            if(iscomplex) then
-               val=pm_fast_newnc(parser%context, &
-                    pm_single_complex,1)
-               val%data%c(val%offset)=cmplx(0.0,rnumber)
-            elseif(isreal) then
-               val=pm_fast_newnc(parser%context, &
-                    pm_single,1)
-               val%data%r(val%offset)=rnumber
-            else
-               val=pm_fast_newnc(parser%context, &
-                    pm_int,1)
-               val%data%i(val%offset)=inumber
-            endif
-         case('l')
-            if(isreal) then
-               call parse_error(parser,'Long real not available')
-            else
-               val=pm_fast_newnc(parser%context, &
-                    pm_longlong,1)
-               val%data%lln(val%offset)=inumber
-            endif
-         case('8')
-            if(isreal) goto 20
-            if(isdigit(peekchar())) goto 20
-            if(inumber<-127.or.inumber>127) goto 20
-            val=pm_fast_newnc(parser%context, &
-                 pm_int8,1)
-            val%data%i8(val%offset)=inumber
-         case('1')
-            if(isreal) goto 20
-            if(peekchar()/='6'.or.isdigit(peekchar_plus(1))) goto 20
-            if(inumber<-16383.or.inumber>16383) goto 20
-            val=pm_fast_newnc(parser%context, &
-                 pm_int16,1)
-            val%data%i16(val%offset)=inumber
-            c=getchar()
-         case('3')
-            if(isreal) goto 20
-            if(peekchar()/='2'.or.isdigit(peekchar_plus(1))) goto 20
-            if(inumber<-2147483647.or.inumber>2147483647) goto 20
-            val=pm_fast_newnc(parser%context, &
-                 pm_int32,1)
-            val%data%i32(val%offset)=inumber
-            c=getchar()
-         case('6')
-            if(isreal) goto 20
-            if(peekchar()/='4'.or.isdigit(peekchar_plus(1))) goto 20
-            val=pm_fast_newnc(parser%context, &
-                 pm_int64,1)
-            val%data%i64(val%offset)=inumber
-            c=getchar()
-         end select
+      if(iscomplex) then
+         val=pm_fast_newnc(parser%context, &
+              pm_double_complex,1)
+         val%data%dc(val%offset)=cmplx(0.0,rnumber,kind=pm_d)
+      else if(isreal) then
+         val=pm_fast_newnc(parser%context,pm_double,1)
+         val%data%d(val%offset)=rnumber
       else
-         if(iscomplex) then
-            val=pm_fast_newnc(parser%context, &
-                 pm_double_complex,1)
-            val%data%dc(val%offset)=cmplx(0.0,rnumber,kind=pm_d)
-         else if(isreal) then
-            val=pm_fast_newnc(parser%context,pm_double,1)
-            val%data%d(val%offset)=rnumber
-         else
-            val=pm_fast_newnc(parser%context,pm_long,1)
-            val%data%ln(val%offset)=inumber
-         endif
+         val=pm_fast_newnc(parser%context,pm_long,1)
+         val%data%ln(val%offset)=inumber
       endif
-      parser%lexval=val
+      parser%lexval=pm_new_literal_value_type(parser%context,val)
       sym=sym_number
       return
 20    continue
@@ -1527,6 +1469,7 @@ contains
                 if(expect(parser,sym_close)) return
              elseif(sym==sym_open) then
                 call make_node(parser,sym_proc,1)
+                call scan(parser)
                 if(exprlist(parser,sym=sym_pm_list)) return
                 call make_node(parser,sym_open,2)
                 if(expect(parser,sym_close)) return
@@ -1863,7 +1806,7 @@ contains
        call make_node(parser,sym_present,1)
        if(expect(parser,sym_close)) return
     case(sym_number,sym_string)
-       call push_val(parser,parser%lexval)
+       call push_num_val(parser,parser%lexval)
        call make_node(parser,sym,1)
        call scan(parser)
     case(sym_dollar)
@@ -4001,12 +3944,7 @@ contains
           if(parser%sym==sym_open) then
              call scan(parser)
              if(parser%sym==sym_number) then
-                if(pm_fast_vkind(parser%lexval)/=&
-                     pm_long) then
-                   call parse_error(parser,&
-                        'Cannot have "fix" before non-default integer constant')
-                endif
-                call push_val(parser,parser%lexval)
+                call push_num_val(parser,parser%lexval)
                 call make_node(parser,sym_number,1)
                 call scan(parser)
                 call make_node(parser,sym,1)
@@ -4015,7 +3953,7 @@ contains
                 call scan(parser)
                 call make_node(parser,sym,1)
              elseif(parser%sym==sym_string) then
-                call push_val(parser,parser%lexval)
+                call push_num_val(parser,parser%lexval)
                 call make_node(parser,sym_string,1)
                 call scan(parser)
                 call make_node(parser,sym,1)
@@ -4642,14 +4580,14 @@ contains
        iscomm=.true.
        isref=.true.
     endif
-    
+
     ! Procedure name
     if(.not.check_name(parser,name)) then
        if(.not.isref) then
           if(op(parser,name,.false.,.false.)) goto 999
        endif
     endif
- 
+
     ! Communicating proc flags
     if(.not.isref) then
        if(parser%sym==sym_pct) then
@@ -4665,7 +4603,7 @@ contains
 
     ! Start of parameters
     if(expect(parser,sym_open)) goto 999
-   
+
 10  continue
 
     ! Create fully qualified (module!name) procedure name
@@ -4707,26 +4645,35 @@ contains
        call push_null_val(parser)
        nret=-1
     endif
-    
+
     if(parser%sym==sym_yield) then
        if(yield_clause()) return
     endif
 
-    if(parser%sym==sym_uncond) then
-       flags=ior(flags,proc_is_uncond)
-    elseif(parser%sym==sym_cond) then
-       flags=ior(flags,proc_is_cond)
-    endif
-    
-    if(parser%sym==sym_global) then
-       flags=ior(flags,proc_run_shared)
-    elseif(parser%sym==sym_pm_shared) then
-       flags=ior(flags,proc_run_local)
-    elseif(parser%sym==sym_complete) then
-       if(iand(flags,proc_is_uncond)/=0) then
-          call parse_error(parser,'Cannot combine "cplt" and "uncond"')
+    if(iscomm) then
+
+       if(parser%sym==sym_uncond) then
+          flags=ior(flags,proc_is_uncond)
+          call scan(parser)
+       elseif(parser%sym==sym_cond) then
+          flags=ior(flags,proc_is_cond)
+          call scan(parser)
        endif
-       flags=ior(flags,proc_run_complete)
+
+       if(parser%sym==sym_global) then
+          flags=ior(flags,proc_run_shared)
+          call scan(parser)
+       elseif(parser%sym==sym_pm_shared) then
+          flags=ior(flags,proc_run_local)
+          call scan(parser)
+       elseif(parser%sym==sym_complete) then
+          if(iand(flags,proc_is_uncond)/=0) then
+             call parse_error(parser,'Cannot combine "cplt" and "uncond"')
+          endif
+          flags=ior(flags,proc_run_complete)
+          call scan(parser)
+       endif
+
     endif
 
     ! Attributes
@@ -4741,14 +4688,14 @@ contains
     if(parser%sym==sym_dotdotdot) then
        call scan(parser)
        flags=ior(flags,proc_is_open)
-    endif    
-    
+    endif
+
     ! = expr or  [ check expr ] block
     if(parser%sym==sym_assign.and.nret==-1) then
-       
+
        call push_null_val(parser)
        call scan(parser)
-       
+
        m=0
        do
           if(isref) then
@@ -4826,22 +4773,22 @@ contains
     endif
     call push_null_val(parser) ! Code tree
 
-    
+
     if(parser%error_count>scount) then
        parser%vtop=sbase
        goto 999
     endif
 
     if(parser%error_count>0) goto 999
-  
+
     ! Assign flags to proc_flags slot
     parser%vstack(parser%vtop-&
          proc_num_args-node_args+proc_flags+1)%offset=flags
-   
+
     ! Assign number of returns to proc_numret slot
     parser%vstack(parser%vtop-&
          proc_num_args-node_args+proc_numret+1)%offset=nret
-    
+
     if(pm_debug_checks) then
        if(parser%vtop-base/=proc_num_args) then
           write(*,*) '=========',parser%vtop-base,proc_num_args
@@ -4856,7 +4803,7 @@ contains
     endif
 
     call make_node_at(parser,sym,proc_num_args,line,pos)
-    
+
     if(debug_parser) then
        write(*,*) 'PROC DECL>----------------'
        call dump_parse_tree(parser%context,44,top_val(parser),2)
@@ -4864,7 +4811,7 @@ contains
     endif
 
     call add_proc_decl(parser,name,ptr)
-    
+
     iserr=.false.
 999 continue
     call pm_delete_register(parser%context,reg)
@@ -4925,14 +4872,14 @@ contains
       call make_node(parser,node_sym(params),n*2+num_comm_args)
       parser%vstack(parser%vtop-8)=top_val(parser)
       call drop_val(parser)
-      
+
       call name_vector(parser,base)
       parser%vstack(parser%vtop-6)=top_val(parser)
       call drop_val(parser)
-  
+
       iserr=.false.
     end function yield_clause
-    
+
     function return_stmt() result(iserr)
       logical:: iserr
       integer:: m
@@ -4975,7 +4922,7 @@ contains
       parser%vtop=parser%vtop-1
       iserr=.false.
     end function  return_stmt
-    
+
   end function proc_decl
 
   !======================================================
@@ -5273,10 +5220,12 @@ contains
 
     if(expect(parser,sym_colon)) goto 999
     if(expect(parser,sym_string)) goto 999
-    p=pm_dict_lookup(parser%context,parser%op_names,parser%lexval)
+    p=pm_dict_lookup(parser%context,parser%op_names,&
+         pm_type_val(parser%context,&
+         parser%lexval))
     if(pm_fast_isnull(p)) then
        call parse_error(parser,'Bad intrinsic operation'//&
-            pm_value_as_string(parser%context,parser%lexval))
+            pm_value_as_string(parser%context,pm_type_val(parser%context,parser%lexval)))
        goto 999
     endif
     opcode=p%offset
@@ -5284,7 +5233,8 @@ contains
     if(parser%sym==sym_open) then
        call scan(parser)
        if(expect(parser,sym_number)) goto 999
-       opcode2=parser%lexval%data%ln(parser%lexval%offset)
+       p=pm_type_val(parser%context,parser%lexval)
+       opcode2=p%data%ln(p%offset)
        if(expect(parser,sym_close)) goto 999
     elseif(parser%sym>=first_mode.and.parser%sym<=last_mode) then
        opcode2=parser%sym

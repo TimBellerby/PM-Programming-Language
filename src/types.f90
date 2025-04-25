@@ -228,7 +228,6 @@ contains
     
     context%tcache=pm_dict_new(context,128_pm_ln)
     context%pcache=pm_dict_new(context,1024_pm_ln)
-    context%vcache=pm_set_new(context,1024_pm_ln)
 
     key(1)=pm_type_is_basic
     do i=1,pm_null
@@ -545,7 +544,7 @@ contains
     if(present(vindex)) then
        args(2)=vindex
     else
-       args(2)=pm_set_add(context,context%vcache,val)
+       args(2)=pm_set_add(context,context%names,val)
     endif
     args(3)=pm_fast_typeof(val)
     if(args(3)==pm_string) args(3)=pm_string_type
@@ -553,6 +552,19 @@ contains
   contains
     include 'ftypeof.inc'
   end function pm_new_fix_value_type
+
+  function pm_fix_value_type_from_literal(context,tno) result(tno2)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    integer:: tno2
+    integer:: args(3)
+    type(pm_ptr):: tv
+    tv=pm_type_vect(context,tno)
+    args(1)=pm_type_new_fix_value
+    args(2)=pm_tv_name(tv)
+    args(3)=pm_tv_arg(tv,1)
+    tno2=pm_new_basic_type(context,args,pm_type_val(context,tno))
+  end function pm_fix_value_type_from_literal
 
   !==========================================
   ! Create new compile time value type
@@ -567,7 +579,7 @@ contains
     if(present(vindex)) then
        args(2)=vindex
     else
-       args(2)=pm_set_add(context,context%vcache,val)
+       args(2)=pm_set_add(context,context%names,val)
     endif
     args(3)=pm_fast_typeof(val)
     if(args(3)==pm_string) args(3)=pm_string_type
@@ -585,7 +597,7 @@ contains
     integer:: tno
     integer,dimension(2):: args
     args(1)=pm_type_new_error
-    args(2)=pm_set_add(context,context%vcache,val)
+    args(2)=pm_set_add(context,context%names,val)
     tno=pm_new_basic_type(context,args,val)
   end function pm_new_error_type
 
@@ -598,6 +610,7 @@ contains
     integer:: tno
     tno=pm_new_error_type(context,pm_new_string(context,str))
   end function pm_error_type_from_string
+
   
   !=============================================
   ! Create new compile time proc value type
@@ -1042,14 +1055,12 @@ contains
     do i=1,size(array)
        tno=pm_type_strip_mode(context,array(i),mode)
        if(mode==sym_shared.and..not.shared_ok) then
-          if(iand(pm_type_flags(context,tno),pm_type_has_distributed)/=0) then
-             combined_mode=-i
-             return
-          endif
+          combined_mode=-i
+          return
        endif
        cmode=min(cmode,mode)
     enddo
-    if(cmode==sym_chan.or.cmode==sym_nhd) cmode=sym_private
+    if(cmode<sym_uniform) cmode=sym_private
     if(is_cond.and.cmode==sym_invar) cmode=sym_uniform
     combined_mode=cmode
   end function pm_type_combine_modes
@@ -1092,13 +1103,12 @@ contains
        case(sym_global)
           ok=mode2>=sym_invar
        case(sym_complete)
-          ok=mode2>=sym_chan
+          ok=mode2>=sym_chan.and.mode2/=sym_uniform.and.mode2/=sym_joint
        case(sym_connected)
           ok=mode2>sym_private.or.mode2==sym_global&
                .or.mode2==sym_complete
        case(sym_individual) 
-          ok=mode2>=sym_private.and.mode2<sym_invar&
-               .and.mode2/=sym_uniform
+          ok=mode2>=sym_private.and.mode2<sym_uniform
        case(sym_uniform) 
           ok=mode2==sym_uniform.or.mode2==sym_invar
        case default

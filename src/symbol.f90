@@ -786,7 +786,7 @@ module pm_symbol
   data sym_names(sym_local_sub)        /'<local-sub>'/
   data sym_names(sym_set_mode)         /'<set-mode>'/
   data sym_names(sym_export)           /'<export>'/
-  data sym_names(sym_export_param)     /'<export-param>'/
+  data sym_names(sym_export_param)     /'PM__export_param'/
   data sym_names(sym_export_as_new)    /'<export-as-new>'/
   data sym_names(sym_amp_error)        /'<amp-error>'/
   data sym_names(sym_also)             /'<also>'/
@@ -910,7 +910,7 @@ module pm_symbol
   data sym_names(sym_get_tile_sz)      /'PM__get_tilesz'/
   data sym_names(sym_make_mask)        /'PM__make_mask'/
   data sym_names(sym_node_for)         /'node_for'/
-  data sym_names(sym_import_param)     /'PM__impparam'/
+  data sym_names(sym_import_param)     /'PM__import_param'/
   data sym_names(sym_set_elem)         /'PM__setaelem'/
   data sym_names(sym_assign_or_init)   /'PM__assign_or_init'/
   data sym_names(sym_assign_var)       /'PM__assign_var'/
@@ -1304,7 +1304,7 @@ contains
                 str='_'//trim(str2)
              else
                 call pm_name_string(context,first,str)
-                str=trim(str)//'''_'//trim(str2)
+                str=trim(str)//'::_'//trim(str2)
              endif
           else
              str='?type'
@@ -1313,7 +1313,7 @@ contains
           write(str,'(1h?,i8,1h?)') n
        endif
     else if(n<0) then
-       str='use '
+       str='var '
        call pm_name_string(context,-n,str(5:))
     else
        str='EOF'

@@ -357,7 +357,7 @@ contains
           else
              newve=vector_export_if_needed(context,ve,arg(1)%data%ptr(arg(1)%offset+1))
              if(opcode2==2) newve=import_vector(context,newve,arg(1)%data%ptr(arg(1)%offset+1))
-             ve=make_new_ve(newve,arg(3))
+             ve=make_new_ve(newve,arg(3)) 
           endif
           call set_arg(2,ve)
        endif

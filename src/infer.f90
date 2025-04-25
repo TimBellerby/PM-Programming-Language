@@ -740,6 +740,15 @@ contains
                merge(sym_shared,sym_invar,&
                iand(pm_type_flags(coder%context,t1),pm_type_has_distributed)/=0))
        endif
+    case(op_export_param)
+       t1=pm_type_strip_mode(coder%context,atype1,mode)
+       if(mode<sym_invar) then
+          rtype=pm_error_type_from_string(coder%context,'Can only access '//&
+               '"shrd" or "invar" values in a "gbl" procedure, not: '//&
+               trim(sym_names(mode)))
+       else
+          rtype=t1  ! private mode 
+       endif
     case(op_list_concat)
        call infer_list_concat
     case(op_list_splice)
@@ -937,9 +946,9 @@ contains
              call inf_cblock(coder,cnode_arg(args,i+1))
              call inf_cblock(coder,cnode_arg(args,i+2))
           enddo
-       case(sym_do,sym_pm_shared,sym_pm_shared_always,sym_pm_chan,sym_pm_chan_always)
+       case(sym_do)
           call inf_cblock(coder,cnode_arg(args,1))
-       case(sym_sync)
+       case(sym_sync,sym_pm_shared,sym_pm_shared_always,sym_pm_chan,sym_pm_chan_always)
           call inf_cblock(coder,cnode_arg(args,2))
        case(sym_pct)
           call inf_cblock(coder,cnode_arg(args,2))
@@ -3260,16 +3269,12 @@ contains
        endif
        return
     endif
-    arg1=pm_dict_val(coder%context,coder%context%tcache,&
-         int(pm_tv_arg(tv,2),pm_ln))
+    arg1=pm_type_val(coder%context,pm_tv_arg(tv,2))
     if(n>1) then
-       arg2=pm_dict_val(coder%context,coder%context%tcache,&
-            int(pm_tv_arg(tv,3),pm_ln))
+       arg2=pm_type_val(coder%context,pm_tv_arg(tv,3))
     endif
     rtyp=pm_type_strip_to_basic(coder%context,pm_type_arg(coder%context,rstype,1))
     
-    !write(*,*) rtyp,'rtyp=',trim(pm_type_as_string(coder%context,rtyp))
-
     rtv=pm_type_vect(coder%context,rtyp)
     rtyp=pm_type_strip_to_basic(coder%context,pm_tv_arg(rtv,1))
     if(rtyp==pm_long) then
@@ -3398,6 +3403,8 @@ contains
     case(op_concat_fold)
        c=pm_concat_string(coder%context,a,b)
     end select
+  contains
+    include 'fname.inc'
   end subroutine fold_string
 
   !===============================================

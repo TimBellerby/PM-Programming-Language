@@ -1520,7 +1520,7 @@ contains
     if(vk==pm_tiny_int) then
        w=v
     else
-       w=pm_new(context,pm_logical,pm_fast_esize(import_vec)-3)
+       w=pm_new(context,pm_logical,max(1_pm_ln,pm_fast_esize(import_vec)-3))
        if(vk==pm_null) then
           k=0
           do i=4,pm_fast_esize(import_vec)
@@ -1566,6 +1566,7 @@ contains
           enddo
        endif
     endif
+ 
   contains
     include 'fvkind.inc'
     include 'fesize.inc'

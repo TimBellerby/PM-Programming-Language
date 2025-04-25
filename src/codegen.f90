@@ -129,13 +129,16 @@ module pm_codegen
      ! Misc values
      type(pm_ptr):: temp,temp2,true,false,one,comm_amp
      type(pm_ptr):: std_amp,block_amp,iter_amps,iter_block_amps
-     type(pm_ptr):: check_mess,undef_val
+     type(pm_ptr):: undef_val
 
      ! 'true and 'false types
      integer:: true_fix,false_fix,true_literal,false_literal
 
      ! '1 type
      integer:: unit_type
+
+     ! Check default error message
+     integer:: check_mess
 
      ! Contextual information for this point in the traverse
      type(pm_ptr):: proc
@@ -209,8 +212,7 @@ contains
          coder%std_amp,coder%block_amp,coder%iter_amps,&
          coder%iter_block_amps,array=coder%vstack,&
          array_size=coder%vtop)
-    coder%reg3=>pm_register(context,'coder-for stack',coder%defer_check,&
-         coder%check_mess)
+    coder%reg3=>pm_register(context,'coder-for stack',coder%defer_check)
     coder%sig_cache=pm_dict_new(context,32_pm_ln)
     coder%prog_cblock=pm_null_obj
     coder%defer_check=pm_null_obj
@@ -253,7 +255,8 @@ contains
          pm_intern_val(coder%context,coder%iter_amps))
     coder%iter_block_amps=pm_fast_tinyint(coder%context,&
          pm_intern_val(coder%context,coder%iter_block_amps))
-    coder%check_mess=pm_new_string(coder%context,'Failed "check" or "test""')
+    coder%check_mess=pm_new_literal_value_type(coder%context,&
+         pm_new_string(coder%context,'Failed "check" or "test""'))
     coder%proc_name_vals=pm_dict_new(coder%context,8_pm_ln)
     coder%id=0
     coder%block_id=0
@@ -945,11 +948,7 @@ contains
   end subroutine trav_pm_context
   
   !====================================================================
-  ! Traverse a foreach statement node
-  ! - designed to be called indirectly by xexpr, which is used
-  !   to compute subexpressions covering iterators and attributes 
-  ! - assumes variables from base to current top are 'where' variables
-  !   in the subexpression
+  ! Traverse foreach statement converting to a call to PM__foreach_stmt
   !====================================================================
   subroutine trav_foreach_stmt(coder,cblock,pnode,node)
     type(code_state),intent(inout):: coder
@@ -1026,10 +1025,7 @@ contains
 
   !====================================================================
   ! Traverse a for or forall statement node
-  ! - designed to be called indirectly by xexpr, which is used
-  !   to compute subexpressions covering iterators and attributes 
-  ! - assumes variables from base to current top are 'where' variables
-  !   in the subexpression
+  ! converting to a call to PM__for_stmt / PM__forall_stmt
   !====================================================================
   subroutine trav_for_stmt(coder,cblock,pnode,node)
     type(code_state),intent(inout):: coder
@@ -2458,10 +2454,10 @@ contains
     do i=2,node_numargs(p),2
        mess=node_arg(p,i)
        if(pm_fast_isnull(mess)) then
-          call make_const(coder,cblock,p,coder%check_mess)
+          call make_literal_const(coder,cblock,p,coder%check_mess)
           call code_null(coder)
        elseif(node_sym(mess)==sym_string) then
-          call make_const(coder,cblock,p,node_arg(mess,1))
+          call make_literal_const(coder,cblock,p,node_num_arg(mess,1))
           call code_null(coder)
        else
           call make_sys_var(coder,cblock,p,sym_check,var_is_shadowed)
@@ -3453,11 +3449,9 @@ contains
        call make_sp_call_rtn(coder,cblock,node,sym_cast,2,1)
     case(sym_number,sym_string)
        if(coder%fixed) then
-          p=node_arg(node,1)
-          call make_const(coder,cblock,node,p,&
-               pm_new_fix_value_type(coder%context,p))
+          call make_literal_const(coder,cblock,node,node_num_arg(node,1),fixit=.true.)
        else
-          call make_const(coder,cblock,node,node_arg(node,1))
+          call make_literal_const(coder,cblock,node,node_num_arg(node,1))
        endif
     case default
        call dump_parse_tree(coder%context,6,pnode,2)
@@ -3652,7 +3646,7 @@ contains
        outer2:do i=1,m
           do j=1,n
              nam1=name1%data%i(name1%offset+i)
-             nam2=name2%data%i(name2%offset+j)
+             nam2=abs(name2%data%i(name2%offset+j))
              if(nam1==nam2) cycle outer2
           enddo
           call element_error(exprs,sym,name,name1,i)
@@ -3843,7 +3837,8 @@ contains
        case(sym_false)
           call push_word(coder,coder%false_fix)
        case(sym_number,sym_string)
-          call push_word(coder,pm_new_fix_value_type(coder%context,node_arg(name,1)))
+          call push_word(coder,&
+               pm_fix_value_type_from_literal(coder%context,node_num_arg(name,1)))
        case default
           call push_word(coder,pm_type_new_fix)
           call push_word(coder,0)
@@ -3858,7 +3853,7 @@ contains
        case(sym_false)
           call push_word(coder,coder%false_literal)
        case(sym_number,sym_string)
-          call push_word(coder,pm_new_literal_value_type(coder%context,name))
+          call push_word(coder,node_num_arg(name,1))
        case default
           call push_word(coder,pm_type_new_unfixed)
           call push_word(coder,0)
@@ -5125,7 +5120,8 @@ contains
           call code_keys(cblock,tkeys,keycall,.true.,.true.)
           call code_special_check_body_and_result(cblock)
        elseif(iand(flags,proccall_is_comm)/=0) then
-          coder%par_state=par_state_comm_proc
+          coder%par_state=merge(par_state_comm_proc,par_state_none,&
+               iand(flags,proc_is_uncond)==0)
           call code_params(cblock,.true.,argcall)
           call code_keys(cblock,tkeys,keycall,.true.,.false.)
           call code_loop_check_body_and_result(cblock)
@@ -5432,9 +5428,10 @@ contains
       call code_val(coder,coder%var(coder%mask))
       cblock2=make_cblock(coder,cblock,node,sym)
       call code_check(cblock2)
+      coder%par_state=par_state_none
       call code_body(cblock2)
-      call code_result(cblock2,flags)
       call import_params(cblock2)
+      call code_result(cblock2,flags)
       call close_cblock(coder,cblock2)
       call make_sp_call(coder,cblock,node,sym,2,0)
     end subroutine code_special_check_body_and_result
@@ -5462,13 +5459,15 @@ contains
       type(pm_ptr):: amp,p
       p=node_get(node,proc_params)
       amp=node_get(node,proc_amplocs)
-      do j=0,pm_fast_esize(amp)
-         i=amp%data%i(amp%offset+j)
-         call code_val(coder,coder%var(coder%state_base+i))
-         call code_val(coder,coder%var(coder%state_base+npars-num_comm_args+i))
-         call make_comm_sys_call(coder,cblock,p,sym_export_param,&
-              1,1)
-      enddo
+      if(.not.pm_fast_isnull(amp)) then
+         amp=pm_name_val(coder%context,int(amp%offset))
+         do j=0,pm_fast_esize(amp)
+            i=amp%data%i(amp%offset+j)
+            call code_val(coder,coder%var(coder%state_base+i))
+            call code_val(coder,coder%var(coder%state_base+npars-num_comm_args+i))
+            call make_comm_sys_call(coder,cblock,p,sym_import_param,2,0,assign=.true.)
+         enddo
+      endif
     end subroutine import_params
 
     subroutine code_loop_check_body_and_result(cblock)
@@ -6460,6 +6459,23 @@ contains
     include 'ftypeof.inc'
   end subroutine make_const
 
+  !===========================================
+  ! Make a constant from a literal type
+  !===========================================
+  subroutine make_literal_const(coder,cblock,node,typ,fixit)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: cblock,node
+    integer,intent(in):: typ
+    logical,intent(in),optional:: fixit
+    integer:: tno
+    tno=typ
+    if(present(fixit)) tno=pm_fix_value_type_from_literal(coder%context,tno)
+    call code_val(coder,pm_type_val(coder%context,tno))
+    call code_num(coder,tno)
+    call make_code(coder,node,cnode_is_const,2)
+  end subroutine make_literal_const
+
+  
   !===========================
   ! Dupicate an expression
   !===========================
