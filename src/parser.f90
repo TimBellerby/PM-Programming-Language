@@ -1453,7 +1453,7 @@ contains
                 if(expect(parser,sym_close)) return
                 call make_node_at(parser,sym_open,2,line,pos)
              else
-                call make_node_at(parser,sym_get_dot,1,line,pos)
+                call make_node_at(parser,sym_open_brace,1,line,pos)
              endif
              n=n+1
           case default
@@ -1486,6 +1486,9 @@ contains
           n=n+1
        case(sym_open_square)
           call get_sym_pos(parser,line,pos)
+          call push_sym_val(parser,sym_tuple)
+          if(subscript(parser)) return
+          call simple_call(parser)
           if(subscript(parser)) return
           call make_node_at(parser,sym_sub,1,line,pos)
           n=n+1

@@ -1258,7 +1258,7 @@ contains
     logical,intent(in):: islhs,isaliased
     type(pm_ptr):: arg
     integer:: i,j,n,sym
-    i=1
+    i=2
     n=node_numargs(node)
     
     if(node_sym(node)==sym_reference.and..not.isaliased) then
@@ -1285,21 +1285,62 @@ contains
           endif
        enddo       
     endif
-    
-    do j=n,i,-1
+
+    if(i==n) return
+
+    call trav_reference_as_list(coder,cblock,pnode,node,i,islhs)
+
+  end subroutine trav_comm_ref
+
+  subroutine trav_reference_as_list(coder,cblock,pnode,node,first_index,islhs)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: cblock,pnode,node
+    integer,intent(in):: first_index
+    logical,intent(in):: islhs
+    integer:: i,j,n,base,name,sym
+    type(pm_ptr):: arg
+    base=coder%vtop
+    n=node_numargs(node)
+    do j=first_index,n
        arg=node_arg(node,j)
        sym=node_sym(arg)
-       if(sym==sym_dot) then
-          
-       elseif(sym==sym_open_square) then
+       select case(sym)
+       case(sym_dot)
+          name=node_num_arg(node,1)
+          ! Convert name to literal "name"
+          call make_literal_const(coder,cblock,arg,&
+               pm_new_literal_value_type(coder%context,&
+               pm_name_val(coder%context,name),name))
+       case(sym_sub)
           call trav_expr(coder,cblock,node,node_arg(node,1))
-       else
+       case(sym_open_brace)
           call trav_expr(coder,cblock,node,node_arg(node,1))
-       endif
-       call make_sys_call_rtn(coder,cblock,node,sym_pm_list,2,1)
+          call make_sp_call_rtn(coder,cblock,node,sym_list,1,1)
+       case(sym_open)
+          call trav_expr(coder,cblock,node,node_arg(node,1))
+          call trav_expr(coder,cblock,node,node_arg(node,2))
+          call make_sp_call_rtn(coder,cblock,node,sym_list,2,1)
+       case default
+          call pm_panic('Unexpected node in reference')
+       end select
+    enddo
+
+    n=n-first_index+1
+    if(first_index/=2) then
+       call trav_ref_to_var(coder,cblock,node,node_num_arg(node,1),islhs)
+    endif
+    call dup_code(coder)
+    do i=1,n
+       call code_val(coder,coder%vstack(base+i))
+       call make_comm_sys_call_rtn(coder,cblock,node_arg(node,i+1),sym_pm_ref,2,1)
     enddo
     
-  end subroutine trav_comm_ref
+    do j=1,n
+       call dup_expr(coder,coder%vstack(base+i))
+    enddo
+    call make_sys_call_rtn(coder,cblock,node,sym_pm_list,2,1)
+    
+  end subroutine trav_reference_as_list
 
   subroutine check_alias(coder,cblock,node1,node2,str)
     type(code_state),intent(inout):: coder
