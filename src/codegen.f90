@@ -488,12 +488,6 @@ contains
              call trav_call(coder,cblock,node,node_arg(node,3),0,.true.)
              if(xbase>=0) call hide_where_vars(coder,xbase+1,xtop)
           endif
-       case(sym_invar)
-          call trav_mode_stmt(coder,cblock,node,sym,sym_invar_stmt)
-       case(sym_shared)
-          call trav_mode_stmt(coder,cblock,node,sym,sym_shared_stmt)
-       case(sym_chan)
-          call trav_mode_stmt(coder,cblock,node,sym,sym_chan_stmt)
        case(sym_for,sym_forall)
           call trav_for_stmt(coder,cblock,list,node)
        case(sym_each,sym_foreach_invar)
@@ -1171,6 +1165,8 @@ contains
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,pnode,node
     integer:: base,xtop
+    type(pm_ptr):: var,arg1,arg3
+    integer:: sym1,sym3
     if(coder%par_state==par_state_none) then
        call code_error(coder,node,&
             'Cannot have an "all" statement outside of a parallel context')
@@ -1178,205 +1174,229 @@ contains
        call code_error(coder,node,&
             'In a conditional statement, an "all" statement must be enclosed by a "sync" statement')
     endif
+    
+    arg1=node_arg(node,1)
+    sym1=node_sym(arg1)
+    arg3=node_arg(node,3)
+    sym3=node_sym(arg3)
+    
     call trav_subexpr(coder,cblock,node,node_arg(node,4),base,xtop)
-    call trav_comm_ref(coder,cblock,node,node_arg(node,1),.true.,.false.)
+    call trav_ref_to_var(coder,cblock,node,node_num_arg(node,1),.true.)
+    var=top_code(coder)
+
     call trav_expr(coder,cblock,node,node_arg(node,2))
-    call trav_expr(coder,cblock,node,node_arg(node,3))
-    call make_comm_sys_call(coder,cblock,node,sym_all_stmt,3,0)
+    call trav_expr(coder,cblock,node,arg3)
+
+    if(node_sym(arg1)==sym_reference) then
+       !call trav_comm_ref(coder,cblock,node,arg1,.true.,.true.,var)
+       call make_comm_sys_call(coder,cblock,node,sym_all_stmt,3+node_numargs(arg1),0)
+    else
+       call make_comm_sys_call(coder,cblock,node,sym_all_stmt,3,0)
+    endif
     if(base>=0) call hide_where_vars(coder,base+1,xtop)
+    
   end subroutine trav_all_stmt
 
-  subroutine trav_ref(coder,cblock,pnode,node,islhs,call_sym)
+  subroutine trav_reference(coder,cblock,pnode,node,islhs,skipdot,isalias,call_n)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,pnode,node
-    logical,intent(in):: islhs
-    integer,intent(in),optional:: call_sym
-    integer:: n,flags
-    logical:: maybe_not_private
-    if(node_sym(node)==sym_name) then
+    logical,intent(in):: islhs,skipdot,isalias
+    integer,intent(out),optional:: call_n
+    type(pm_ptr):: arg
+    integer:: i,j,n,sym,start,base,vbase
+    logical:: iscomm,isvar
+    
+    sym=node_sym(node) 
+    if(sym==sym_name) then
        call trav_ref_to_var(coder,cblock,node,node_num_arg(node,1),islhs)
-       n=1
-    elseif(node_sym(node)==sym_reference) then
-       call trav_ref_to_var(coder,cblock,node,node_num_arg(node_arg(node,1),1),islhs)
-       flags=cnode_get_num(top_code(coder),var_flags)
-       maybe_not_private=iand(flags,var_is_maybe_not_private)/=0
-       if(maybe_not_private) then
-          call trav_comm_ref(coder,cblock,pnode,node,islhs,.false.)
-          n=2
-       else
-          call trav_simple_ref(coder,cblock,pnode,node,islhs)
-          n=1
-       endif
+       return
     endif
-    if(present(call_sym)) then
-       if(coder%par_state==par_state_none) then
-          call make_sys_call_rtn(coder,cblock,node,call_sym,n,1)
-       else
-          call make_comm_sys_call_rtn(coder,cblock,node,call_sym,n,1)
-       endif
-    endif
-  end subroutine trav_ref
 
-  subroutine trav_simple_ref(coder,cblock,pnode,node,islhs)
-    type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: cblock,pnode,node
-    logical,intent(in):: islhs
-    integer:: i,n,m,sym
-    type(pm_ptr):: arg,list
+    arg=node_arg(node,1)
+    if(node_sym(arg)==sym_name) then
+       call trav_ref_to_var(coder,cblock,arg,node_num_arg(arg,1),islhs)
+       isvar=.true.
+    else
+       call trav_expr(coder,cblock,node,arg)
+       isvar=.false.
+    endif
+   
+    start=2
+    arg=node_arg(node,start)
+    sym=node_sym(arg)
+    if(sym==sym_pling) then
+       call make_comm_sys_call(coder,cblock,node,sym_pm_pling,1,1)
+       iscomm=.true.
+       start=3
+    elseif(sym==sym_at) then
+!!! need the @[] part
+       
+       call make_comm_sys_call(coder,cblock,node,sym_pm_at,1,1)
+       iscomm=.true.
+       start=3
+    else
+       arg=top_code(coder)
+       if(cnode_get_kind(arg)==cnode_is_var) then
+          iscomm=cnode_flags_set(top_code(coder),var_flags,var_is_maybe_not_private)
+       else
+          iscomm=.false.
+       endif
+    endif
+
+    vbase=coder%vtop
+    base=coder%vtop-start+2
+    
     n=node_numargs(node)
-    do i=2,n
+    do i=start,n
        arg=node_arg(node,i)
        sym=node_sym(arg)
        select case(sym)
        case(sym_dot)
-          call make_const(coder,cblock,node,node_arg(node,1))
-          call make_sp_call_rtn(coder,cblock,node,sym_dot,2,1)
-       case(sym_sub)
-          list=node_arg(node,1)
-          call trav_exprlist(coder,cblock,node,list)
-          call make_sys_call_rtn(coder,cblock,node,sym_sub,1+node_numargs(list),1)
-       case(sym_open)
-          list=node_arg(node,2)
-          m=node_numargs(list)
-          call trav_exprlist(coder,cblock,node,list)
-          call make_arglist(coder,cblock,node,m,1,.false.,.true.)
-          call code_null(coder)
-          call trav_expr(coder,cblock,node,node_arg(node,1))
-          call make_full_call(coder,cblock,node,pm_fast_tinyint(coder%context,0),&
-               pm_null_obj,1+m,1,0,pm_null_obj,&
-               proccall_is_comm+proccall_is_general+proccall_is_ref,pop_code(coder))
-          call make_sys_call_rtn(coder,cblock,node,sym_get_ref,1,1)
-       end select
-    enddo
-  contains
-    include 'ftiny.inc'
-  end subroutine trav_simple_ref
-
-  subroutine trav_comm_ref(coder,cblock,pnode,node,islhs,isaliased)
-    type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: cblock,pnode,node
-    logical,intent(in):: islhs,isaliased
-    type(pm_ptr):: arg
-    integer:: i,j,n,sym
-    i=2
-    n=node_numargs(node)
-    
-    if(node_sym(node)==sym_reference.and..not.isaliased) then
-       do while(i<=n)
-          arg=node_arg(node,i)
-          sym=node_sym(node)
-          if(sym==sym_dot) then
-             call code_val(coder,node_arg(arg,1))
-             call make_sp_call_rtn(coder,cblock,node,sym_dot,2,1)
-             i=i+1
-          else
-             if(i==n) then
-                if(sym==sym_open_square) then
-                   call trav_exprlist(coder,cblock,node,arg)
-                   call make_comm_sys_call_rtn(coder,cblock,node,sym_sub,node_numargs(arg),1)
-                else
-                   call trav_exprlist(coder,cblock,node,node_arg(arg,2))
-                   call make_comm_sys_call_rtn(coder,cblock,node,node_num_arg(arg,1),&
-                        node_numargs(node_arg(arg,2)),1,aflags=proccall_is_ref)
-                endif
-                i=i+1
-             endif
-             exit
-          endif
-       enddo       
-    endif
-
-    if(i==n) return
-
-    call trav_reference_as_list(coder,cblock,pnode,node,i,islhs)
-
-  end subroutine trav_comm_ref
-
-  subroutine trav_reference_as_list(coder,cblock,pnode,node,first_index,islhs)
-    type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: cblock,pnode,node
-    integer,intent(in):: first_index
-    logical,intent(in):: islhs
-    integer:: i,j,n,base,name,sym
-    type(pm_ptr):: arg
-    base=coder%vtop
-    n=node_numargs(node)
-    do j=first_index,n
-       arg=node_arg(node,j)
-       sym=node_sym(arg)
-       select case(sym)
-       case(sym_dot)
-          name=node_num_arg(node,1)
-          ! Convert name to literal "name"
-          call make_literal_const(coder,cblock,arg,&
-               pm_new_literal_value_type(coder%context,&
-               pm_name_val(coder%context,name),name))
-       case(sym_sub)
-          call trav_expr(coder,cblock,node,node_arg(node,1))
+          call code_name_as_string(coder,cblock,arg,node_num_arg(arg,1))
        case(sym_open_brace)
-          call trav_expr(coder,cblock,node,node_arg(node,1))
-          call make_sp_call_rtn(coder,cblock,node,sym_list,1,1)
+          call trav_expr(coder,cblock,arg,node_arg(arg,1))
+          call make_sp_call(coder,cblock,arg,sym_open_brace,1,0,flags=call_is_no_touch)
+       case(sym_sub)
+          call trav_expr(coder,cblock,arg,node_arg(arg,1))
        case(sym_open)
-          call trav_expr(coder,cblock,node,node_arg(node,1))
-          call trav_expr(coder,cblock,node,node_arg(node,2))
+          call trav_expr(coder,cblock,arg,node_arg(arg,1))
+          call trav_expr(coder,cblock,arg,node_arg(arg,2))
           call make_sp_call_rtn(coder,cblock,node,sym_list,2,1)
-       case default
-          call pm_panic('Unexpected node in reference')
        end select
     enddo
 
-    n=n-first_index+1
-    if(first_index/=2) then
-       call trav_ref_to_var(coder,cblock,node,node_num_arg(node,1),islhs)
+    call code_val(coder,coder%vstack(vbase))
+    
+    i=start
+    
+    if(skipdot) then
+       arg=node_arg(node,i)
+       sym=node_sym(arg)
+       do while(sym==sym_dot.or.sym==sym_open_brace)
+          call code_val(coder,coder%vstack(base+i))
+          call make_sp_call_rtn(coder,cblock,arg,sym_dot,2,1)
+          i=i+1
+          if(i>n) exit
+          arg=node_arg(node,i)
+          sym=node_sym(arg)
+       enddo
     endif
-    call dup_code(coder)
-    do i=1,n
-       call code_val(coder,coder%vstack(base+i))
-       call make_comm_sys_call_rtn(coder,cblock,node_arg(node,i+1),sym_pm_ref,2,1)
-    enddo
     
-    do j=1,n
-       call dup_expr(coder,coder%vstack(base+i))
-    enddo
-    call make_sys_call_rtn(coder,cblock,node,sym_pm_list,2,1)
+    if(i<n) then
+       do j=i+1,n
+          call code_val(coder,coder%vstack(base+j))
+       enddo
+       if(present(call_n)) then
+          call_n=n-i
+       else
+          if(.not.iscomm) then
+             call make_sys_call_rtn(coder,cblock,node,&
+                  merge(sym_rhs,sym_lhs,islhs),n-i+1,1)
+          else
+             call make_comm_sys_call_rtn(coder,cblock,node,&
+                  merge(sym_rhs,sym_lhs,islhs),n-i+1,1)
+          endif
+       endif
+    end if
     
-  end subroutine trav_reference_as_list
+    if(isalias) then
+       call dup_expr(coder,coder%vstack(vbase))
+       do j=start,n
+          call dup_expr(coder,coder%vstack(base+j)) 
+       enddo
+       call make_sp_call_rtn(coder,cblock,node,sym_list,n-start+1,1)
+       coder%vstack(vbase)=coder%vstack(coder%vtop-1)
+       coder%vstack(vbase+1)=coder%vstack(coder%vtop)
+       coder%vtop=vbase+1
+    else
+       coder%vstack(vbase)=coder%vstack(coder%vtop)
+       coder%vtop=vbase
+    endif
 
-  subroutine check_alias(coder,cblock,node1,node2,str)
+ 
+    
+  end subroutine trav_reference
+
+  function check_aliased(coder,node1,node2,str) result(aliased)
     type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: cblock,node1,node2
+    type(pm_ptr),intent(in):: node1,node2
     character(len=*):: str
-    if(is_aliased(coder,cblock,node1,node2)) then
+    logical:: aliased
+    logical:: hard_aliased
+    aliased=is_aliased(node1,node2,hard_aliased)
+    if(hard_aliased) then
        call code_error(coder,node1,str)
        call code_error(coder,node2,'Corresponding variable access for the above error')
     endif
-  end subroutine check_alias
+  end function check_aliased
 
-  function is_aliased(coder,cblock,node1,node2) result(aliased)
-    type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: cblock,node1,node2
+  function is_aliased(node1,node2,hard_aliased) result(aliased)
+    type(pm_ptr),intent(in):: node1,node2
+    logical,intent(out),optional:: hard_aliased
     logical:: aliased
-    integer:: i
+    integer:: i,start,ds1,ds2,sym1,sym2
     type(pm_ptr):: arg1,arg2
-    if(root_name(node1)/=root_name(node2)) then
+
+    arg1=node_arg(node1,1)
+    sym1=node_sym(arg1)
+    arg2=node_arg(node2,1)
+    sym2=node_sym(arg2)
+    if(sym1/=sym_name.or.sym2/=sym_name) then
        aliased=.false.
+       if(present(hard_aliased)) hard_aliased=.false.
        return
+    else
+       if(node_num_arg(arg1,1)/=node_num_arg(arg2,1)) then
+          aliased=.false.
+          if(present(hard_aliased)) hard_aliased=.false.
+          return
+       endif
     endif
-    aliased=.true.
-    do i=2,min(node_numargs(node1),node_numargs(node2))
-       arg1=node_arg(node1,i)
-       arg2=node_arg(node2,i)
+    
+    start=2
+    sym1=node_sym(node_arg(node1,2))
+    sym2=node_sym(node_arg(node2,2))
+    if(sym1==sym_pling.or.sym2==sym_pling) then
+       if(sym1/=sym2) then
+          aliased=.true.
+          if(present(hard_aliased)) hard_aliased=.true.
+          return
+       endif
+       start=3
+    endif
+
+    ds1=merge(1,0,sym1==sym_at)
+    ds2=merge(1,0,sym2==sym_at)
+       
+    do i=start,min(node_numargs(node1),node_numargs(node2))
+       arg1=node_arg(node1,i+ds1)
+       arg2=node_arg(node2,i+ds2)
        if(node_sym(arg1)==sym_dot.and.node_sym(arg2)==sym_dot) then
           if(node_num_arg(arg1,1)/=node_num_arg(arg2,1)) then
              aliased=.false.
+             if(present(hard_aliased)) hard_aliased=.false.
              return
           endif
        else
-          exit
+          aliased=.true.
+          if(present(hard_aliased)) hard_aliased=.false.
+          return
        endif
     enddo
+    aliased=.true.
+    if(present(hard_aliased)) hard_aliased=.true.
   end function is_aliased
   
+  subroutine code_name_as_string(coder,cblock,node,name)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: cblock,node
+    integer,intent(in):: name
+    call make_literal_const(coder,cblock,node,&
+         pm_new_literal_value_type(coder%context,&
+         pm_name_val(coder%context,name),name))
+  end subroutine code_name_as_string
+
+
   !========================================================
   ! Traverse "sync" statement
   !========================================================
@@ -1566,8 +1586,8 @@ contains
                    arg2=node_arg(node,j+1)
                    k=node_sym(arg2)
                    if(k==sym_name.or.k==sym_reference) then
-                      call check_alias(coder,cblock,arg,arg2,&
-                           '"&" item aliases with another item')
+!!$                      call check_aliased(coder,cblock,arg,arg2,&
+!!$                           '"&" item aliases with another item')
                    endif
                 endif
              enddo
@@ -1581,9 +1601,8 @@ contains
           arg=node_arg(node,i+1)
           k=node_sym(arg)
           if(k==sym_name.or.k==sym_reference) then
-             call trav_ref(coder,cblock,node,arg,&
-                  node_sym(node_arg(node,i))/=sym_amp,&
-                  call_sym=sym_iter_ref)
+             call trav_reference(coder,cblock,node,arg,&
+                  node_sym(node_arg(node,i))/=sym_amp,.true.,.false.)
           else
              call trav_expr(coder,cblock,node,node_arg(node,i+1))
           endif
@@ -2389,32 +2408,6 @@ contains
        top=coder%top
        if(present(dtop)) dtop=coder%top
     endif
-    if(node_sym(p)==sym_split) then
-       wbase=coder%wtop
-       do i=2,node_numargs(p),2
-          arg=node_arg(p,i+1)
-          name=root_name(p)
-          ok=.true.
-          do j=wbase+1,coder%wtop
-             if(name==coder%wstack(i)) then
-                ok=.false.
-                exit
-             endif
-          enddo
-          if(ok) call push_word(coder,name)
-          call trav_comm_ref(coder,cblock,p,arg,.true.,.true.)
-          call dup_expr(coder,top_code(coder))
-          call make_var(coder,cblock,p,node_num_arg(p,i),var_is_where)
-          call make_sys_call_rtn(coder,cblock,p,sym_get_val_ref,1,1)
-       enddo
-       call make_sys_call(coder,cblock,p,sym_check_alias,node_numargs(p)/2,0)
-       do i=wbase+1,coder%wtop
-          call make_var(coder,cblock,p,coder%wstack(i),var_is_split+var_is_where)
-       enddo
-       coder%wtop=wbase
-       p=node_arg(p,1)
-       top=coder%top
-    endif
     if(node_sym(p)==sym_check) then
        call apply_x(p,node_arg(p,1))
        call make_check(coder,cblock,p,0)
@@ -2655,8 +2648,6 @@ contains
 !!$  end subroutine trav_par_stmt
 
 
-
-
   !*****************************************************
   ! ASSIGNMENTS AND VARIABLE DEFINITIONS
   !*****************************************************
@@ -2889,7 +2880,7 @@ contains
        sym=node_sym(node)
        select case(sym)
        case(sym_reference)
-          call trav_simple_ref(coder,cblock,pnode,node,.true.)
+          call trav_reference(coder,cblock,pnode,node,.true.,.true.,.false.)
           call assign_call(node,.false.)
        case(sym_name)
           call trav_ref_to_var(coder,cblock,node,node_num_arg(node,1),.true.)
@@ -2939,7 +2930,7 @@ contains
        call drop_code(coder)
        return
     endif
-    call trav_simple_ref(coder,cblock,pnode,node,.true.)
+    call trav_reference(coder,cblock,pnode,node,.true.,.true.,.false.)
     call swap_code(coder)
     call trav_expr(coder,cblock,pnode,op)
     call make_assign_call(coder,cblock,pnode,sym_assignment,3,0)
@@ -3062,100 +3053,6 @@ contains
   contains
     include 'fisnull.inc'
   end subroutine trav_ref_to_var
-
-!!$  !========================================================
-!!$  ! Traverse a  reference value
-!!$  !========================================================
-!!$  recursive function trav_ref(coder,cblock,pnode,node,mode) result(outmode)
-!!$    type(code_state),intent(inout):: coder
-!!$    type(pm_ptr),intent(in):: cblock,pnode,node
-!!$    integer,intent(in):: mode
-!!$    integer:: outmode
-!!$    logical:: outer
-!!$    integer:: sym,flags
-!!$    integer:: acall,i
-!!$    outer=.false.
-!!$    outmode=0
-!!$    if(pm_fast_isname(node)) then
-!!$       call trav_ref_to_var(coder,cblock,pnode,node,mode)
-!!$    else if(pm_fast_vkind(node)==pm_pointer) then
-!!$       sym=node_sym(node) 
-!!$       select case(sym)
-!!$       case(sym_sub,sym_dot_sub)
-!!$          if(iand(mode,ref_is_val)/=0) then
-!!$             acall=merge(sym_make_noderef,sym_make_subref,sym==sym_dot_sub)
-!!$          else
-!!$             if(iand(mode,ref_is_amp)/=0) then
-!!$                acall=merge(sym_make_nodelhs_amp,sym_make_sublhs_amp,sym==sym_dot_sub)
-!!$             else
-!!$                acall=merge(sym_make_nodelhs,sym_make_sublhs,sym==sym_dot_sub)
-!!$             endif
-!!$          endif
-!!$          call make_comm_sys_call(coder,cblock,node,acall,2,1)
-!!$          outmode=ior(outmode,ref_is_subscripted)
-!!$       case(sym_dot)
-!!$          call make_temp_var(coder,cblock,pnode)
-!!$          call dup_code(coder)
-!!$          outmode=trav_ref(coder,cblock,node,node_arg(node,1),mode)
-!!$          call make_const(coder,cblock,node,node_arg(node,2))
-!!$          call make_basic_sp_call(coder,cblock,node,&
-!!$               merge(sym_dot,sym_dot_ref,&
-!!$               iand(mode,ref_is_val)/=0),2,1)
-!!$       case(sym_get_dot)
-!!$          call make_temp_var(coder,cblock,node)
-!!$          call dup_code(coder)
-!!$          outmode=trav_ref(coder,cblock,node,node_arg(node,1),mode)
-!!$          call trav_expr(coder,cblock,node,node_arg(node,2))
-!!$          call make_basic_sp_call(coder,cblock,node,&
-!!$               merge(sym_get_dot,sym_get_dot_ref,&
-!!$               iand(mode,ref_is_val)/=0),2,1)
-!!$       case(sym_get_dot_ref)
-!!$          call make_temp_var(coder,cblock,node)
-!!$          call dup_code(coder)
-!!$          outmode=trav_ref(coder,cblock,node,node_arg(node,1),mode)
-!!$          call trav_expr(coder,cblock,node,node_arg(node,2))
-!!$          call make_basic_sp_call(coder,cblock,node,&
-!!$               sym_get_dot_ref,2,1)
-!!$       case(sym_caret)
-!!$          call trav_expr(coder,cblock,pnode,node_arg(node,1))
-!!$       case(sym_pling)
-!!$          outmode=ior(trav_ref(coder,cblock,node,node_arg(node,1),mode),&
-!!$               ref_has_at)
-!!$          call make_comm_sys_call_rtn(coder,cblock,node,sym_make_array,1,1)
-!!$       case(sym_name)
-!!$          call trav_ref_to_var(coder,cblock,node,node_arg(node,1),mode)
-!!$          outmode=0
-!!$       case(sym_dot_call)
-!!$          outmode=trav_ref(coder,cblock,node,node_arg(node,1),mode)
-!!$          call trav_exprlist(coder,cblock,node,node_arg(node,3))
-!!$          if(node_sym(node_arg(node,2))==sym_dot) then
-!!$             
-!!$          else
-!!$             call make_comm_sys_call_rtn(coder,cblock,node,node_num_arg(node,2),&
-!!$                  node_numargs(node_arg(node,3))+1,1,aflags=proccall_is_ref,assign=.true.)
-!!$          endif
-!!$       case(sym_reference)
-!!$          outmode=trav_ref(coder,cblock,node,node_arg(node,2),mode)
-!!$       case default
-!!$          if(iand(mode,ref_is_val)==0) then
-!!$             call code_error(coder,pnode,&
-!!$                  'Cannot indirectly assign to expression - value is updated')
-!!$             call make_temp_var(coder,cblock,pnode)
-!!$          else
-!!$             call trav_expr(coder,cblock,pnode,node)
-!!$          endif
-!!$       end select
-!!$    else
-!!$       call code_error(coder,pnode,&
-!!$            'Cannot make reference')
-!!$       call make_temp_var(coder,cblock,pnode)
-!!$    endif
-!!$  contains
-!!$    include 'fvkind.inc'
-!!$    include 'fisname.inc'
-!!$    include 'fisnull.inc'
-!!$    include 'ftiny.inc'
-!!$  end function  trav_ref
 
   !========================================================
   ! Create a new system variable from expr on top of stack
@@ -3437,7 +3334,7 @@ contains
     case(sym_pm_each_index)
        call trav_pm_each_index(coder,cblock,pnode,node,.true.)
     case(sym_reference)
-       call trav_ref(coder,cblock,pnode,node,.false.,call_sym=sym_get_ref)
+       call trav_reference(coder,cblock,pnode,node,.false.,.true.,.false.)
     case(sym_open)
        call make_temp_var(coder,cblock,node)
        call dup_code(coder)
@@ -4880,7 +4777,7 @@ contains
                  'Call using "&" arguments cannot be a component of an expression')
           endif
        endif
-       call process_amp_args(amps,int(pm_fast_esize(amps)+1))
+       call process_amp_args(list,amps)
     endif
 
     ! Create argument list node from nargs + nret values on vstack
@@ -4999,57 +4896,93 @@ contains
     include 'fesize.inc'
     include 'fvkind.inc'
     include 'ftiny.inc'
-    
-    ! For each & argument x, potentially aliasing argument y, code:
-    !    x1=PM__lhs_and_val(x)
-    !    PM__check_alias(x1,y1)
-    !    x2=PM__copy_in(x1)
-    !    f(...,&x2,...)
-    !    PM__copy_out(&x1,x2)  // This is coded in post-process
-    !
-    !    All x1 and then all x2 values are stored on vstack above base
 
-    subroutine process_amp_args(amp,namp)
+    subroutine process_amp_args(node,amp)
+      type(pm_ptr),intent(in):: node
       type(pm_ptr),intent(in):: amp
-      integer,intent(in):: namp
-      integer:: i,j,jj,k,sym
-      type(pm_ptr):: arg
+      integer:: i,j,jj,k,sym,first_amp
+      type(pm_ptr):: arg,arg2
+      logical:: aliased(nargs),xaliased(nargs,nargs),is_amp(nargs),alias,any_aliased
+      character(len=*),parameter:: emess='An "&" argument aliases another argument'
 
       j=0
+      any_aliased=.false.
+      aliased=.false.
+      first_amp=amp%data%i(amp%offset)
       do i=1,nargs
-         if(amp%data%i(amp%offset+j)==i) then
-            call trav_ref(coder,cblock,list,node_arg(list,i),.true.)
-
-            ! Check for aliasing with other parameters
+         arg=node_arg(node,i)
+         is_amp(i)=amp%data%i(amp%offset+j)==i
+         if(is_amp(i)) then
+            xaliased(:,i)=.false.
             do k=1,i-1
-               arg=node_arg(list,k)
-               sym=node_sym(arg)
+               arg2=node_arg(list,k)
+               sym=node_sym(arg2)
                if(sym==sym_name.or.sym==sym_reference) then
-                  call check_alias(coder,cblock,node_arg(list,i),arg,&
-                       '"&" argument aliases with another argument')
-               endif
-            enddo
-            jj=min(pm_fast_esize(amp),jj+1)
-            do k=i+1,nargs
-               if(k==amp%data%i(amp%offset+jj)) then
-                  jj=min(pm_fast_esize(amp),jj+1)
-               else
-                  arg=node_arg(list,k)
-                  sym=node_sym(arg)
-                  if(sym==sym_name.or.sym==sym_reference) then
-                     call check_alias(coder,cblock,node_arg(list,i),arg,&
-                          '"&" argument aliases with another argument')
+                  if(check_aliased(coder,arg,arg2,emess)) then
+                     aliased(i)=.true.
+                     aliased(k)=.true.
+                     xaliased(k,i)=.true.
                   endif
                endif
             enddo
-
-            !! Find index of location of next "&" arg
-            j=min(pm_fast_esize(amp),j+1)
+            j=min(j+1,pm_fast_esize(amp))
          else
-            arg=node_arg(list,i)
-            call trav_expr(coder,cblock,list,arg)
+            sym=node_sym(arg)
+            if(sym==sym_reference.or.sym==sym_name) then
+               do k=first_amp,i-1
+                  if(is_amp(k)) then
+                     if(check_aliased(coder,arg,arg2,emess)) then 
+                        aliased(i)=.true.
+                        aliased(k)=.true.
+                        xaliased(i,k)=.true.
+                     endif
+                  endif
+               enddo
+            endif
          endif
       enddo
+
+      if(any_aliased) then
+         do i=1,nargs
+            arg=node_arg(node,i)
+            if(aliased(i)) then
+               call trav_reference(coder,cblock,node,arg,is_amp(i),.true.,.true.)
+            elseif(is_amp(i)) then
+               call trav_reference(coder,cblock,node,arg,.true.,.true.,.false.)
+               call code_null(coder)
+            else
+               call trav_expr(coder,cblock,node,arg)
+               call code_null(coder)
+            endif
+         enddo
+         do i=1,nargs
+            if(is_amp(i).and.aliased(i)) then
+               do j=1,nargs
+                  if(i/=j.and..not.(is_amp(j).and.j>i)) then
+                     if(xaliased(k,j)) then
+                        call code_val(coder,coder%vstack(base+i*2-1))
+                        call code_val(coder,coder%vstack(base+j*2-1))
+                        call make_sys_call(coder,cblock,node_arg(node,i),&
+                             sym_check_alias,2,0)
+                     endif
+                  endif
+               enddo
+            endif
+         enddo
+         do i=1,nargs
+            coder%vstack(base+i)=coder%vstack(base+2*i)
+         enddo
+         coder%vtop=coder%vtop-nargs
+      else
+         do i=1,nargs
+            arg=node_arg(node,i)
+            if(is_amp(i)) then
+               call trav_reference(coder,cblock,node,arg,.true.,.true.,.false.)
+            else
+               call trav_expr(coder,cblock,node,arg)
+            endif
+         enddo
+      endif
     end subroutine process_amp_args
     
   end subroutine trav_call

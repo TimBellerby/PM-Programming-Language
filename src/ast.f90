@@ -113,6 +113,7 @@ module pm_ast
   integer,parameter:: proccall_is_no_inline=  32
   integer,parameter:: proccall_is_yield=      64
 
+  integer,parameter:: proccall_is_lhs=        128
   integer,parameter:: proc_is_cond=           256
   integer,parameter:: proc_is_uncond=         512
   integer,parameter:: proc_run_complete=      2**10

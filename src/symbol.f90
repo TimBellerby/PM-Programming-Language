@@ -385,8 +385,8 @@ module pm_symbol
   integer,parameter:: sym_pm_forall_stmt = hook + 40
   integer,parameter:: sym_pm_over_stmt = hook + 41
   integer,parameter:: sym_pm_par_stmt = hook + 42
-  integer,parameter:: sym_lhs_and_val = hook + 43
-  integer,parameter:: sym_rhs_and_val = hook + 44
+  integer,parameter:: sym_lhs = hook + 43
+  integer,parameter:: sym_rhs = hook + 44
   integer,parameter:: sym_make_var= hook + 45
   integer,parameter:: sym_make_chan_var = hook + 46
   integer,parameter:: sym_make_nhd_var = hook + 47
@@ -394,9 +394,9 @@ module pm_symbol
   integer,parameter:: sym_make_invar_var = hook + 49
   integer,parameter:: sym_make_shared_var = hook + 50
   integer,parameter:: sym_make_const = hook + 51
-  integer,parameter:: sym_chan_stmt = hook + 52
-  integer,parameter:: sym_invar_stmt = hook + 53
-  integer,parameter:: sym_shared_stmt = hook + 54
+  integer,parameter:: sym_pm_at = hook + 52
+  integer,parameter:: sym_pm_pling = hook + 53
+  integer,parameter:: sym_lcl_stmt = hook + 54
   integer,parameter:: sym_dechan = hook + 55
   integer,parameter:: sym_check_iter = hook + 56
   integer,parameter:: sym_check_iter_amp = hook + 57
@@ -514,7 +514,7 @@ module pm_symbol
   integer,parameter:: sym_blocking    =   hook5 + 25
   integer,parameter:: sym_chunks      =   hook5 + 26
   integer,parameter:: sym_get_chunk   =   hook5 + 27
-  integer,parameter:: sym_pm_at       =   hook5 + 28
+  integer,parameter:: sym_pm_atz       =   hook5 + 28
   integer,parameter:: sym_push_mess   =   hook5 + 29
   integer,parameter:: sym_pop_sync_mess = hook5 + 30
   integer,parameter:: sym_join_param  =   hook5 + 31
@@ -854,8 +854,8 @@ module pm_symbol
   data sym_names(sym_pm_forall_stmt)   /'PM__forall_stmt'/
   data sym_names(sym_pm_over_stmt)     /'PM__over_stmt'/
   data sym_names(sym_pm_par_stmt)      /'PM__par_stmt'/
-  data sym_names(sym_lhs_and_val)      /'PM__lhs_and_val'/
-  data sym_names(sym_rhs_and_val)      /'PM__rhs_and_val'/
+  data sym_names(sym_lhs)              /'PM__lhs'/
+  data sym_names(sym_rhs)              /'PM__rhs_and_val'/
   data sym_names(sym_make_var)         /'PM__make_var'/
   data sym_names(sym_make_chan_var)    /'PM__make_chan_var'/
   data sym_names(sym_make_nhd_var)     /'PM__make_nhd_var'/
@@ -864,9 +864,9 @@ module pm_symbol
   data sym_names(sym_make_shared_var)  /'PM__make_shrd_var'/
   data sym_names(sym_make_const)       /'PM__make_const'/
   
-  data sym_names(sym_chan_stmt)        /'PM__chan_stmt'/
-  data sym_names(sym_invar_stmt)       /'PM__invar_stmt'/
-  data sym_names(sym_shared_stmt)      /'PM__shrd_stmt'/
+  data sym_names(sym_pm_at)            /'PM__chan_stmt'/
+  data sym_names(sym_pm_pling)         /'PM__invar_stmt'/
+  data sym_names(sym_lcl_stmt)         /'PM__shrd_stmt'/
 
   data sym_names(sym_dechan)           /'PM__dechan'/
   data sym_names(sym_check_iter)       /'PM__check_iter'/
@@ -989,7 +989,7 @@ module pm_symbol
   data sym_names(sym_dim_noinit)       /'PM__dim_noinit'/
   data sym_names(sym_chunks)           /'chunks'/
   data sym_names(sym_get_chunk)        /'chunk'/
-  data sym_names(sym_pm_at)            /'PM__at'/
+  data sym_names(sym_pm_atz)           /'PM__atz'/
   data sym_names(sym_pm_node)          /'PM__node'/
   data sym_names(sym_init_const)       /'PM__init_const'/
 

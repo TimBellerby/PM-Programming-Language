@@ -1427,6 +1427,10 @@ contains
        call scan(parser)
        call make_node(parser,sym_pling,0)
        n=n+1
+    elseif(parser%sym==sym_at) then
+       call scan(parser)
+       call make_node(parser,sym_at,0)
+       n=n+1
     endif
     do
        select case(parser%sym)
@@ -1489,7 +1493,6 @@ contains
           call push_sym_val(parser,sym_tuple)
           if(subscript(parser)) return
           call simple_call(parser)
-          if(subscript(parser)) return
           call make_node_at(parser,sym_sub,1,line,pos)
           n=n+1
        case default
@@ -4280,9 +4283,11 @@ contains
   !======================================================
   ! Parameter list for procedure declaration
   !======================================================
-  recursive function param_list(parser,iscomm) result(iserr)
+  recursive function param_list(parser,iscomm,dot_name,dot_type,close) result(iserr)
     type(parse_state),intent(inout):: parser
     logical,intent(in):: iscomm
+    type(pm_ptr),intent(in):: dot_name,dot_type
+    integer,intent(in):: close
     logical:: iserr
     integer:: m,n,i,base,last,vbase,sym,msym,name,numloop
     type(pm_ptr):: temp,dom
@@ -4297,7 +4302,7 @@ contains
        call scan(parser)
        if(expect(parser,sym_colon)) return
        if(typ(parser)) return
-       if(parser%sym/=sym_close) then
+       if(parser%sym/=close) then
           if(expect(parser,sym_comma)) return
        endif
     else
@@ -4311,7 +4316,7 @@ contains
           call scan(parser)
           if(expect(parser,sym_colon)) return
           if(typ(parser)) return
-          if(parser%sym/=sym_close) then
+          if(parser%sym/=close) then
              if(expect(parser,sym_comma)) return
           endif
        else
@@ -4322,7 +4327,7 @@ contains
           call scan(parser)
           if(expect(parser,sym_colon)) return
           if(typ(parser)) return
-          if(parser%sym/=sym_close) then
+          if(parser%sym/=close) then
              if(expect(parser,sym_comma)) return
           endif
        else
@@ -4333,7 +4338,7 @@ contains
           call scan(parser)
           if(expect(parser,sym_colon)) return
           if(typ(parser)) return
-          if(parser%sym/=sym_close) then
+          if(parser%sym/=close) then
              if(expect(parser,sym_comma)) return
           endif
        else
@@ -4345,7 +4350,7 @@ contains
           call scan(parser)
           if(expect(parser,sym_colon)) return
           if(typ(parser)) return
-          if(parser%sym/=sym_close) then
+          if(parser%sym/=close) then
              if(expect(parser,sym_comma)) return
           endif
        else
@@ -4356,7 +4361,7 @@ contains
           call scan(parser)
           if(expect(parser,sym_colon)) return
           if(typ(parser)) return
-          if(parser%sym/=sym_close) then
+          if(parser%sym/=close) then
              if(expect(parser,sym_comma)) return
           endif
        else
@@ -4364,9 +4369,15 @@ contains
        endif
        m=num_comm_args
     endif
+
+    if(.not.pm_fast_isnull(dot_name)) then
+       call push_val(parser,dot_name)
+       call push_val(parser,dot_type)
+       m=m+1
+    endif
     
     ! Empty argument list
-    if(parser%sym==sym_close) then
+    if(parser%sym==close) then
        call make_node(parser,sym_list,m*2)
        call push_null_val(parser)
        call push_null_val(parser)
@@ -4460,6 +4471,9 @@ contains
        enddo
     else
        if(n>0) then
+          if(.not.pm_fast_isnull(dot_name)) then
+             call parse_error(parser,'A method cannot have keyword arguments')
+          endif
           call make_node(parser,sym_list,n*3)
        else
           call push_null_val(parser)
@@ -4479,12 +4493,14 @@ contains
        call push_null_val(parser)
     endif
     
-    if(expect(parser,sym_close)) return
+    if(expect(parser,close)) return
  
     iserr=.false.
     return
   contains
 
+    include 'fisnull.inc'
+    
     function arg_typ_with_mode(iscomm) result(iserr)
       logical,intent(in):: iscomm
       logical:: iserr
@@ -4551,15 +4567,15 @@ contains
   function proc_decl(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
-    type(pm_ptr),target::ptr,dom,dparams,rtypes
+    type(pm_ptr),target::ptr,dom,dparams,rtypes,dot_name,dot_type
     type(pm_ptr):: p,params,link
     type(pm_reg),pointer:: reg
     integer:: name,callname,this,thispar
     integer:: nret,base,flags,sbase,scount,m,nreduce,sym
-    integer:: line,pos,nerrors
+    integer:: line,pos,nerrors,open,close
     logical:: ampargs,iscall,iscomm,isref,isshared,islocal,ischan,have_rtn
     nerrors=parser%error_count
-    reg=>pm_register(parser%context,'proc',ptr,dom,dparams,rtypes)
+    reg=>pm_register(parser%context,'proc',ptr,dom,dparams,rtypes,dot_name,dot_type)
     iserr=.true.
     sym=sym_proc
     nret=0
@@ -4569,28 +4585,58 @@ contains
     dom=pm_null_obj
     dparams=pm_null_obj
     thispar=-1
+    open=sym_open
+    close=sym_close
 
     ! Line and position of procedure start
     call get_sym_pos(parser,line,pos)
     call scan(parser)
-
-    ! Reference procedure proc .name(...)
+   
     iscomm=.false.
     isref=.false.
-    if(parser%sym==sym_dot) then
+    if(parser%sym==sym_open) then
+       ! Reference procedure proc (name:type).name(...)
        call scan(parser)
+       if(parser%sym==sym_amp) then
+          flags=ior(flags,proccall_is_lhs)
+          call scan(parser)
+       endif
+       if(expect_name(parser)) goto 999
+       dot_name=pop_val(parser)
+       if(parser%sym==sym_colon) then
+          call scan(parser)
+          if(moded_typ(parser,.true.,.false.)) goto 999
+          dot_type=pop_val(parser)
+       else
+          dot_type=pm_null_obj
+       endif
+       if(expect(parser,sym_close)) goto 999
+       if(parser%sym==sym_open_square) then
+          name=sym_sub
+          open=sym_open_square
+          close=sym_close_square
+       else
+          if(expect(parser,sym_dot)) goto 999
+          if(expect_name(parser)) goto 999
+          name=pop_num_val(parser)
+       endif
        flags=ior(flags,proccall_is_ref+proccall_is_comm+proccall_is_general)
        iscomm=.true.
        isref=.true.
-    endif
-
-    ! Procedure name
-    if(.not.check_name(parser,name)) then
-       if(.not.isref) then
-          if(op(parser,name,.false.,.false.)) goto 999
+    else
+       
+       ! Procedure name
+       if(.not.check_name(parser,name)) then
+          if(.not.isref) then
+             if(op(parser,name,.false.,.false.)) goto 999
+          endif
        endif
-    endif
 
+       dot_name=pm_null_obj
+       dot_type=pm_null_obj
+       
+    endif
+       
     ! Communicating proc flags
     if(.not.isref) then
        if(parser%sym==sym_pct) then
@@ -4605,7 +4651,7 @@ contains
     endif
 
     ! Start of parameters
-    if(expect(parser,sym_open)) goto 999
+    if(expect(parser,open)) goto 999
 
 10  continue
 
@@ -4623,7 +4669,7 @@ contains
     ! Push some more entries in the procedure node (some get values later)
     call push_val(parser,parser%modl)
     call push_num_val(parser,-12345)      ! flags
-    if(param_list(parser,iscomm)) goto 999
+    if(param_list(parser,iscomm,dot_name,dot_type,close)) goto 999
 
     params=parser%vstack(parser%vtop-2)
     call push_num_val(parser,-777)        ! coded returns
@@ -4701,7 +4747,7 @@ contains
 
        m=0
        do
-          if(isref) then
+          if(iand(flags,proccall_is_lhs)/=0) then
              if(m>0) then
                 call parse_error(parser,&
                      'Cannot return more than one value from reference "." procedure')
@@ -4828,7 +4874,9 @@ contains
       integer:: m,n,i,k,base,first
       type(pm_ptr):: params,amps
       iserr=.true.
-      if(iand(flags,proccall_is_comm)/=0) then
+      if(iand(flags,proccall_is_ref)/=0) then
+         call parse_error(parser,'Cannot have a "yield" clause in a method')
+      elseif(iand(flags,proccall_is_comm)/=0) then
          first=num_comm_args+1
       else
          first=2
@@ -4890,7 +4938,7 @@ contains
       call scan(parser)
       m=0
       do
-         if(isref) then
+         if(iand(flags,proccall_is_lhs)/=0) then
             if(m>0) then
                call parse_error(parser,&
                     'Cannot return more than one value from reference "." procedure')
@@ -5779,13 +5827,6 @@ contains
     do
        select case(parser%sym)
        case(sym_proc)
-          call scan(parser)
-          if(parser%sym==sym_open) then
-             call push_back(parser,sym_proc)
-             exit
-          else
-             call push_back(parser,sym_proc)
-          endif
           if(proc_decl(parser)) goto 999
        case(sym_type)
           if(typ_decl(parser)) goto 999
@@ -6132,6 +6173,16 @@ contains
   contains
     include 'ftiny.inc'
   end subroutine push_num_val
+
+  !======================================================
+  ! Pop a tiny integer from the value stack
+  !======================================================
+  function pop_num_val(parser) result(num)
+    type(parse_state),intent(inout):: parser
+    integer:: num
+    num=parser%vstack(parser%vtop)%offset
+    parser%vtop=parser%vtop-1
+  end function pop_num_val
 
   !======================================================
   ! Push token on to value stack

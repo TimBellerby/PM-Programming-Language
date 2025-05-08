@@ -1113,30 +1113,17 @@ contains
            tno2=pop_word(coder)
            tno2=pm_type_add_mode(coder%context,tno2,mode)
            call combine_types(cnode_arg(args,1),tno2)
-        case(sym_dot,sym_dot_ref,sym_get_dot,sym_get_dot_ref)
-          if(sig==sym_get_dot.or.sig==sym_get_dot_ref) then
-             tno=arg_type(3)
-             if(tno/=error_type) then
-                namep=pm_type_vect(coder%context,arg_type(3))
-                name=pm_tv_name(namep)
-                namep=pm_fast_name(coder%context,name)
-             else
-                call set_arg_to_error_type(1)
-                return
-             endif
-          else
-             namep=cnode_arg(cnode_arg(args,3),1)
-             name=namep%offset
-          endif
-          tno=arg_type_with_mode(2)
-          if(tno==error_type) then
-             call set_arg_to_error_type(1)
-          else
+        case(sym_dot,sym_dot_ref)
+           name=arg_type(3)
+           tno=arg_type_with_mode(2)
+           if(tno==error_type) then
+              call set_arg_to_error_type(1)
+           else
              tno=pm_type_strip_mode(coder%context,&
                   tno,mode)
              if(tno>0) then
                 call set_call_sig(resolve_elem(cnode_arg(args,2),tno,name,&
-                     sig==sym_dot_ref.or.sig==sym_get_dot_ref,.false.,tno2))
+                     sig==sym_dot_ref,.false.,tno2))
                 call combine_types(cnode_arg(args,1),&
                      pm_type_add_mode(coder%context,tno2,mode))
              else
@@ -1766,15 +1753,15 @@ contains
     !==================================================================
     ! Resolve signature for item.name
     !==================================================================
-    recursive function resolve_elem(var,tno,name,isref,isopt,elem_type) result(sig)
+    recursive function resolve_elem(var,tno,nametyp,isref,isopt,elem_type) result(sig)
       type(pm_ptr),intent(in):: var
-      integer,intent(in):: tno,name
+      integer,intent(in):: tno,nametyp
       logical,intent(in):: isref,isopt
       integer,intent(out):: elem_type
       integer:: sig,tk
       type(pm_ptr):: svec
 
-      sig=pm_type_find_elem(coder%context,tno,name,isref,&
+      sig=pm_type_find_elem(coder%context,tno,nametyp,isref,&
            elem_type)
       if(sig==0) then
          if(.not.isopt) then

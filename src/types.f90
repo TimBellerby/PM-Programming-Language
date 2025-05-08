@@ -2127,14 +2127,15 @@ contains
   !      offset<0    Returns dref rather than sub-element
   ! If offset/=0 then etype returns the type of the element
   !=================================================================
-  recursive function pm_type_find_elem(context,tno,name,change,etype) result(offset)
+  recursive function pm_type_find_elem(context,tno,nametype,change,etype) result(offset)
     type(pm_context),pointer:: context
-    integer,intent(in):: tno,name
+    integer,intent(in):: tno,nametype
     logical,intent(in):: change
     integer,intent(out):: etype
     integer:: offset,ptype,mode
     type(pm_ptr):: tv
-    integer:: tk,i
+    integer:: tk,i,name
+    name=pm_type_name(context,nametype)
     if(tno<0) then
        offset=0
        return
@@ -2152,25 +2153,6 @@ contains
        enddo
        offset=0
        return
-    case(pm_type_is_dref)
-!!$       offset=pm_type_find_elem(context,&
-!!$            pm_type_strip_mode(context,pm_tv_arg(tv,1),mode),&
-!!$            name,change,stack,top,&
-!!$            maxstack,etype)
-!!$       if(offset==0) then
-!!$          return
-!!$       else
-!!$          offset=-offset
-!!$       endif
-!!$       call push(pm_type_new_dref)
-!!$       call push(name)
-!!$       call push(pm_type_add_mode(context,etype,mode))
-!!$       call push(tno)
-!!$       do i=3,pm_tv_numargs(tv)
-!!$          call push(pm_tv_arg(tv,i))
-!!$       enddo
-!!$       etype=pm_new_type(context,stack(top-pm_tv_numargs(tv)-1:top))
-!!$       top=top-pm_tv_numargs(tv)-2
     case(pm_type_is_rec)
        call pm_type_elem_offset(context,tv,name,change,offset,etype)
     case default
