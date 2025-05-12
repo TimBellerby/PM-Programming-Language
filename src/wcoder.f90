@@ -1448,7 +1448,7 @@ contains
           enddo
        endif
     case(sym_private,sym_set_mode,sym_const,sym_var,&
-         sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign,sym_assignment)
+         sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign,sym_pm_assign)
        continue ! Nothing to do
     case(sym_null)
        call wc_call_args(wcd,callnode,args,op_nullify,0,nargs,nargs,rv,ve)

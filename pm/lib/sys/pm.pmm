@@ -1040,8 +1040,6 @@ proc string(x:tuple7d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++",
 //  RANGES AND SEQUENCES
 //  *****************************************************
 
-/*
-
 //  Not in operator
 proc notin(x,y)=not(x in y)
 
@@ -1159,6 +1157,7 @@ proc empty(x:range)=rec range {
   _lo=x._hi,_hi=x._lo,_n=0
 }
 proc string(x:range)=string(x._lo)++".."++(x._hi)
+
 //  Cyclic range types (limited functionality and not part of grid)
 type cyclic_range is rec {_lo:int,_hi:int,_w:int,_n:int}
 proc cyclic_range(x:int,y:int,w:int)=rec cyclic_range {
@@ -1168,9 +1167,10 @@ proc high(x:cyclic_range)=x._hi
 proc size(x:cyclic_range)=x._n
 proc element(x:cyclic_range,y:int)=(x._lo + y) mod x._w
 proc string(x:cyclic_range)="cycle("++x._lo++".."++x._hi++","++x._w++")"
+
 //  Strided range types
 type strided_range(t:range_base) is rec {_lo:t,_hi:t,_st:t,_n:int}
-type _any_seq(t:range_base):iterable is strided_range(t), ... 
+type _any_seq(t:range_base) is strided_range(t), ... 
 type _any_seq(t:any_int) is ..., range(t)
 type seq(t:range_base) is  _any_seq(t)
 proc _seq(lo,hi,st)=rec strided_range {
@@ -1240,7 +1240,287 @@ proc empty(x:strided_range(any_int))=rec strided_range {
   _lo=x._hi,_hi=x._lo,_st=x._st,_n=0
 }
 
+//  Block sequence
+type block_seq is rec { _lo:int,_hi:int,_st:int,_b:int,_n:int,_align:int}
+proc block_seq(lo:int,hi:int,st:int,b:int,align:int){
+  test "Block sequence width must be non-negative: "++b=>b>=0
+  test "Block sequence width must be less than step: "++b++">="++st=>b<=st
+  test "Block sequence alignment must be less that width: "++align++">="++b=>align<st
+  return rec block_seq {
+  _lo=lo,_hi=min(hi,lo-align+nc*st+b-1),_st=st,_b=b,_n=n,_align=align} where n=nc*b+max(0,min(b,df+1-nc*st))-align where nc=df/st where df=hi-lo+align
+}
+proc first_block(x:block_seq)=if(x._align==0=>1..0,x._lo..x._lo-x._align+x._b-1)
+proc last_block(x:block_seq)=low..min(low+x._b,x._hi) where low=x._lo-x._align+nb*x._st where nb=(x._hi-x._lo+x._align+x._st-x._b+1)/x._st
+proc middle_blocks(x:block_seq)=rec block_seq {
+_lo=low,_hi=low+nb*x._st-1,_st=x._st,_b=x._b,_n=nb*x._b,_align=0}where nb=(x._hi-low+x._st-x._b+1)/x._st where low=if(x._align==0=>x._lo,x._lo-x._align+x._st)
+proc string(x:block_seq)=x._lo++".."++x._hi++" by "++x._st++" width "++x._b++" align "++x._align
+proc low(x:block_seq)=x._lo
+proc high(x:block_seq)=x._hi
+proc step(x:block_seq)=x._st
+proc width(x:block_seq)=x._b
+proc norm(x:block_seq)=x
+proc align(x:block_seq)=x._align
+proc #(x:block_seq)=shape([0..x._n-1])
+proc dims(x:block_seq)=x._n
+proc size(x:block_seq)=x._n
+proc +(x:block_seq,y:int)=rec block_seq {
+  _lo=x._lo+y,_hi=x._hi+y,_st=x._st,_b=x._b,_n=x._n,_align=x._align
+}
+proc -(x:block_seq,y:int)=rec block_seq {
+  _lo=x._lo-y,_hi=x._hi-y,_st=x._st,_b=x._b,_n=x._n,_align=x._align
+}
+proc _arb(x:block_seq)=x._lo
+proc in(x:int,y:block_seq)=x>=y._lo and x<=y._hi and (x-y._lo+y._align) mod y._st<y._b
+proc #(y:block_seq,x:int)=nb*y._b+xx-nb*y._st where nb=xx/y._st where xx=x-y._lo+y._align 
+proc #(y:block_seq,x:grid_dim)=overlap(map_seq(y),map_seq(x))
+proc element(x:block_seq,y:int)=x._lo+y+((y+x._align)/x._b)*(x._st-x._b)
+proc intersect(x:block_seq,y:range(any_int)){
+  var lo=max(x._lo,y._lo)
+  var hi=min(x._hi,y._hi)
+  oldbase=x._lo-x._align
+  nblo=((lo-oldbase)/x._st)*x._st+oldbase
+  nbhi=((hi-oldbase)/x._st)*x._st+oldbase
+  if lo-nblo>=x._b:lo=nblo+x._st
+  if hi-nbhi>=x._b:hi=nbhi+x._b-1
+  align=base-(base/x._st)*x._st where base=lo-oldbase
+  return block_seq(lo,hi,x._st,x._b,align)
+}
+            
+proc intersect(x:range(any_int),y:block_seq)=intersect(y,x)
+proc overlap(x:range(any_int),y:block_seq) {
+  z=intersect(y,x)
+  return block_seq(z._lo-x._lo,z._hi-x._lo,z._st,z._b,z._align)
+}
+proc overlap(x:block_seq,y:range(any_int)) {
+  z=intersect(x,y)
+  return start..start+size(z)-1 where start=z#z._lo
+}
+proc overlap(x:block_seq,y:range(any_int)) {
+  z=intersect(x,y)
+  return start..start+size(z)-1, block_seq(z._lo-x._lo,z._hi-x._lo,z._st,z._b,z._align) where start=z#z._lo
+}
+proc overlap(x:range(any_int),y:block_seq)=xx,yy where yy,xx=overlap(y,x)
+proc empty(x:block_seq)=block_seq(1,0,1,1,0)
+
+/*
+//  Mapped sequence
+type map_seq(t:array(int)) is rec {array:t}
+proc map_seq(x:grid_dim){
+  var a=array(0,#x)
+  forall i in a,j in x:i=j
+  return rec map_seq{
+    array=a
+  }
+}
+proc map_seq(x:array(int,mshape1d))=rec map_seq {
+array=x} check "Array for ""map_seq"" must be strictly increasing or stricly decreasing"=>_mono(x)
+proc _mono(x) {
+    /*
+  xs=#x
+  var ok=true
+  if x[low(xs.1)]<x[high(xs.1)] {
+    forall i in low(xs.1)+1..high(xs.1){
+      if x[i]<x[i-1]:sync ok=false
+    }
+  } else{
+    forall i in low(xs.1)+1..high(xs.1):if x[i]>x[i-1]:sync ok=false
+  }
+  return ok
 */
+}
+proc map_seq(x:map_seq)=x
+proc #(x:map_seq)=#(x.array)
+proc dims(x:map_seq)=size(x.array)
+proc size(x:map_seq)=size(x.array)
+proc +(x:map_seq,y:range_base)=rec map_seq{
+  array=x.array+y
+}
+proc -(x:map_seq,y:range_base)=rec map_seq{
+  array=x.array-y
+}
+proc _arb(x:map_seq)=_arb(x.array)
+proc element(x:map_seq,y:int)=element(x.array,y)
+PM__intrinsic _intersect_aseq(&any,any,any,any,any,&any): "intersect_aseq"
+PM__intrinsic _overlap_aseq(&any,any,any,any,any,&any): "intersect_aseq"(1)
+PM__intrinsic _overlap_aseq2(&any,any,any,any,any,&any,&any): "intersect_aseq"(2)
+PM__intrinsic _expand_aseq(&any,any,any,&any,any,any): "expand_aseq"
+PM__intrinsic _intersect_bseq(&any,any,any,any,any,any,any,any,any,any,any,any): "intersect_bseq"
+PM__intrinsic _overlap_bseq(&any,any,any,any,any,any,any,any,any,any,any,any): "intersect_bseq"(1)
+PM__intrinsic _overlap_bseq2(&any,any,any,any,any,any,any,any,any,any,any,any,any): "intersect_bseq"(2)
+PM__intrinsic _includes_aseq(any,any,any,any)->(bool) : "includes_aseq"
+PM__intrinsic _index_aseq(any,any,any)->(int) : "index_aseq"
+PM__intrinsic _in_aseq(any,any,any)->(bool) : "in_aseq"
+proc intersect(x:block_seq,y:block_seq)=intersect(map_seq(x),map_seq(y))
+proc overlap(x:block_seq,y:block_seq)=overlap(map_seq(x),map_seq(y))
+proc overlap(x:block_seq,y:block_seq)=v,w where v,w=overlap(map_seq(x),map_seq(y))
+proc intersect(x:map_seq,y:map_seq) {
+  var a=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
+  var n=0
+  _intersect_aseq(&n,x.array,size(x.array),y.array,size(y.array),&a)
+  v=rec map_seq {
+    array=a[0..n-1]
+  }
+  return v
+}
+proc overlap(x:map_seq,y:map_seq) {
+  var a=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
+  var n=0
+  _overlap_aseq(&n,x.array,size(x.array),y.array,size(y.array),&a)
+  v=rec map_seq {
+    array=a[0..n-1]
+  }
+  return v
+}
+proc overlap(x:map_seq,y:map_seq) {
+  var a=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
+  var b=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
+  var n=0
+  _overlap_aseq2(&n,x.array,size(x.array),y.array,size(y.array),&a,&b)
+  ns=[0..n-1]
+  v=rec map_seq {
+    array=a[ns]
+  }
+  w=rec map_seq {
+    array=b[ns]
+  }
+  return v,w
+}
+proc overlap(x:seq,y:seq)=overlap(x,y),overlap(y,x)
+proc expand(t:map_seq,i:range(any_int)) {
+  var a=array(0,[0..max(1,size(t)*max(1,size(i))-1)])
+  var m=0
+  _expand_aseq(&m,t.array,size(t.array),&a,low(i),high(i))
+  v=rec map_seq {
+    array=a[0..m-1]
+  }
+  return v
+}
+proc inc(x:map_seq,y:map_seq)=_includes_aseq(x.array,size(x.array),y.array,size(y.array))
+proc inc(x:map_seq,y:seq or block_seq)=x inc map_seq(y)
+proc inc(x:block_seq,y:block_seq)=map_seq(x) inc map_seq(y)
+proc inc(x:seq or block_seq,y:map_seq)=map_seq(x) inc y
+proc in(y:any_int,x:map_seq)=_in_aseq(x.array,size(x.array),int(y))
+proc #(x:map_seq,y:any_int)=_index_aseq(x.array,size(x.array),int(y))
+proc empty(x:map_seq) {
+  a=array(0,[1..0])
+  return rec map_seq {
+    array=a
+  }
+}
+*/
+proc map_seq(x)=x
+proc _rdiv(x,y)=if(y<0=>if(x<0=>x/y,(y-x+1)/y),x>0=>x/y,(x-y+1)/y)
+
+//  Grids (tuples of sequences)
+type _grid_dim(t:range_base) is seq(t),...
+type _grid_dim(t:int) is ...,block_seq  //,map_seq
+type grid_dim(t:range_base) is _grid_dim(t)
+type grid1d(t1:grid_dim) is [t1]
+type grid2d(t1:grid_dim,t2:grid_dim) is [t1,t2]
+type grid3d(t1:grid_dim,t2:grid_dim,t3:grid_dim) is [t1,t2,t3]
+type grid4d(t1:grid_dim,t2:grid_dim,t3:grid_dim,t4:grid_dim) is [t1,t2,t3,t4]
+type grid5d(t1:grid_dim,t2:grid_dim,t3:grid_dim,t4:grid_dim,t5:grid_dim) is [t1,t2,t3,t4,t5]
+type grid6d(t1:grid_dim,t2:grid_dim,t3:grid_dim,t4:grid_dim,t5:grid_dim,t6:grid_dim) is [t1,t2,t3,t4,t5,t6]
+type grid7d(t1:grid_dim,t2:grid_dim,t3:grid_dim,t4:grid_dim,t5:grid_dim,t6:grid_dim,t7:grid_dim) is [t1,t2,t3,t4,t5,t6,t7]
+type grid(t:range_base) is tuple(grid_dim(t))
+proc #(x:grid)=shape(map($_shp,x))
+proc dims(x:grid)=map($_size,x)
+proc +(x:grid,y:tuple(range_base))=map($+,x,y)
+proc -(x:grid,y:tuple(range_base))=map($+,x,y)
+proc empty(x:grid)=map($empty,x)
+proc element(x:grid_dim,y:grid_dim){
+  var a=array(0,#y)
+  forall i in a,j in y:i=x[j]
+  return rec map_seq{
+    array=a
+  }
+}
+proc element(x:grid,y:grid)=map($element,x,y)
+
+//  Slices of grids (may have dims that are just an integer and also _ or _() or null)
+type grid_slice_dim(t:range_base) is grid_dim(t),single_point(t),null
+type grid_slice(t) is grid(t),tuple(grid_slice_dim(t))
+
+//  Some limited functionality for extended grids (which include cyclic ranges)
+type iterable_dim is grid_slice_dim,cyclic_range,...
+type iterable_grid is tuple(iterable_dim),grid_slice
+proc _shp(x:iterable_dim)=0..size(x)-1
+proc size(x:iterable_dim)->(int)...
+proc element(x:iterable_dim,y)=error_type()check "Cannot index this type with a non-integer index"=>fix(false)
+proc element(x:iterable_dim,y:int)->(any)...
+proc element(x:iterable_dim,y:tuple1d)=element(x,y.1)
+proc _shp(x:stretch_dim)=null
+proc _shp(x:null)=x
+proc _size(x:stretch_dim or null)=fix(1)
+proc _size(x)=size(x)
+PM__intrinsic _act(x:single_point)->(PM__tinyint) : "miss_arg"
+proc _act(x)=x
+proc _sliceit(...)=tuple(...)
+proc active_dims(x:iterable_grid)=map_apply($_act,$_sliceit,x)
+proc active_dims(x:single_point)=null
+PM__intrinsic _act(x:single_point,y:any)->(PM__tinyint) : "miss_arg"
+proc _act(x,y)=y
+proc active_dims(x:iterable_grid,y:tuple)=map_apply($_act,$_sliceit,x,y)
+proc active_dims(x:single_point,y)=null
+proc _ar(x:single_point)=0
+proc _ar(x)=1
+proc rank(x:iterable_grid)=map_reduce($_ar,$+,x)
+proc element(x:iterable_grid,y:index){
+  t=_tup(y)
+  return _ges(head(x),tail(x),head(t),tail(t),fix(false))
+}
+proc element(x:grid_slice,...:grid_slice){
+  t=_tup(...)
+  return _ges(head(x),tail(x),head(t),tail(t),fix(true)) 
+}
+proc element(x:null,y)=null
+proc _spnt(i,y:fix(true))=i
+proc _spnt(i,y:fix(false))=i._t
+proc _spif(i:int,y:fix(true))=single_point(i)
+proc _spif(i,y:fix(true))=i
+proc _spif(i,y:fix(false))=i
+proc _ges(i:single_point,x,j,y,t)=prepend(_spnt(i,t),_ges(head(x),tail(x),j,y,t))
+proc _ges(i:empty_head,x,j,y,t)=error_type() :test "Rank mismatch in subscript" => fix(false)
+proc _ges(i,x,j,y,t)=prepend(_spif(element(i,j),t),_ges(head(x),tail(x),head(y),tail(y),t))
+proc _ges_null(i,x,j,y,t:fix(true))=prepend(element(i,j),_ges(head(x),tail(x),head(y),tail(y),t))
+proc _ges_null(i,x,j,y,t:fix(false))=_ges(head(x),tail(x),head(y),tail(y),t)
+proc _ges(i:null,x,j,y,t)=_ges_null(i,x,j,y,t)
+proc _ges(i:single_point,x,j:stretch_dim,y,t)=prepend(null,_ges(i,x,head(y),tail(y),t))
+proc _ges(i:empty_head,x,j:stretch_dim,y,t)=prepend(null,_ges(i,x,head(y),tail(y),t))
+proc _ges(i,x,j:stretch_dim,y,t)=prepend(null,_ges(i,x,head(y),tail(y),t))
+proc _ges(i:null,x,j:stretch_dim,y,t)=prepend(null,_ges(i,x,head(y),tail(y),t))
+proc _ges(i:single_point,x,j:empty_head,y,t)=prepend(_spnt(i,t),_ges(head(x),tail(x),j,y,t))
+proc _ges(i:empty_head,x,j:empty_head,y,t)=null
+proc _ges(i,x,j:empty_head,y,t)=error_type() :test "Rank mismatch" => fix(false)
+proc _ges(i:null,x,j:empty_head,y,t:fix(true))=error_type() :test "Rank mismatch" => fix(false)
+proc _ges(i:null,x,j:empty_head,y,t:fix(false))=null
+proc size(x:iterable_grid)=map_reduce($_size,$*,x)
+proc #(x:grid_slice)=shape(map($_shp,active_dims(x)))
+proc dims(x:iterable_grid)=map($_size,active_dims(x))
+proc _arb(x:grid_slice)=map($_arb,x)
+proc in(x:tuple(range_base),y:grid_slice)=map_reduce($in,$and,x,y)
+proc inc(x:grid_slice,y:grid_slice)=map_reduce($inc,$and,x,y) 
+proc #(x:grid,y:tuple(subs_dim))=map($#,x,y)
+PM__intrinsic _acthash(x:single_point,y:any)->(PM__tinyint) : "miss_arg"
+proc _acthash(x,y)=x#y
+proc #(x:grid_slice,y:tuple(subs_dim) or grid_slice)=map_apply($_acthash,$_sliceit,x,y)
+proc convert(x:grid_slice,y:real_num)=map_const($convert,x,y)
+proc sint(x:grid_slice)=map($sint,x)
+proc int(x:grid_slice)=map($int,x)
+proc sreal(x:grid_slice)=map($sreal,x)
+proc real(x:grid_slice)=map($real,x)
+proc low(x:grid_slice)=map($low,x)
+proc high(x:grid_slice)=map($high,x)
+proc overlap(x:grid_slice,y:grid_slice)=map($overlap,x,y)
+proc overlap(x:grid_slice,y:grid_slice)=u,v where u,v=map($overlap,x,y)
+proc intersect(x:grid_slice,y:grid_slice)=map($intersect,x,y)
+proc intersect(x:grid_slice_dim,y:grid_slice_dim)=intersect(map_seq(x),map_seq(y))
+proc overlap(x:grid_slice_dim,y:grid_slice_dim)=overlap(map_seq(x),map_seq(y))
+proc overlap(x:grid_slice_dim,y:grid_slice_dim)=u,v where u,v=overlap(map_seq(x),map_seq(y))
+proc expand(x:grid_slice,y:grid)=map($expand,x,y)
+proc contact(x:grid_slice,y:grid)=map($contract,x,y)
+PM__intrinsic gcd(x:int,y:int)->(int) : "gcd"
+
 
 // ***************************************************
 // LOOPS AND PARALLEL STATEMENTS
@@ -1263,6 +1543,9 @@ proc PM__for_stmt'(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <
       }
    }
 }
+
+proc PM__par_stmt'(num) yield() <<inline>> {  yield() }
+proc PM__check_task'(num)=true
 
 proc PM__chan_stmt'() yield() { yield() }
 proc PM__over_stmt'(x) yield() { yield() }
@@ -1348,20 +1631,13 @@ proc PM__switch(w:fix(string),x:fix(string),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w:fix(bool),x:fix(bool),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w,x,y,...)=PM__switch(w,x,y,PM__switch(w,...))
 
+/*
 //  Assignment
 proc PM__assign_or_init(a,b)<<inline>>=a {
   PM__assign_var(&^(a),b)
 }
+*/
 
-proc PM__assign_or_init(a:<any>,b)=PM__dup(b as a)
-
-proc PM__assign_var(&a,b) {
-  PM__assign(&a,b)
-}
-
-proc PM__assign(&a:any,b:any) {
-  _assign(&a,c) where c=b as a
-}
 
 /*
 type assignment_operator is $_just_assign,$+,$*,$&,$|,$~,$and,$or,$++,...
@@ -1400,11 +1676,30 @@ PM__intrinsic _assign_element(&any,any): "assign"
 
 //  Other variable operations
 
+proc PM__assign_or_init(&a:PM__assign_or_init,b)=PM__dup(b as a)
+
+proc PM__assign_or_init(&a,b)=a:PM__assign(&a,b)
+
+proc PM__init_const(&a:PM__assign_or_init,b)=PM__dup(b as a)
+
+proc PM__init_const(&a,b)=a check "Cannot initialise a constant twice"=>fix(false)
+
+proc PM__assign_var(&a,b) {
+  PM__assign(&a,b)
+}
+
+proc PM__dup(x)=x
+
+proc PM__assign(&a:any,b:any) {
+  _assign(&a,c) where c=b as a
+}
+
 PM__intrinsic PM__clone(x:any)->(=x) : "clone"
 PM__intrinsic PM__make_var(x:any)->(=x) : "clone"
 PM__intrinsic PM__make_var'(x:priv)->(=x) : "clone_var" priv
 PM__intrinsic PM__make_var'(x:any)->(=x) : "clone" priv
 PM__intrinsic PM__make_const'(x:any)->(=x) : "clone_var"
+PM__intrinsic PM__make_const(x:any)->(=x) : "clone_var"
 
 PM__intrinsic PM__dechan'(x:any)->(=x): "clone_var" 
 /*
@@ -1451,11 +1746,11 @@ PM__intrinsic<<needs_type>> element_at_index(x:any,y:fix(int))->(|x):"elem"
 
 proc elements(x)=_elements(x,1)
 proc _elements(x,i:literal(int)) {
-    const e
+    let e...
     if fix(i==num_elements(x)) {
-        e=_cons(PM__element_at(x,i),_list_end)
+        let ...e=_cons(PM__element_at(x,i),_list_end)
     } else {
-        e=_cons(PM__element_at(x,i),_elements(x,i+1))
+        let ...e=_cons(PM__element_at(x,i),_elements(x,i+1))
     }
     return e
 }
@@ -1505,6 +1800,10 @@ proc PM__copy_out(&a,b):a=b
 
 proc PM__for_in(a)=a
 proc PM__for_var(a)=a
+
+proc PM__import_param'(x)=x
+proc PM__export_param'(x)=x
+proc PM__import_param'(&x,y){}
 
 proc PM__make_over'(a)=a
 

@@ -1191,7 +1191,7 @@ contains
                   'Cannot initialise constant twice in succession: ',&
                   cnode_get(cnode_arg(args,1),var_name))
           endif
-       case(sym_assignment)
+       case(sym_pm_assign)
           tno=pm_type_get_mode(coder%context,arg_type_with_mode(1))
           if(tno>=sym_invar) then
              call inf_error(coder,callnode,&
@@ -3610,7 +3610,7 @@ contains
          return
       endif
       name=pm_name_stem(coder%context,sig_name(coder,cnode_get_num(node,call_sig)))
-      if(name==sym_assignment.or.name==sym_assign_var.or.&
+      if(name==sym_pm_assign.or.name==sym_assign_var.or.&
            name==sym_make_subref.or.name==sym_make_sublhs.or.&
            name==sym_make_sublhs_amp) then
          hideit=.false.
@@ -3669,7 +3669,7 @@ contains
     if(signame==sym_proc) then
        tv=pm_type_vect(coder%context,coder%wstack(base))
        signame=abs(pm_tv_name(tv))
-    elseif(signamebase==sym_assignment.or.signamebase==sym_assign_var) then
+    elseif(signamebase==sym_pm_assign.or.signamebase==sym_assign_var) then
        signame=sym_assign
     elseif(signamebase==sym_make_subref.or.signamebase==sym_make_sublhs.or.&
          signamebase==sym_make_sublhs_amp) then

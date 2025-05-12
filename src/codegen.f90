@@ -1197,13 +1197,19 @@ contains
     
   end subroutine trav_all_stmt
 
+  !================================================================
+  ! Traverse a reference leaving an object or object reference
+  ! on vstack
+  ! If isalias is true then a second element on the stack is a
+  ! list of reference elements to be used in alias checking
+  !================================================================
   subroutine trav_reference(coder,cblock,pnode,node,islhs,skipdot,isalias,call_n)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,pnode,node
     logical,intent(in):: islhs,skipdot,isalias
     integer,intent(out),optional:: call_n
     type(pm_ptr):: arg
-    integer:: i,j,n,sym,start,base,vbase
+    integer:: i,j,n,sym,start,base,vbase,abase,atop
     logical:: iscomm,isvar
     
     sym=node_sym(node) 
@@ -1224,20 +1230,23 @@ contains
     start=2
     arg=node_arg(node,start)
     sym=node_sym(arg)
+    abase=coder%vtop
     if(sym==sym_pling) then
-       call make_comm_sys_call(coder,cblock,node,sym_pm_pling,1,1)
+       call make_comm_sys_call_rtn(coder,cblock,node,sym_pm_pling,1,1)
        iscomm=.true.
        start=3
     elseif(sym==sym_at) then
-!!! need the @[] part
-       
-       call make_comm_sys_call(coder,cblock,node,sym_pm_at,1,1)
+       call make_comm_sys_call_rtn(coder,cblock,node,sym_pm_at,1,merge(2,1,isalias))
        iscomm=.true.
        start=3
     else
        arg=top_code(coder)
        if(cnode_get_kind(arg)==cnode_is_var) then
-          iscomm=cnode_flags_set(top_code(coder),var_flags,var_is_maybe_not_private)
+          if(isvar) then
+             iscomm=cnode_flags_set(arg,var_flags,var_is_maybe_not_private)
+          else
+             iscomm=coder%par_state/=par_state_none
+          endif
        else
           iscomm=.false.
        endif
@@ -1264,6 +1273,8 @@ contains
           call make_sp_call_rtn(coder,cblock,node,sym_list,2,1)
        end select
     enddo
+
+    atop=coder%vtop
 
     call code_val(coder,coder%vstack(vbase))
     
@@ -1301,10 +1312,10 @@ contains
     
     if(isalias) then
        call dup_expr(coder,coder%vstack(vbase))
-       do j=start,n
+       do j=abase+1,atop
           call dup_expr(coder,coder%vstack(base+j)) 
        enddo
-       call make_sp_call_rtn(coder,cblock,node,sym_list,n-start+1,1)
+       call make_sp_call_rtn(coder,cblock,node,sym_list,atop-abase+1,1)
        coder%vstack(vbase)=coder%vstack(coder%vtop-1)
        coder%vstack(vbase+1)=coder%vstack(coder%vtop)
        coder%vtop=vbase+1
@@ -1312,8 +1323,6 @@ contains
        coder%vstack(vbase)=coder%vstack(coder%vtop)
        coder%vtop=vbase
     endif
-
- 
     
   end subroutine trav_reference
 
@@ -2664,12 +2673,30 @@ contains
     lhs=node_arg(node,1)
     rhs=node_arg(node,2)
     sym=node_sym(lhs)
-    n=node_numargs(lhs)
-    if(sym/=sym_assign.and.sym/=sym_where) n=n-2
+    n=lhs_size(lhs)
     call trav_rhs(coder,cblock,node,rhs,n)
     call trav_lhs(coder,cblock,node,lhs,rhs)
     coder%vtop=base
   end subroutine trav_assign_define
+
+  !========================================================
+  ! Number of elements in LHS node
+  !========================================================
+  recursive function lhs_size(lhs) result(n)
+    type(pm_ptr),intent(in):: lhs
+    integer:: n
+    integer:: sym,i
+    n=node_numargs(lhs)
+    sym=node_sym(lhs)
+    if(sym==sym_assign_list) then
+       n=0
+       do i=1,node_numargs(lhs)
+          n=n+lhs_size(node_arg(lhs,i))
+       enddo
+    elseif(sym/=sym_assign.and.sym/=sym_where) then
+       n=n-2
+    endif
+  end function lhs_size
 
   !========================================================
   ! Traverse multiple assignments, var/const definitions
@@ -2684,8 +2711,7 @@ contains
        assn=node_arg(node,i)
        lhs=node_arg(assn,1)
        sym=node_sym(lhs)
-       n=node_numargs(lhs)
-       if(sym/=sym_assign) n=n-2
+       n=lhs_size(lhs)
        rhs=node_arg(assn,2)
        call trav_rhs(coder,cblock,node,rhs,n)
     enddo
@@ -2703,19 +2729,26 @@ contains
   ! Computes these in *reverse* order assuming RHS has
   ! stacked them one after the other.
   !========================================================
-  subroutine trav_lhs(coder,cblock,node,lhs,rhs)
+  recursive subroutine trav_lhs(coder,cblock,node,lhs,rhs)
     type(code_state):: coder
     type(pm_ptr),intent(in):: cblock,node,lhs,rhs
     integer:: i,n,sym
-    type(pm_ptr):: rhs_val
+    type(pm_ptr):: lhs_val,rhs_val
     n=node_numargs(lhs)
     sym=node_sym(lhs)
     select case(sym)
     case(sym_var,sym_const)
        do i=n-2,1,-1
-          call make_definition(coder,cblock,lhs,node_arg(lhs,i),&
-               merge(0,var_is_var,sym==sym_const),node_arg(lhs,n),&
-               node_num_arg(lhs,n-1))
+          lhs_val=node_arg(lhs,i)
+          if(node_sym(lhs_val)==sym_dotdotdot) then
+             call make_definition(coder,cblock,lhs,node_arg(lhs_val,1),&
+                  merge(0,var_is_var,sym==sym_const),node_arg(lhs,n),&
+                  node_num_arg(lhs,n-1))
+          else
+             call make_definition(coder,cblock,lhs,lhs_val,&
+                  merge(0,var_is_var,sym==sym_const),node_arg(lhs,n),&
+                  node_num_arg(lhs,n-1))
+          endif
        enddo
     case(sym_where)
        do i=n,1,-1
@@ -2729,6 +2762,10 @@ contains
        endif
        do i=n,1,-1
           call trav_single_lhs(coder,cblock,lhs,node_arg(lhs,i),rhs_val)
+       enddo
+    case(sym_assign_list)
+       do i=n,1,-1
+          call trav_lhs(coder,cblock,lhs,node_arg(lhs,i),rhs)
        enddo
     end select
   end subroutine trav_lhs
@@ -2912,7 +2949,7 @@ contains
       else
          call swap_code(coder)
          call make_assign_call(coder,cblock,pnode,&
-              merge(sym_aliased_assign,sym_assignment,present(alias)),&
+              merge(sym_aliased_assign,sym_pm_assign,present(alias)),&
               2,0,aflags=call_is_assign_call)
       endif
     end subroutine assign_call
@@ -2933,7 +2970,7 @@ contains
     call trav_reference(coder,cblock,pnode,node,.true.,.true.,.false.)
     call swap_code(coder)
     call trav_expr(coder,cblock,pnode,op)
-    call make_assign_call(coder,cblock,pnode,sym_assignment,3,0)
+    call make_assign_call(coder,cblock,pnode,sym_pm_assign,3,0)
   end subroutine make_op_assignment_noalias
 
   !===================================================================
@@ -3103,7 +3140,7 @@ contains
     if(cnode_flags_set(v,var_flags,var_is_ref)) then
        call make_assign_call(coder,cblock,node,sym_set_ref,2,0,aflags=flags)
     else
-       call make_assign_call(coder,cblock,node,sym_assignment,2,0,aflags=flags)
+       call make_assign_call(coder,cblock,node,sym_pm_assign,2,0,aflags=flags)
     endif
     call access_var(coder,v,.true.)
   end subroutine make_var_assignment

@@ -191,7 +191,7 @@ module pm_symbol
   integer,parameter:: sym_test = last_decl + 18
   integer,parameter:: sym_default = last_decl + 19
   integer,parameter:: sym_task = last_decl + 20
-  integer,parameter:: sym_extern = last_decl + 21
+  integer,parameter:: sym_assignment = last_decl + 21
   integer,parameter:: sym_var = last_decl + 22
   integer,parameter:: sym_const = last_decl + 23
   integer,parameter:: sym_each = last_decl + 24
@@ -416,7 +416,7 @@ module pm_symbol
   integer,parameter:: sym_d7= hook1 + 7
   integer,parameter:: sym_copy_in = hook1 + 8
   integer,parameter:: sym_copy_out = hook1 + 9
-  integer,parameter:: sym_assignment = hook1 + 10
+  integer,parameter:: sym_pm_assign = hook1 + 10
   integer,parameter:: sym_aliased_assign = hook1 + 11
   integer,parameter:: sym_first = hook1 + 12
   integer,parameter:: sym_next = hook1 + 13
@@ -670,9 +670,9 @@ module pm_symbol
   data sym_names(sym_test)             /'test'/
   data sym_names(sym_default)          /'default'/
   data sym_names(sym_task)             /'task'/
-  data sym_names(sym_extern)           /'extern'/
+  data sym_names(sym_assignment)       /'assign'/
   data sym_names(sym_var)              /'var'/
-  data sym_names(sym_const)            /'const'/
+  data sym_names(sym_const)            /'let'/
   data sym_names(sym_each)             /'foreach'/
   data sym_names(sym_where)            /'where'/
   data sym_names(sym_split)            /'split'/
@@ -888,7 +888,7 @@ module pm_symbol
 
   data sym_names(sym_copy_in)          /'PM__copy_in'/
   data sym_names(sym_copy_out)         /'PM__copy_out'/
-  data sym_names(sym_assignment)       /'PM__assign'/
+  data sym_names(sym_pm_assign)        /'PM__assign'/
   data sym_names(sym_aliased_assign)   /'PM__aliased_assign'/
   data sym_names(sym_first)            /'PM__first'/
   data sym_names(sym_next)             /'PM__next'/
