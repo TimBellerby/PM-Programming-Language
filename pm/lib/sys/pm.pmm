@@ -1700,7 +1700,12 @@ PM__intrinsic PM__make_var'(x:priv)->(=x) : "clone_var" priv
 PM__intrinsic PM__make_var'(x:any)->(=x) : "clone" priv
 PM__intrinsic PM__make_const'(x:any)->(=x) : "clone_var"
 PM__intrinsic PM__make_const(x:any)->(=x) : "clone_var"
-
+proc PM__init_var(x:any,y:any)=PM__make_var(x,y)
+proc PM__init_const(x:any,y:any)=PM__make_const(x,y)
+proc PM__init_var'(x:any,y:any)=PM__make_var'(x,y)
+proc PM__init_const'(x:any,y:any)=PM__make_const'(x,y)
+proc PM__make_var(x,y)=PM__make_var(x as y)
+proc PM__make_const(x,y)=PM__make_const(x as y)
 PM__intrinsic PM__dechan'(x:any)->(=x): "clone_var" 
 /*
 PM__intrinsic PM__dup(x:fix(int))->(int) : "clone"

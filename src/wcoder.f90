@@ -1447,7 +1447,7 @@ contains
                   var_slot(wcd,cnode_arg(args,kk)))
           enddo
        endif
-    case(sym_private,sym_set_mode,sym_const,sym_var,&
+    case(sym_private,sym_set_mode,sym_const,sym_var,sym_dotdotdot,&
          sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign,sym_pm_assign)
        continue ! Nothing to do
     case(sym_null)

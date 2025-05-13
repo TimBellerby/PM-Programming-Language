@@ -1412,26 +1412,47 @@ contains
   recursive subroutine trav_sync_stmt(coder,cblock,pnode,node)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,pnode,node
-    integer:: save_par_state
+    integer:: save_par_state,base
+    type(pm_ptr):: label,body
+    label=node_arg(node,1)
+    body=node_arg(node,2)
     select case(coder%par_state)
     case(par_state_none)
        call code_error(coder,node,&
             'Cannot have a "sync" statement outside of a parallel context')
-    case(par_state_for,par_state_comm_proc)
-       call code_error(coder,node,&
-            'Can only have "sync" statements inside a branch of a conditional statement')
-    case(par_state_sync)
-       call code_error(coder,node,&
-            'Cannot nest "sync" or "sync while" statements inside each other')
+    case(par_state_for,par_state_comm_proc,par_state_sync)
+       if(.not.pm_fast_isnull(label)) then
+          call code_error(coder,node,&
+               'Can only have "sync(...)" statements inside a branch of a conditional statement')
+       endif
     end select
     save_par_state=coder%par_state
     coder%par_state=par_state_sync
-    call code_val(coder,node_arg(node,1))
-    call trav_stmt_list(coder,cblock,node,node_arg(node,2),sym_sync,open_scope=.true.)
-    call make_sp_call(coder,cblock,node,sym_sync,2,0)
+
+    sym=node_sym(body)
+    if(sym==sym_open) then
+       call trav_call(coder,cblock,node,body,0,.true.)
+    elseif(sym==sym_assign) then
+       call trav_sync_assign(coder,cblock,node,body)
+    else
+       call trav_stmt_list(coder,cblock,node,node_arg(node,2),sym_sync,open_scope=.true.)
+    endif
+    if(.not.pm_fast_isnull(parser)) then
+       call code_val(coder,label)
+       call make_sp_call(coder,cblock,node,sym_sync,2,0)
+    endif
     coder%par_state=save_par_state
+  contains
+    include 'fisnull.inc'
   end subroutine trav_sync_stmt
 
+  subroutine trav_sync_assign(coder,cblock,pnode,node)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: cblock,pnode,node
+    
+  end subroutine trav_sync_assign
+
+  
   !========================================================
   ! Traverse "sync while" statement
   !========================================================
@@ -2327,7 +2348,7 @@ contains
     integer:: lex_scope,lex_scope_of_var
     lex_scope=coder%lex_scope
     lex_scope_of_var=cnode_get_num(var,var_lex_scope)
-    do while(var_lex_scope<lex_scope)
+    do while(lex_scope_of_var<lex_scope)
         call add_to_change_list(coder,coder%vstack(lex_scope-merge(1,0,modify)),var)
         lex_scope=coder%vstack(lex_scope-2)%offset
     end do
@@ -2743,11 +2764,11 @@ contains
           if(node_sym(lhs_val)==sym_dotdotdot) then
              call make_definition(coder,cblock,lhs,node_arg(lhs_val,1),&
                   merge(0,var_is_var,sym==sym_const),node_arg(lhs,n),&
-                  node_num_arg(lhs,n-1))
+                  mode=node_num_arg(lhs,n-1),dotdotdot=.true.)
           else
              call make_definition(coder,cblock,lhs,lhs_val,&
                   merge(0,var_is_var,sym==sym_const),node_arg(lhs,n),&
-                  node_num_arg(lhs,n-1))
+                  mode=node_num_arg(lhs,n-1))
           endif
        enddo
     case(sym_where)
@@ -2976,17 +2997,17 @@ contains
   !===================================================================
   ! Use expression on top of stack to create new variable or constant
   !===================================================================
-  recursive subroutine make_definition(coder,cblock,node,vname,flags,vtype,mode)
+  recursive subroutine make_definition(coder,cblock,node,vname,flags,vtype,mode,dotdotdot)
     type(code_state):: coder
     type(pm_ptr),intent(in):: cblock,node,vname
     integer,intent(in):: flags
     type(pm_ptr),intent(in),optional:: vtype
     integer,intent(in),optional:: mode
+    logical,intent(in),optional:: dotdotdot
     type(pm_ptr):: pnode,var
     integer:: name,has_type
     integer:: vcall,vflags
     logical:: has_mode
-
 
     if(node_sym(vname)==sym_name.or.pm_fast_isname(vname)) then
        if(pm_fast_isname(vname)) then
@@ -3008,8 +3029,29 @@ contains
              endif
           endif
        endif
-       call make_var(coder,cblock,pnode,name,vflags)
-       var=top_code(coder)
+       if(present(dotdotdot)) then
+          var=find_var(coder,name)
+          if(pm_fast_isnull(var)) then
+             call code_error(coder,vname,&
+                  'Variable being intialised with "..." has not been previously defined')
+             call make_temp_var(coder,cblock,node)
+             var=top_code(coder)
+          else
+             if(cnode_flags_set(var,var_flags,var_is_var).neqv.iand(flags,var_is_var)/=0) then
+                if(iand(flags,var_is_var)/=0) then
+                   call code_error(coder,node,&
+                        '"let..." cannot be intialised using "var ...="')
+                else
+                   call code_error(coder,node,&
+                        '"var..." cannot be intialised using "let ...="')
+                endif
+             endif
+             call code_val(coder,var)
+          endif
+       else
+          call make_var(coder,cblock,pnode,name,vflags)
+          var=top_code(coder)
+       endif
        call swap_code(coder)
        has_type=0
        if(present(vtype)) then
@@ -3022,13 +3064,20 @@ contains
           endif
        endif
        vcall=merge(sym_make_var,sym_make_const,iand(flags,var_is_var)/=0)
+       if(present(dotdotdot)) then
+          vcall=merge(sym_init_var,sym_init_const,iand(flags,var_is_var)/=0)
+          call code_val(coder,var)
+          call make_sp_call_rtn(coder,cblock,pnode,sym_dotdotdot,1,1)
+          call update_change_lists(coder,var,.true.)
+          has_type=1
+       endif
        if(coder%par_state>par_state_none) then
           ! Assumes cannot have "const" in a mode statement
           if(has_mode) vcall=vcall+mode-sym_chan+1
           call make_comm_sys_call(coder,cblock,pnode,vcall,1+has_type,1)
        else
           if(has_mode) call code_error(coder,node,'Cannot have a "'//&
-               trim(sym_names(mode))//' var" statement outside of a parallel context')
+               trim(sym_names(mode))//' var" definition outside of a parallel context')
           call make_sys_call(coder,cblock,pnode,vcall,1+has_type,1)
        endif
     elseif(node_sym(vname)==sym_underscore) then

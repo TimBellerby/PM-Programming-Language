@@ -1130,6 +1130,18 @@ contains
                 call set_arg_to_error_type(1)
              endif
           endif
+       case(sym_dotdotdot)
+          tno=get_var_type(coder,callnode,cnode_arg(args,2),init=.true.)
+          if(tno==error_type) then
+             call set_arg_to_error_type(1)
+          else
+             tv=pm_type_vect(coder%context,tno)
+             if(pm_tv_kind(tv)==pm_type_is_uninitialised) then
+                coder%stack(get_slot(1))=pm_tv_arg(tv,1)
+             else
+                call inf_error(coder,callnode,'Cannot initialise "var..." or "let..." twice')
+             endif
+          endif
        case(sym_cast)
           ! Arg 3 is type to cast to (-ve if in a conditional context)
           tno=arg_type(3)
@@ -1361,7 +1373,7 @@ contains
             p=writelist
             do while(.not.pm_fast_isnull(p))
                var=p%data%ptr(p%offset)
-               save_var_types(i)=get_var_type(coder,callnode,var)
+               save_var_types(i)=get_var_type(coder,callnode,var,init=.true.)
                p=p%data%ptr(p%offset+1)
                i=i+1
             end do
@@ -1371,7 +1383,7 @@ contains
             do while(.not.pm_fast_isnull(p))
                var=p%data%ptr(p%offset)
                typ=save_var_types(i)
-               save_var_types(i)=get_var_type(coder,callnode,var)
+               save_var_types(i)=get_var_type(coder,callnode,var,init=.true.)
                call set_var_type(coder,var,typ)
                p=p%data%ptr(p%offset+1)
                i=i+1
@@ -1381,7 +1393,7 @@ contains
             p=writelist
             do while(.not.pm_fast_isnull(p))
                var=p%data%ptr(p%offset)
-               call combine_var_type(coder,callnode,var,save_var_types(i))
+               call combine_var_type(coder,callnode,var,save_var_types(i),no_init=.true.)
                p=p%data%ptr(p%offset+1)
                i=i+1
             end do
@@ -1482,7 +1494,8 @@ contains
             p=pm_type_val(coder%context,tno)
             n=p%data%ln(p%offset)
          else
-            call inf_error(coder,callnode,'Internal error: PM__each_index: not a literal or fix int parameter')
+            call inf_error(coder,callnode,&
+                 'Internal error: PM__each_index: not a literal or fix int parameter')
          endif
       else
          n=1
@@ -1904,8 +1917,7 @@ contains
     call check_wstack(coder,nargs)
 
     do i=1,nargs
-       tno=get_arg_type(coder,callnode,cnode_arg(args,i+nret),&
-            init=flags)
+       tno=get_arg_type(coder,callnode,cnode_arg(args,i+nret))
        coder%wstack(coder%wtop+i)=tno
        undef_arg=undef_arg.or.tno<=0
     enddo
@@ -3028,13 +3040,12 @@ contains
   ! Get currently resolved type (&mode) for argument
   ! (variable or constant)
   !=================================================
-  function get_arg_type(coder,callnode,arg,init) result(tno)
+  function get_arg_type(coder,callnode,arg) result(tno)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,arg
-    integer,intent(in),optional:: init
     integer:: tno
     if(cnode_get_kind(arg)==cnode_is_var) then
-       tno=get_var_type(coder,callnode,arg,init)
+       tno=get_var_type(coder,callnode,arg)
     else
        if(pm_debug_checks) then
           if(cnode_get_kind(arg)/=cnode_is_const) then
@@ -3054,7 +3065,7 @@ contains
   function get_var_type(coder,callnode,var,init) result(tno)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,var
-    integer,intent(in),optional:: init
+    logical,intent(in),optional:: init
     integer:: tno
     integer:: tk
     tno=coder%stack(cnode_get_num(var,var_index)+coder%base)
@@ -3066,20 +3077,13 @@ contains
 !!$       return
 !!$    endif
     tk=pm_type_kind(coder%context,tno)
-    if(tk==pm_type_is_uninitialised) then
-       if(present(init)) then
-          if(iand(init,call_takes_uninit)/=0) then
-             if(iand(init,call_converts_uninit)/=0) then
-                tno=pm_type_arg(coder%context,tno,1)
-             endif
-             return
-          endif
-       endif
+    if(tk==pm_type_is_uninitialised.and..not.present(init)) then
        call cnode_error(coder,callnode,&
-            'Attempt to use "var" or "const" value before it is initialised: ',&
+            'Attempt to use "var..." or "const..." before it is initialised: ',&
             cnode_get(var,var_name))
        call cnode_error(coder,var,&
             'Definition statement relating to above error')
+       call pm_panic('FAN')
        coder%stack(cnode_get_num(var,var_index)+coder%base)=error_type
        tno=error_type
     elseif(tk==pm_type_is_error) then
@@ -3127,7 +3131,7 @@ contains
     integer,intent(in):: typ
     logical,intent(in),optional:: no_init
     integer:: typ0,typ2
-    typ0=get_var_type(coder,cnode,var)
+    typ0=get_var_type(coder,cnode,var,init=.true.)
     typ2=typ0
     if(typ/=typ0) then
        if(typ0<=0) then

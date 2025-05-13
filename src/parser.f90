@@ -2387,6 +2387,10 @@ contains
        end select
        if(parser%sym/=sym_comma) exit
        call scan(parser)
+       if(parser%sym/=sym_underscore.and.parser%sym<=num_sym) then
+          call push_back(parser,sym_comma)
+          exit
+       endif
     enddo
     iserr=.false.
   end function lhs
@@ -2433,6 +2437,8 @@ contains
        if(expect(parser,sym_assign)) return
        if(rhs(parser,n)) return
        call make_node(parser,sym_assign,2)
+    else
+       call make_node(parser,sym_do,1)
     endif
     iserr=.false.
   end function assn_or_call
@@ -2829,11 +2835,12 @@ contains
   recursive function var_stmt(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
-    integer:: n,nu,m,vsym,mode
+    integer:: n,nu,ntot,m,vsym,mode
     logical:: dotcall,has_dotdotdot
     iserr=.true.
     mode=0
     m=0
+    ntot=0
     do
        select case(parser%sym)
        case(sym_var,sym_const)
@@ -2903,6 +2910,7 @@ contains
        endif
 10     continue
        m=m+1
+       ntot=ntot+n
        if(parser%sym/=sym_comma) exit
        call scan(parser)
     enddo
@@ -2910,54 +2918,24 @@ contains
 
     if(parser%sym/=sym_dotdotdot) then
        if(expect(parser,sym_assign)) return
-       if(rhs(parser,n)) return
+       if(rhs(parser,ntot)) return
        call make_node(parser,sym_assign,2)
        if(subexpr(parser)) return
-    elseif(m>1) then
-       call parse_error(parser,'Cannot have multiple left hand side elements before "..."')
-    elseif(mode/=0) then
-       call parse_error(parser,'"'//trim(sym_names(mode))//' var" must have an initialiser')
-    elseif(nu>0) then
-       call parse_error(parser,'Cannot have "_" in unitialised "'//&
-            trim(sym_names(vsym))//'" declaration')
     else
+       if(m>1) then
+          call parse_error(parser,'Cannot have multiple left hand side elements before "..."')
+       elseif(mode/=0) then
+          call parse_error(parser,'"'//trim(sym_names(mode))//' var" must have an initialiser')
+       elseif(nu>0) then
+          call parse_error(parser,'Cannot have "_" in unitialised "'//&
+               trim(sym_names(vsym))//'" declaration')
+       endif
        call scan(parser)
     endif
     iserr=.false.
   end function var_stmt
 
-  !==========================================================
-  ! all ref [ op ] = expr [ subexpr ] 
-  !==========================================================
-  recursive function all_stmt(parser) result(iserr)
-    type(parse_state),intent(inout):: parser
-    logical:: iserr
-    iserr=.true.
-    call scan(parser)
-    if(valref(parser)) return
-    select case(parser%sym)
-    case(sym_plus,sym_minus,sym_mult,sym_and,sym_or,&
-         sym_amp,sym_bar,sym_tilde,sym_concat)
-       call push_sym_val(parser,parser%sym)
-       call make_node(parser,sym_proc,1)
-       call scan(parser)
-       if(expect(parser,sym_assign)) return
-    case(sym_open_brace)
-       call scan(parser)
-       if(expr(parser)) return
-       if(expect(parser,sym_close_brace)) return
-    case(sym_assign)
-       call make_node(parser,sym_null,0)
-    case default
-       if(expect(parser,sym_assign)) return
-    end select
-    if(expr(parser)) return
-    call push_null_val(parser)
-    if(subexpr(parser)) return
-    call make_node(parser,sym_all,4)
-    iserr=.false.
-  end function all_stmt
-    
+
   !==========================================================
   ! switch [ xexpr ] { case xexprlist : statement_list ... }
   !==========================================================
@@ -3333,30 +3311,79 @@ contains
   end function over_stmt
 
   !======================================================
-  ! sync [ while ] name [ block ]
+  ! sync ( [ while ] name)  block | assignment | call 
   !======================================================
   function sync_stmt(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
-    integer:: line,name
+    integer:: line,name,name2,sym,n,nu
+    logical:: is_call,is_assign,is_labelled
     iserr=.true.
     line=get_sym_line(parser)
     call scan(parser)
+    sym=sym_sync
     if(parser%sym==sym_open) then
        call scan(parser)
-       if(expect(parser,sym_while)) return
+       if(parser%sym==sym_while) then
+          call scan(parser)
+          sym=sym_sync_while
+       endif
        if(expect_and_get_name(parser,name)) return
        if(expect(parser,sym_close)) return
-       if(block_or_single_stmt(parser,sym_sync,name,line)) return
-       call make_node(parser,sym_sync_while,2)
+       is_labelled=.true.
     else
-       if(expect_and_get_name(parser,name)) return
-       if(parser%sym==sym_open_brace.or.parser%sym==sym_colon) then
-          if(block_or_single_stmt(parser,sym_sync,name,line)) return
-       else
-          call push_null_val(parser)
+       call push_null_val(parser)
+       is_labelled=.false.
+    endif
+    if(parser%sym==sym_colon.or.parser%sym==sym_open_brace) then
+       if(.not.is_labelled) then
+          call parse_error(parser,&
+               'A "sync" statement that is not of the form "sync(...)"'//&
+               ' cannot be applied to a block of statements') 
        endif
-       call make_node(parser,sym_sync,2)
+       if(block_or_single_stmt(parser,sym_sync,name,line)) return
+       call make_node(parser,sym,2)
+    else
+       if(parser%sym==sym_dollar) then
+          call scan(parser)
+          if(op(parser,name2,.true.,.false.)) return
+          call push_sym_val(parser,name2)
+          call make_node(parser,sym_proc,1)
+          if(parser%sym==sym_dot) call scan(parser)
+          if(arglist(parser)) return
+          call make_node(parser,sym_open,1)
+       else
+          if(parser%sym==sym_assignment) then
+             call scan(parser)
+             is_assign=.true.
+          else
+             is_assign=.false.
+          endif
+          is_call=.false.
+          if(lhs(parser,n,nu,is_call)) return
+          if(is_call) then
+             if(is_assign) then
+                call parse_error(parser,&
+                     'Left hand side of "sync assign" appears to contain a procedure call')
+                return
+             else
+                call make_node(parser,sym_open,1)
+             endif
+          elseif(n>1) then
+             call parse_error(parser,'"sync" assignment can only have one left hand side')
+             return
+          elseif(nu>1) then
+             call parse_error(parser,'Left hand side of "sync" assignment cannot be "_"')
+             return
+          else
+             if(expect(parser,sym_assign)) return
+             if(expr(parser)) return
+             call make_node(parser,sym_assign,2)
+          endif
+       endif
+       call push_null_val(parser)
+       if(subexpr(parser)) return
+       call make_node(parser,sym,3)
     endif
     iserr=.false.
   end function sync_stmt
@@ -3432,14 +3459,12 @@ contains
           if(par_stmt(parser)) goto 999
        case(sym_any)
           if(any_stmt(parser)) goto 999
-       case(sym_all)
-          if(all_stmt(parser)) goto 999
        case(sym_over)
           if(over_stmt(parser)) goto 999
        case(sym_underscore)
           if(assn_or_call(parser,.false.,.true.,.true.)) goto 999
           if(subexpr(parser)) goto 999
-       case(sym_var,sym_const,sym_invar,sym_chan,sym_nhd,sym_shared)
+       case(sym_var,sym_const,sym_assignment,sym_invar,sym_chan,sym_nhd,sym_shared)
           if(var_stmt(parser)) goto 999
           if(subexpr(parser)) goto 999
        case(sym_dollar)

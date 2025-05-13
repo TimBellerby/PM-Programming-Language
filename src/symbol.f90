@@ -405,7 +405,9 @@ module pm_symbol
   integer,parameter:: sym_lhs_and_val_sync = hook + 60
   integer,parameter:: sym_iter_ref = hook + 61
   integer,parameter:: sym_check_task = hook + 62
-  integer,parameter:: hook1 = hook + 62
+  integer,parameter:: sym_init_var = hook + 63
+  integer,parameter:: sym_init_const = hook + 64
+  integer,parameter:: hook1 = hook + 64
   
   integer,parameter:: sym_d1= hook1 + 1
   integer,parameter:: sym_d2= hook1 + 2
@@ -521,7 +523,7 @@ module pm_symbol
   integer,parameter:: sym_split_param =   hook5 + 32
   integer,parameter:: sym_dim_noinit  =   hook5 + 33
   integer,parameter:: sym_pm_node     =   hook5 + 34
-  integer,parameter:: sym_init_const  =   hook5 + 35
+  integer,parameter:: sym_init_constx  =   hook5 + 35
   integer,parameter:: sym_pm_dump     =   hook5 + 36
 
   integer,parameter:: hook6 = 36 + hook5
@@ -877,6 +879,8 @@ module pm_symbol
   data sym_names(sym_lhs_and_val_sync) /'PM__lhs_and_val_sync'/
   data sym_names(sym_iter_ref)         /'PM__iter_ref'/
   data sym_names(sym_check_task)       /'PM__check_task'/
+  data sym_names(sym_init_var)         /'PM__init_var'/
+  data sym_names(sym_init_const)       /'PM__init_const'/
   
   data sym_names(sym_d1)               /'PM__d1'/
   data sym_names(sym_d2)               /'PM__d2'/
@@ -991,7 +995,7 @@ module pm_symbol
   data sym_names(sym_get_chunk)        /'chunk'/
   data sym_names(sym_pm_atz)           /'PM__atz'/
   data sym_names(sym_pm_node)          /'PM__node'/
-  data sym_names(sym_init_const)       /'PM__init_const'/
+  data sym_names(sym_init_constx)       /'PM__init_constx'/
 
   data sym_names(sym_infer_stack)      /'infer_stack'/
   data sym_names(sym_infer_type)       /'infer_type'/
