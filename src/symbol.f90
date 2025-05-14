@@ -332,16 +332,18 @@ module pm_symbol
   integer,parameter:: sym_dim = node0 + 41
   integer,parameter:: sym_vdim = node0 + 42
   integer,parameter:: sym_sync_assign = node0 + 43
-  integer,parameter:: sym_get_filesystem = node0 + 44
-  integer,parameter:: sym_nested_loop = node0 + 45
-  integer,parameter:: sym_assign_list = node0 + 46
-  integer,parameter:: sym_case_range = node0 + 47
-  integer,parameter:: sym_dot_call = node0 + 48
-  integer,parameter:: sym_key = node0 + 49
-  integer,parameter:: sym_reference = node0 + 50
+  integer,parameter:: sym_sync_assign_ref = node0 + 44
+  integer,parameter:: sym_sync_assign_op = node0 + 45
+  integer,parameter:: sym_get_filesystem = node0 + 46
+  integer,parameter:: sym_nested_loop = node0 + 47
+  integer,parameter:: sym_assign_list = node0 + 48
+  integer,parameter:: sym_case_range = node0 + 49
+  integer,parameter:: sym_dot_call = node0 + 50
+  integer,parameter:: sym_key = node0 + 51
+  integer,parameter:: sym_reference = node0 + 52
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 51
+  integer,parameter:: hook = node0 + 53
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -419,18 +421,19 @@ module pm_symbol
   integer,parameter:: sym_copy_in = hook1 + 8
   integer,parameter:: sym_copy_out = hook1 + 9
   integer,parameter:: sym_pm_assign = hook1 + 10
-  integer,parameter:: sym_aliased_assign = hook1 + 11
-  integer,parameter:: sym_first = hook1 + 12
-  integer,parameter:: sym_next = hook1 + 13
-  integer,parameter:: sym_checkcase = hook1 + 14
-  integer,parameter:: sym_dim1= hook1 + 15
-  integer,parameter:: sym_dim2= hook1 + 16
-  integer,parameter:: sym_dim3= hook1 + 17
-  integer,parameter:: sym_dim4= hook1 + 18
-  integer,parameter:: sym_dim5= hook1 + 19
-  integer,parameter:: sym_dim6= hook1 + 20
-  integer,parameter:: sym_dim7= hook1 + 21
-  integer,parameter:: hook2= hook1+21
+  integer,parameter:: sym_pm_assign_ref = hook1 + 11
+  integer,parameter:: sym_pm_assign_op = hook1 +12
+  integer,parameter:: sym_first = hook1 + 13
+  integer,parameter:: sym_next = hook1 + 14
+  integer,parameter:: sym_checkcase = hook1 + 15
+  integer,parameter:: sym_dim1= hook1 + 16
+  integer,parameter:: sym_dim2= hook1 + 17
+  integer,parameter:: sym_dim3= hook1 + 18
+  integer,parameter:: sym_dim4= hook1 + 19
+  integer,parameter:: sym_dim5= hook1 + 20
+  integer,parameter:: sym_dim6= hook1 + 21
+  integer,parameter:: sym_dim7= hook1 + 22
+  integer,parameter:: hook2= hook1+22
 
   integer,parameter:: sym_generate = hook2 + 1
   integer,parameter:: sym_broadcast = hook2 +2
@@ -803,7 +806,9 @@ module pm_symbol
   data sym_names(sym_cast)             /'PM__cast'/
   data sym_names(sym_dim)              /'PM__dim'/
   data sym_names(sym_vdim)             /'PM__vdim'/
-  data sym_names(sym_sync_assign)      /'<sync-assign>'/
+  data sym_names(sym_sync_assign)      /'PM__sync_assign'/
+  data sym_names(sym_sync_assign_ref)  /'PM__sync_assign_ref'/
+  data sym_names(sym_sync_assign_op)   /'PM__sync_assign_op'/
   data sym_names(sym_get_filesystem)   /'PM__filesys'/
   data sym_names(sym_nested_loop)      /'PM__nested_loop'/
   data sym_names(sym_assign_list)      /'<assign-list>'/
@@ -893,7 +898,8 @@ module pm_symbol
   data sym_names(sym_copy_in)          /'PM__copy_in'/
   data sym_names(sym_copy_out)         /'PM__copy_out'/
   data sym_names(sym_pm_assign)        /'PM__assign'/
-  data sym_names(sym_aliased_assign)   /'PM__aliased_assign'/
+  data sym_names(sym_pm_assign_ref)    /'PM__assign_ref'/
+  data sym_names(sym_pm_assign_op)     /'PM__assign_op'/
   data sym_names(sym_first)            /'PM__first'/
   data sym_names(sym_next)             /'PM__next'/
   data sym_names(sym_checkcase)        /'PM__checkcase'/

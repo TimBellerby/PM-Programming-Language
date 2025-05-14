@@ -2368,6 +2368,8 @@ contains
                    return
                 endif
              endif
+          case default
+             call make_node(parser,sym_name,1)
           end select
        endif
 
@@ -2375,14 +2377,14 @@ contains
        case(sym_plus,sym_minus,sym_mult,sym_and,sym_or,sym_amp,sym_bar,sym_tilde,sym_concat)
           call push_sym_val(parser,parser%sym)
           call make_node(parser,sym_proc,1)
-          call make_node(parser,sym_lt,2)
+          call make_node(parser,sym_open_brace,2)
           call scan(parser)
           if(present(cannot_be_move)) cannot_be_move=.true.
        case(sym_open_brace)
           call scan(parser)
           if(expr(parser)) return
           if(expect(parser,sym_close_brace)) return
-          call make_node(parser,sym_lt,2)
+          call make_node(parser,sym_open_brace,2)
           if(present(cannot_be_move)) cannot_be_move=.true.
        end select
        if(parser%sym/=sym_comma) exit
