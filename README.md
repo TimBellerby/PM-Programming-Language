@@ -90,5 +90,5 @@ You can then mpirun the resulting executable.
 
 Both compiler and interpreter expect PM source files to have a .pmm extension.
 
+## PM Version 0.5 is under active development (see branch)
 
-## Watch out for continuing updates.
