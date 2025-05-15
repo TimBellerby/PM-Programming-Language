@@ -1389,6 +1389,9 @@ contains
        case(sym_keep_literals)   !!! IS THIS TO BE USED?
           call set_flags(call_is_fixed)
           call scan(parser)
+       case(sym_pm_ref)
+          call set_flags(proccall_is_ref)
+          call scan(parser)
        end select
        if(parser%sym/=sym_comma) exit
        call scan(parser)
@@ -1967,7 +1970,7 @@ contains
        if(expect(parser,sym_open)) return
        if(exprlist(parser,m,nolist=.true.)) return
        if(expect(parser,sym_close)) return
-       if(m/=3.and.m/=5) then
+       if(m/=3) then
           call parse_error(parser,'Wrong number of args to: '//sym_names(sym))
           return
        endif

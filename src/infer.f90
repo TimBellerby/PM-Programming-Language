@@ -885,7 +885,7 @@ contains
        vbase_check=coder%vtop
        tbase_check=coder%wtop
     endif
-    
+
     nret=cnode_get_num(callnode,call_nret)
     sig=-cnode_get_num(callnode,call_sig)
     args=cnode_get(callnode,call_args)
@@ -1091,34 +1091,34 @@ contains
           if(tno2>0) then
              if(.not.pm_type_includes(coder%context,tno,tno2,&
                   pm_type_incl_val)) then
-                 call inf_error(coder,callnode,&
-                      '"'//trim(sym_names(sig))//&
-                      '" initial expression has wrong type for: ',&
-                      pm_fast_name(coder%context,name))
-                 call inf_trace(coder)
-                 tno2=error_type
-              endif
-           endif
-           tno2=pm_type_add_mode(coder%context,tno2,mode)
-           call combine_types(cnode_arg(args,1),tno2)
-        case(sym_pm_list)
-           call push_word(coder,pm_type_new_tuple+pm_type_is_list)
-           call push_word(coder,0)
-           do i=1,nargs
-              call push_word(coder,arg_type_with_mode(i+1))
-           enddo
-           mode=pm_type_mix_modes(coder%context,&
-                coder%wstack(coder%wtop-nargs+1:coder%wtop))
-           call make_type_if_possible(coder,nargs+2)
-           tno2=pop_word(coder)
-           tno2=pm_type_add_mode(coder%context,tno2,mode)
-           call combine_types(cnode_arg(args,1),tno2)
-        case(sym_dot,sym_dot_ref)
-           name=arg_type(3)
-           tno=arg_type_with_mode(2)
-           if(tno==error_type) then
-              call set_arg_to_error_type(1)
-           else
+                call inf_error(coder,callnode,&
+                     '"'//trim(sym_names(sig))//&
+                     '" initial expression has wrong type for: ',&
+                     pm_fast_name(coder%context,name))
+                call inf_trace(coder)
+                tno2=error_type
+             endif
+          endif
+          tno2=pm_type_add_mode(coder%context,tno2,mode)
+          call combine_types(cnode_arg(args,1),tno2)
+       case(sym_pm_list)
+          call push_word(coder,pm_type_new_tuple+pm_type_is_list)
+          call push_word(coder,0)
+          do i=1,nargs
+             call push_word(coder,arg_type_with_mode(i+1))
+          enddo
+          mode=pm_type_mix_modes(coder%context,&
+               coder%wstack(coder%wtop-nargs+1:coder%wtop))
+          call make_type_if_possible(coder,nargs+2)
+          tno2=pop_word(coder)
+          tno2=pm_type_add_mode(coder%context,tno2,mode)
+          call combine_types(cnode_arg(args,1),tno2)
+       case(sym_dot,sym_dot_ref)
+          name=arg_type(3)
+          tno=arg_type_with_mode(2)
+          if(tno==error_type.or.name==error_type) then
+             call set_arg_to_error_type(1)
+          else
              tno=pm_type_strip_mode(coder%context,&
                   tno,mode)
              if(tno>0) then
@@ -1130,7 +1130,42 @@ contains
                 call set_arg_to_error_type(1)
              endif
           endif
+       case(sym_open_brace)
+          ! Used in .{ }
+          ! Check type is literal string or literal integer
+          ! Cater for literal string of the form "_name"
+          tno=arg_type(2)
+          if(tno>0) then
+             if(pm_type_kind(coder%context,tno)/=pm_type_is_single_name) then
+                tv=pm_type_vect(coder%context,arg_type(2))
+                if(pm_tv_kind(tv)==pm_type_is_literal_value) then
+                   tno2=pm_tv_arg(tv,1)
+                   if(tno2==pm_string_type) then
+                      tno=pm_name_type_from_literal_string(coder%context,tno,&
+                           cnode_module_name(callnode))
+                      if(tno<0) then
+                         call inf_error(coder,callnode,&
+                              'String value in ".{}" is not a valid name')
+                         tno=error_type
+                      endif
+                   elseif(tno2/=pm_long) then
+                      call inf_error(coder,callnode,&
+                           'Expression in ".{}" must be a literal string or integer')
+                      tno=error_type
+                   endif
+                else
+                   call inf_error(coder,callnode,&
+                        'Expression in ".{}" must be a literal string or integer')
+                   tno=error_type
+                endif
+             endif
+          endif
+          coder%stack(get_slot(1))=tno
        case(sym_dotdotdot)
+          ! Used in var ...x=y
+          ! Checks existing value of var
+          ! if it is an unintialised value type then convert to type-value
+          ! otherwise give an error
           tno=get_var_type(coder,callnode,cnode_arg(args,2),init=.true.)
           if(tno==error_type) then
              call set_arg_to_error_type(1)
@@ -1345,7 +1380,7 @@ contains
           call pm_panic('inf_call')
        endif
     endif
-    
+
   contains
     include 'ftypeof.inc'
     include 'fesize.inc'
@@ -1442,7 +1477,7 @@ contains
                  pm_type_add_mode(coder%context,tno,mode)
             call inf_cblock(coder,cnode_arg(args,2))
             call code_int_vec(coder,coder%stack,coder%base+slot,coder%base+slot2)
-            
+
             if(i>1) then
                j=1
                p=writelist
@@ -1482,7 +1517,7 @@ contains
       type(pm_ptr):: p,tv
       integer:: start,finish,tno,tno2,i,n,k,key(1)
 !!! need to handle modes
- 
+
       p=cnode_arg(args,nret+3)
       p=cnode_arg(p,1)
       start=p%data%i(p%offset)
@@ -1579,7 +1614,7 @@ contains
       integer:: mode
       tno=pm_type_strip_mode(coder%context,arg_type_with_mode(m),mode)
     end function arg_type
-    
+
 !!$    !===================================================================
 !!$    ! Return the type and mode for arguement m (no error check)
 !!$    !==================================================================
@@ -1672,7 +1707,7 @@ contains
       endif
     end subroutine check_logical
 
-        
+
     !==================================================================
     ! Set loop call signature to 1 if it is in a conditional
     ! (incling masked) context
@@ -1690,7 +1725,7 @@ contains
       endif
       call set_call_sig(mark)
     end subroutine mark_loop_cond
-    
+
     !==================================================================
     ! Check if argument m has long type (int type in PM)
     !==================================================================
@@ -1726,7 +1761,7 @@ contains
          p=p%data%ptr(p%offset+1)
       enddo
     end subroutine check_loop_writes
-    
+
     subroutine clear_cblock_mark(list)
       type(pm_ptr),intent(in):: list
       integer:: slot
@@ -1793,21 +1828,19 @@ contains
                     trim(pm_type_as_string(coder%context,tno))//'": ',&
                     cnode_get(var,var_name))
             else
-               sig=pm_type_find_elem(coder%context,tno,name,.false.,&
+               sig=pm_type_find_elem(coder%context,tno,nametyp,.false.,&
                     elem_type)
                if(sig==0) then
                   call inf_error_with_trace(coder,callnode,&
-                       'Type "'//trim(pm_type_as_string(coder%context,tno))//'"'//&
-                       ' does not have an element named "'//&
-                       trim(pm_name_as_string(coder%context,name))//'" in: ',&
-                       cnode_get(var,var_name))
+                       'An object of type "'//trim(pm_type_as_string(coder%context,tno))//'"'//&
+                       ' does not have element "'//&
+                       trim(pm_type_as_string(coder%context,nametyp))//'"')
                else
                   call inf_error_with_trace(coder,callnode,&
                        'Cannot modify element "'//&
-                       trim(pm_name_as_string(coder%context,name))//&
+                       trim(pm_type_as_string(coder%context,nametyp))//&
                        '" of type "'//&
-                       trim(pm_type_as_string(coder%context,tno))//'" in: ',&
-                       cnode_get(var,var_name))
+                       trim(pm_type_as_string(coder%context,tno))//'"')
                   sig=0
                endif
             endif
@@ -1847,7 +1880,7 @@ contains
       logical,intent(in),optional:: no_init
       call combine_types(cnode_arg(args,m),typ,no_init=no_init)
     end subroutine combine_arg_types
-    
+
     !===================================================================
     ! Augment the type stored in a given variable vararg by adding typ
     !==================================================================
@@ -1857,8 +1890,8 @@ contains
       logical,intent(in),optional:: no_init
       call combine_var_type(coder,cblock,vararg,typ,no_init=no_init)
     end subroutine combine_types
-    
-    
+
+
   end subroutine inf_call
 
   !==================================================================

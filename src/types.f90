@@ -531,6 +531,46 @@ contains
     tno=pm_new_type(context,args)
   end function pm_new_name_type
 
+  function pm_name_type_from_literal_string(context,tno,modname) result(tno2)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno,modname
+    integer:: tno2
+    type(pm_ptr):: str
+    integer:: i,ic,name
+    character(len=1):: c
+    character(len=300):: strchars
+    str=pm_type_val(context,tno)
+    if(pm_debug_checks) then
+       if(pm_fast_vkind(str)/=pm_string) then
+          write(*,*) 'vkind=',pm_fast_vkind(str),pm_type_as_string(context,tno)
+          call pm_panic('Type to literal string')
+       endif
+    endif
+    do i=0,pm_fast_esize(str)
+       c=str%data%s(str%offset+i)
+       ic=iachar(c)
+       if(.not.(c=='_'.or.ic>=iachar('a').and.ic<=iachar('z').or.&
+            ic>=iachar('A').and.ic<=iachar('Z').or.&
+            i>0.and.ic>=iachar('0').and.ic<=iachar('9'))) then
+          tno2=-1
+          return
+       endif
+    enddo
+    name=pm_type_name(context,tno)
+    if(str%data%s(str%offset)=='_') then
+       if(pm_fast_esize(str)<1) then
+          tno2=-1
+          return
+       endif
+       strchars=pm_name_as_string(context,name)
+       name=pm_lname_entry(context,modname,trim(strchars(2:)))
+    endif
+    tno2=pm_new_name_type(context,name)
+  contains
+    include 'fesize.inc'
+    include 'fvkind.inc'
+  end function pm_name_type_from_literal_string
+
   !==========================================
   ! Create new compile time value type
   !==========================================
@@ -582,7 +622,7 @@ contains
        args(2)=pm_set_add(context,context%names,val)
     endif
     args(3)=pm_fast_typeof(val)
-    if(args(3)==pm_string) args(3)=pm_string_type
+    if(args(3)==pm_string.or.args(3)==pm_int32) args(3)=pm_string_type
     tno=pm_new_basic_type(context,args,val)
   contains
     include 'ftypeof.inc'
@@ -2133,8 +2173,24 @@ contains
     logical,intent(in):: change
     integer,intent(out):: etype
     integer:: offset,ptype,mode
-    type(pm_ptr):: tv
+    type(pm_ptr):: tv,nameval,names
     integer:: tk,i,name
+    if(pm_type_kind(context,nametype)==pm_type_is_literal_value) then
+       tv=pm_type_vect(context,tno)
+       if(pm_tv_kind(tv)==pm_type_is_rec) then
+          nameval=pm_type_val(context,nametype)
+          offset=nameval%data%ln(nameval%offset)
+          if(offset<=0.or.offset>pm_type_numargs(context,tno)) then
+             offset=0
+          elseif(change) then
+             names=pm_name_val(context,pm_tv_name(tv))
+             if(names%data%i(names%offset+offset)>0) offset=0
+          endif
+       else
+          offset=0
+       endif
+       return
+    endif
     name=pm_type_name(context,nametype)
     if(tno<0) then
        offset=0
@@ -2191,7 +2247,6 @@ contains
   contains
     include 'fesize.inc'
   end subroutine pm_type_elem_offset
-
 
   ! Concrete only version of a type (used/usable only for returns from builtin functions)
   recursive function pm_type_as_concrete(context,tno,params,isstatic,iserr) result(tno2)

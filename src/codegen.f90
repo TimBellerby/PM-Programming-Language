@@ -2643,7 +2643,7 @@ contains
     endif
 
     vbase=coder%vtop
-    base=coder%vtop-start+2
+    base=coder%vtop-start+1
     
     n=node_numargs(node)
     do i=start,n
@@ -2651,10 +2651,10 @@ contains
        sym=node_sym(arg)
        select case(sym)
        case(sym_dot)
-          call code_name_as_string(coder,cblock,arg,node_num_arg(arg,1))
+          call make_name_value(coder,cblock,arg,node_num_arg(arg,1))
        case(sym_open_brace)
           call trav_expr(coder,cblock,arg,node_arg(arg,1))
-          call make_sp_call(coder,cblock,arg,sym_open_brace,1,0,flags=call_is_no_touch)
+          call make_sp_call_rtn(coder,cblock,arg,sym_open_brace,1,1)
        case(sym_sub)
           call trav_expr(coder,cblock,arg,node_arg(arg,1))
        case(sym_open)
@@ -2675,7 +2675,7 @@ contains
        sym=node_sym(arg)
        do while(sym==sym_dot.or.sym==sym_open_brace)
           call code_val(coder,coder%vstack(base+i))
-          call make_sp_call_rtn(coder,cblock,arg,sym_dot,2,1)
+          call make_sp_call_rtn(coder,cblock,arg,merge(sym_dot_ref,sym_dot,islhs),2,1)
           i=i+1
           if(i>n) exit
           arg=node_arg(node,i)
@@ -2831,15 +2831,15 @@ contains
     aliased=.true.
     if(present(hard_aliased)) hard_aliased=.true.
   end function is_aliased
-  
-  subroutine code_name_as_string(coder,cblock,node,name)
+
+  subroutine make_name_value(coder,cblock,node,name)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,node
     integer,intent(in):: name
-    call make_literal_const(coder,cblock,node,&
-         pm_new_literal_value_type(coder%context,&
-         pm_name_val(coder%context,name),name))
-  end subroutine code_name_as_string
+    call make_const(coder,cblock,node,&
+         pm_name_val(coder%context,name),&
+         pm_new_name_type(coder%context,name))
+  end subroutine make_name_value
 
   !===================================================================
   ! Use expression on top of stack to create new variable or constant

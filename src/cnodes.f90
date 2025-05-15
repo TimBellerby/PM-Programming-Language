@@ -255,6 +255,15 @@ contains
   end function cnode_get_num
 
   !============================================
+  ! Module name for a cnode
+  !============================================
+  function cnode_module_name(ptr) result(name)
+    type(pm_ptr),intent(in):: ptr
+    integer:: name
+    name=cnode_get_num(ptr,cnode_modl_name)
+  end function cnode_module_name
+
+  !============================================
   ! Get argument n from cnode as a number
   !============================================
   function cnode_num_arg(ptr,n) result(val)
