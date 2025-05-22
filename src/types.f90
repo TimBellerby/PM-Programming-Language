@@ -80,7 +80,7 @@ module pm_types
   integer,parameter:: pm_type_new_literal_value=19
   integer,parameter:: pm_type_new_except=20
   integer,parameter:: pm_type_new_param=21+pm_type_has_params
-
+  integer,parameter:: pm_type_new_gated=22
   integer,parameter:: pm_type_new_has=23
   integer,parameter:: pm_type_new_vect=24+pm_type_has_vect
   integer,parameter:: pm_type_new_params=25
@@ -114,7 +114,7 @@ module pm_types
   integer,parameter:: pm_type_is_literal_value=19
   integer,parameter:: pm_type_is_except=20
   integer,parameter:: pm_type_is_param=21
- !
+  integer,parameter:: pm_type_is_gated=22
   integer,parameter:: pm_type_is_has=23
   integer,parameter:: pm_type_is_vect=24
   integer,parameter:: pm_type_is_params=25
@@ -142,7 +142,6 @@ module pm_types
   integer,parameter:: pm_elem_found=0
   integer,parameter:: pm_elem_not_found=1
   integer,parameter:: pm_elem_clash=2
-
 
   ! Error codes from type testing
   integer,parameter:: pm_type_err_none=0
@@ -186,7 +185,6 @@ module pm_types
   integer,public,parameter:: pm_string_literal_type = pm_last_category_type + 4
   integer,public,parameter:: pm_last_literal_type = pm_string_literal_type
   
-    
   ! Kind of dref type (internal type describing references)
   integer,public,parameter:: pm_dref_is_dot=0
   integer,public,parameter:: pm_dref_is_var=-1
@@ -1503,6 +1501,13 @@ contains
        ok=pm_test_type_includes(context,p,pm_tv_arg(u,1),&
             mode,params,base,user,ubase)
        return
+    case(pm_type_is_gated)
+       if(test_gated_type(context,q)) then
+          ok=pm_test_type_includes(context,p,pm_tv_arg(u,pm_tv_numargs(u)),&
+               mode,params,base,user,ubase)
+       else
+          ok=.true.
+       endif
     case(pm_type_is_bottom)
        ok=.true.
        return
@@ -1803,6 +1808,13 @@ contains
        ok=tk==uk
        if(ok) ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
             mode,params,base,user,ubase)
+    case(pm_type_is_gated)
+       if(test_gated_type(context,p)) then
+          ok=pm_test_type_includes(context,pm_tv_arg(t,pm_tv_numargs(t)),q,&
+               mode,params,base,user,ubase)
+       else
+          ok=.false.
+       endif
     case(pm_type_is_bottom)
        ok=.false.
     case(pm_type_is_category)
@@ -1969,13 +1981,270 @@ contains
          pm_type_is_contains,pm_type_is_has,&
          pm_type_is_params,pm_type_is_param)
        ok=pm_type_contains_elem(context,p,pm_tv_arg(u,1),&
+            mode,params,base,user,ubase)
+    case(pm_type_is_gated)
+       if(test_gated_type(context,q)) then
+          ok=pm_type_contains_elem(context,p,pm_tv_arg(u,pm_tv_numargs(u)),&
                mode,params,base,user,ubase)
+       else
+          ok=.true.
+       endif
     case default
        ok=.false.
     end select
   end function pm_type_contains_elem
 
+  recursive function pm_type_intersects(context,tno1,tno2,user,userbase) result(ok)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno1,tno2,userbase
+    integer,intent(inout):: user(:)
+    logical:: ok
+    integer:: tk1,tk2
+    type(pm_ptr):: tv1,tv2,r
+    integer:: n1,n2,i,j
 
+    if(tno1==tno2) then
+       ok=.true.
+       return
+    endif
+    if(tno1==0.or.tno2==0) then
+       ok=.true.
+       return
+    endif
+    if(pm_type_includes(context,tno2,tno1,pm_type_incl_type)) then
+       ok=.true.
+       return
+    endif
+    if(pm_type_includes(context,tno1,tno2,pm_type_incl_type)) then
+       ok=.true.
+       return
+    endif
+    if(pm_type_is_concrete(context,tno1).or.pm_type_is_concrete(context,tno2)) then
+       ok=.false.
+       return
+    endif
+    tv1=pm_type_vect(context,tno1)
+    tv2=pm_type_vect(context,tno2)
+    tk1=pm_tv_kind(tv1)
+    tk2=pm_tv_kind(tv2)
+    n1=pm_tv_numargs(tv1)
+    n2=pm_tv_numargs(tv2)
+    
+    select case(tk2)
+    case(pm_type_is_user)
+       if(tk1/=pm_type_is_user) then
+          do i=2,userbase,2
+             if(user(i)==tno1.and.user(i+1)==tno2) then
+                ok=.true.
+                return
+             endif
+          enddo
+          if(userbase+2>size(user)) then
+             call pm_panic('Program too complex - nested type defs')
+          endif
+          user(userbase+1)=tno1
+          user(userbase+2)=tno2
+          r=pm_dict_val(context,context%tcache,int(tno2,pm_ln))
+          ok=pm_type_intersects(context,tno1,int(r%offset),user,userbase+2)
+          return
+       endif
+       return
+    case(pm_type_is_any)
+       if(tk1==pm_type_is_any) then
+          ok=.false.
+          do i=1,n1
+             do j=1,n2
+                if(i/=j) then
+                   if(pm_type_intersects(context,pm_tv_arg(tv1,1),pm_tv_arg(tv2,1),&
+                        user,userbase)) then
+                      ok=.true.
+                      return
+                   endif
+                endif
+             enddo
+          enddo
+       else
+          ok=.false.
+          do j=1,n2
+             if(pm_type_intersects(context,tno1,pm_tv_arg(tv2,j),&
+                  user,userbase)) then
+                ok=.true.
+                return
+             endif
+          enddo
+       endif
+       return
+    case(pm_type_is_all)
+       if(tk1==pm_type_is_all) then
+          ok=.true.
+          do i=1,n1
+             do j=1,n2
+                if(i/=j) then
+                   if(.not.pm_type_intersects(context,pm_tv_arg(tv1,1),pm_tv_arg(tv2,1),&
+                        user,userbase)) then
+                      ok=.false.
+                      return
+                   endif
+                endif
+             enddo
+          enddo
+       else
+          ok=.true.
+          do j=1,n2
+             if(.not.pm_type_intersects(context,tno1,pm_tv_arg(tv2,j),&
+                  user,userbase)) then
+                ok=.false.
+                return
+             endif
+          enddo
+       endif
+       return
+    case(pm_type_is_contains,pm_type_is_category,pm_type_is_bottom)
+       ok=.true.
+       return
+    case(pm_type_is_gated)
+       if(test_gated_type(context,tno2)) then
+          ok=pm_type_intersects(context,tno1,pm_tv_arg(tv2,pm_tv_numargs(tv2)),&
+               user,userbase)
+       else
+          ok=.true.
+       endif
+       return
+    case(pm_type_is_par_kind,pm_type_is_vect,pm_type_is_has,&
+         pm_type_is_params,pm_type_is_param)
+       ok=pm_type_intersects(context,pm_tv_arg(tv2,1),tno2,user,userbase)
+       return
+    case(pm_type_is_except)
+       if(tk1==pm_type_is_except) then
+          if(pm_type_intersects(context,pm_tv_arg(tv1,1),pm_tv_arg(tv2,1),&
+               user,userbase)) then
+             if(pm_type_includes(context,pm_tv_arg(tv2,2),pm_tv_arg(tv1,1),pm_type_incl_type)) then
+                ok=.false.
+                return
+             endif
+             if(pm_type_includes(context,pm_tv_arg(tv1,2),pm_tv_arg(tv2,1),pm_type_incl_type)) then
+                ok=.false.
+                return
+             endif
+             ok=.true.
+             return
+          else
+             ok=.false.
+          endif
+       else
+          if(pm_type_intersects(context,tno1,pm_tv_arg(tv2,1),&
+               user,userbase)) then
+             if(pm_type_includes(context,pm_tv_arg(tv2,2),tno1,pm_type_incl_type)) then
+                ok=.false.
+                return
+             endif
+             ok=.true.
+          else
+             ok=.false.
+          endif
+       endif
+       return
+    end select
+    
+    
+    select case(tk1)
+    case(pm_type_is_user)
+       do i=2,userbase,2
+          if(user(i)==tno1.and.user(i+1)==tno2) then
+             ok=.true.
+             return
+          endif
+       enddo
+       if(userbase+2>size(user)) then
+          call pm_panic('Program too complex - nested type defs')
+       endif
+       user(userbase+1)=tno1
+       user(userbase+2)=tno2
+       r=pm_dict_val(context,context%tcache,int(tno1,pm_ln))
+       ok=pm_type_intersects(context,int(r%offset),tno2,user,userbase+2)
+    case(pm_type_is_any)
+       ok=.false.
+       do i=1,n1
+          if(pm_type_intersects(context,tno1,pm_tv_arg(tv1,i),&
+               user,userbase)) then
+             ok=.true.
+             return
+          endif
+       enddo
+    case(pm_type_is_all)
+       ok=.true.
+       do i=1,n1
+          if(pm_type_intersects(context,tno1,pm_tv_arg(tv1,i),&
+               user,userbase)) then
+             ok=.true.
+             return
+          endif
+       enddo
+    case(pm_type_is_except)
+       if(pm_type_intersects(context,pm_tv_arg(tv1,1),tno2,&
+            user,userbase)) then
+          if(pm_type_includes(context,pm_tv_arg(tv2,2),tno1,pm_type_incl_type)) then
+             ok=.false.
+             return
+          endif
+          ok=.true.
+       else
+          ok=.false.
+       endif
+    case(pm_type_is_contains,pm_type_is_category,pm_type_is_bottom)
+       ok=.true.
+    case(pm_type_is_par_kind,pm_type_is_vect,pm_type_is_has,&
+         pm_type_is_params,pm_type_is_param)
+       ok=pm_type_intersects(context,pm_tv_arg(tv1,1),tno2,user,userbase)
+    case(pm_type_is_gated)
+       if(test_gated_type(context,tno1)) then
+          ok=pm_type_intersects(context,pm_tv_arg(tv1,pm_tv_numargs(tv1)),tno2,&
+               user,userbase)
+       else
+          ok=.true.
+       endif
+    case default
+       if(tk1/=tk2) then
+          ok=.false.
+          return
+       endif
+       if(pm_tv_name(tv1)/=pm_tv_name(tv2)) then
+          ok=.false.
+          return
+       endif
+       if(n1/=n2) then
+          ok=.false.
+          return
+       endif
+       do i=1,n1
+          if(.not.pm_type_intersects(context,pm_tv_arg(tv1,i),pm_tv_arg(tv2,i),&
+               user,userbase)) then
+             ok=.false.
+             return
+          endif
+       enddo
+       ok=.true.
+    end select
+  end function pm_type_intersects
+
+
+  function test_gated_type(context,tno) result(ok)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    logical:: ok
+    integer:: i
+    type(pm_ptr):: tv
+    integer::stack(max_user_nesting)
+    tv=pm_type_vect(context,tno)
+     do i=1,pm_tv_numargs(tv)-1,2
+       if(.not.pm_type_intersects(context,pm_tv_arg(tv,i),pm_tv_arg(tv,i+1),stack,1)) then
+          ok=.false.
+          return
+       endif
+    enddo
+    ok=.true.
+  end function test_gated_type
+ 
   !===============================================
   ! Perform enveloping conversions if possible
   ! Returns -1 if not possible
@@ -2404,7 +2673,7 @@ contains
     type(pm_context),pointer:: context
     integer,intent(in):: tno
     logical,intent(in),optional:: distr
-    character(len=256):: str
+    character(len=1024):: str
     integer:: n
     str=''
     if(tno==0) then
@@ -2418,7 +2687,7 @@ contains
   recursive subroutine pm_type_to_string(context,typno,str,n,distr,tuple,noequiv,tuple_start)
     type(pm_context),pointer:: context
     integer,intent(in):: typno
-    character(len=256),intent(inout):: str
+    character(len=1024),intent(inout):: str
     integer,intent(inout):: n
     logical,intent(in),optional:: distr,tuple,noequiv
     integer,intent(in),optional:: tuple_start
@@ -2439,11 +2708,11 @@ contains
        return
     endif
     if(tno<0) then
-       if(add_char('*Internal error(<0)*')) return
+       if(add_char('*Internal-error(<0)*')) return
        return
     endif
     if(tno>pm_dict_size(context,context%heap%tcache)) then
-       if(add_char('*Internal error(>size)*')) return
+       if(add_char('*Internal-error(>size)*')) return
        return
     endif
     tv=pm_type_vect(context,tno)
@@ -2524,7 +2793,7 @@ contains
     case(pm_type_is_tuple,pm_type_is_vtuple)
        istart=1
        if(present(tuple_start)) istart=tuple_start
-       if(iand(pm_tv_flags(tv),pm_type_is_list)/=0) then
+       if(iand(pm_tv_flags(tv),pm_type_is_list)/=0.and.pm_opts%show_details) then
           if(add_char('PM__list(')) return
        else
           if(add_char('(')) return
@@ -2614,8 +2883,10 @@ contains
        endif
        n=len_trim(str)+1
        if(n>len(str)-10) return
-       if(iand(pm_tv_flags(tv),pm_type_has_distributed)/=0) then
-          if(add_char('*distr*')) return
+       if(pm_opts%show_details) then
+          if(iand(pm_tv_flags(tv),pm_type_has_distributed)/=0) then
+             if(add_char('*distr*')) return
+          endif
        endif
     case(pm_type_is_dref)
        if(pm_opts%show_all_ref) then
@@ -2777,13 +3048,17 @@ contains
        else
           istart=2
        endif
-       do i=1,istart
-          if(pm_type_arg(context,pm_tv_arg(tv,1),i)/=0) then
-             if(add_char('^')) return
-             istart=1
-             exit
-          endif
-       enddo
+       if(pm_opts%show_hidden) then
+          istart=1
+       elseif(pm_opts%show_details) then
+          do i=1,istart
+             if(pm_type_arg(context,pm_tv_arg(tv,1),i)/=0) then
+                if(add_char('^')) return
+                istart=1
+                exit
+             endif
+          enddo
+       endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,tuple_start=istart)
        if(add_char('->')) return
        call pm_type_to_string(context,pm_tv_arg(tv,2),str,n)
@@ -2803,30 +3078,67 @@ contains
        endif
        if(add_char(')')) return
     case(pm_type_is_vect)
-       if(add_char('^^(')) return
+       if(pm_opts%show_details) then
+          if(add_char('^^(')) return
+       endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
-       if(add_char(')')) return
+       if(pm_opts%show_details) then
+          if(add_char(')')) return
+       endif
     case(pm_type_is_par_kind)
        name=pm_tv_name(tv)
        if(add_char(trim(sym_names(name)))) return
        if(add_char(' ')) return
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
     case(pm_type_is_param,pm_type_is_params)
-       if(add_char('$')) return
+       if(pm_opts%show_details) then
+          if(add_char('{')) return
+       endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,noequiv=.true.)
+       if(pm_opts%show_details) then
+          if(add_char('}')) return
+       endif
+    case(pm_type_is_gated)
+       if(pm_opts%show_details) then
+          if(add_char('{')) return
+          if(.not.test_gated_type(context,tno)) then
+             if(add_char('~')) return
+          endif
+          call pm_type_to_string(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n,noequiv=.true.)
+          if(add_char(':')) return
+          do i=1,pm_tv_numargs(tv)-2,2
+             if(no_intersect(pm_tv_arg(tv,i),pm_tv_arg(tv,i+1))) then
+                if(add_char('~')) return
+             endif
+             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,noequiv=.true.)
+             if(add_char('^')) return
+             call pm_type_to_string(context,pm_tv_arg(tv,i+1),str,n,noequiv=.true.)
+             if(i<pm_tv_numargs(tv)-2) then
+                if(add_char(',')) return
+             endif
+          enddo
+          if(add_char('}')) return
+       else
+          if(test_gated_type(context,tno)) then
+             call pm_type_to_string(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n,noequiv=.true.)
+          else
+             if(add_char(' _ ')) return
+          endif
+       endif
     case(pm_type_is_type)
        if(add_char('<')) return
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
        if(add_char('>')) return
     case(pm_type_is_uninitialised)
-       if(add_char('UNINIT:')) return
+       if(pm_opts%show_details) then
+          if(add_char('UNINIT:')) return
+       endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
     case(pm_type_is_bottom)
        if(add_char(' _ ')) return
     case default
-       if(add_char('?')) return
-       write(str(n:n+3),'(i4)') tk
-       n=len_trim(str)+1
+       if(add_char('*Internal-error(kind='//&
+            trim(pm_int_as_string(tk))//')*')) return
     end select
   contains
     include 'fvkind.inc'
@@ -2905,6 +3217,13 @@ contains
          endif
       endif
     end function show_equiv
+
+    function no_intersect(tno1,tno2) result(ok)
+      integer,intent(in):: tno1,tno2
+      logical:: ok
+      integer:: stack(max_user_nesting)
+      ok=.not.pm_type_intersects(context,tno1,tno2,stack,1)
+    end function no_intersect
 
   end subroutine pm_type_to_string
 

@@ -137,6 +137,12 @@ contains
     !write(*,*) 'Parsing',trim(str)
     call parse_file_on_unit(parser,pm_comp_file_unit,.false.)
     close(pm_comp_file_unit)
+    if(parser%error_count>0) then
+       if(pm_main_process) then
+          write(*,*) 'Cannot parse system module: '//trim(str2)
+       endif
+       call pm_stop('Compilation terminated')
+    endif
     
 !!$    
 !!$    call sysdefs(parser)

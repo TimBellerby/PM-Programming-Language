@@ -558,13 +558,10 @@ PM__intrinsic tanh(cpx)->(cpx) : "tanh_dc"
 PM__intrinsic im(cpx)->(real) : "imag_dc"
 PM__intrinsic conj(cpx)->(cpx) : "conj_dc"
 
-
-
 //  Cannot convert real to int (must use nint or trunc)
 proc sint(x:any_real)=sint(0) :test "Cannot convert real to integer" => fix(false)
 proc int(x:any_real)=0 :test "Cannot convert real to integer" => fix(false)
 proc lint(x:any_real)=lint(0) :test "Cannot convert real to integer" => fix(false)
-
 
 //  Some numeric conversions not hard-coded
 proc cpx(x:real_num)=cpx(real(x))
@@ -715,16 +712,15 @@ type tuple4d(t1,t2,t3,t4) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,PM__d4:t4}
 type tuple5d(t1,t2,t3,t4,t5) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,PM__d4:t4,PM__d5:t5}
 type tuple6d(t1,t2,t3,t4,t5,t6) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,PM__d4:t4,PM__d5:t5,PM__d6:t6}
 type tuple7d(t1,t2,t3,t4,t5,t6,t7) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,PM__d4:t4,PM__d5:t5,PM__d6:t6,PM__d7:t7}
-type tuple1d_of(t) is tuple1d(t)
-type tuple2d_of(t) is tuple2d(t,t)
-type tuple3d_of(t) is tuple3d(t,t,t)
-type tuple4d_of(t) is tuple4d(t,t,t,t)
-type tuple5d_of(t) is tuple5d(t,t,t,t,t)
-type tuple6d_of(t) is tuple6d(t,t,t,t,t,t)
-type tuple7d_of(t) is tuple7d(t,t,t,t,t,t,t)
-type tuple(t) is tuple1d(t),tuple2d(t,t),tuple3d(t,t,t),tuple4d(t,t,t,t),tuple5d(t,t,t,t,t),
-                 tuple6d(t,t,t,t,t,t),tuple7d(t,t,t,t,t,t,t)
 
+type tuple(t,r:literal(int))
+type tuple(t,r:1) is ...,tuple1d(t)
+type tuple(t,r:2) is ...,tuple2d(t,t)
+type tuple(t,r:3) is ...,tuple3d(t,t,t)
+type tuple(t,r:4) is ...,tuple4d(t,t,t,t)
+type tuple(t,r:5) is ...,tuple5d(t,t,t,t,t)
+type tuple(t,r:6) is ...,tuple6d(t,t,t,t,t,t)
+type tuple(t,r:7) is ...,tuple7d(t,t,t,t,t,t,t)
 
 proc tuple(x)=rec tuple1d {
   PM__d1=x
@@ -748,34 +744,34 @@ proc tuple(x,y,z,t,u,v,w)=rec tuple7d {
   PM__d1=x,PM__d2=y,PM__d3=z,PM__d4=t,PM__d5=u,PM__d6=v,PM__d7=w
 }
 
-proc get_dim(t:tuple1d,n:fix(1) or [fix(1)])=t.1
-proc get_dim(t:tuple2d,n:fix(1) or [fix(1)])=t.1
-proc get_dim(t:tuple3d,n:fix(1) or [fix(1)])=t.1
-proc get_dim(t:tuple4d,n:fix(1) or [fix(1)])=t.1
-proc get_dim(t:tuple5d,n:fix(1) or [fix(1)])=t.1
-proc get_dim(t:tuple6d,n:fix(1) or [fix(1)])=t.1
-proc get_dim(t:tuple7d,n:fix(1) or [fix(1)])=t.1
-proc get_dim(t:tuple2d,n:fix(2) or [fix(2)])=t.2
-proc get_dim(t:tuple3d,n:fix(2) or [fix(2)])=t.2
-proc get_dim(t:tuple4d,n:fix(2) or [fix(2)])=t.2
-proc get_dim(t:tuple5d,n:fix(2) or [fix(2)])=t.2
-proc get_dim(t:tuple6d,n:fix(2) or [fix(2)])=t.2
-proc get_dim(t:tuple7d,n:fix(2) or [fix(2)])=t.2
-proc get_dim(t:tuple3d,n:fix(3) or [fix(3)])=t.3
-proc get_dim(t:tuple4d,n:fix(3) or [fix(3)])=t.3
-proc get_dim(t:tuple5d,n:fix(3) or [fix(3)])=t.3
-proc get_dim(t:tuple6d,n:fix(3) or [fix(3)])=t.3
-proc get_dim(t:tuple7d,n:fix(3) or [fix(3)])=t.3
-proc get_dim(t:tuple4d,n:fix(4) or [fix(4)])=t.4
-proc get_dim(t:tuple5d,n:fix(4) or [fix(4)])=t.4
-proc get_dim(t:tuple6d,n:fix(4) or [fix(4)])=t.4
-proc get_dim(t:tuple7d,n:fix(4) or [fix(4)])=t.4
-proc get_dim(t:tuple5d,n:fix(5) or [fix(5)])=t.5
-proc get_dim(t:tuple6d,n:fix(5) or [fix(5)])=t.5
-proc get_dim(t:tuple7d,n:fix(5) or [fix(5)])=t.5
-proc get_dim(t:tuple6d,n:fix(6) or [fix(6)])=t.6
-proc get_dim(t:tuple7d,n:fix(6) or [fix(6)])=t.6
-proc get_dim(t:tuple7d,n:fix(7) or [fix(7)])=t.7
+proc dim(t:tuple1d,n:fix(1) or [fix(1)])=t.1
+proc dim(t:tuple2d,n:fix(1) or [fix(1)])=t.1
+proc dim(t:tuple3d,n:fix(1) or [fix(1)])=t.1
+proc dim(t:tuple4d,n:fix(1) or [fix(1)])=t.1
+proc dim(t:tuple5d,n:fix(1) or [fix(1)])=t.1
+proc dim(t:tuple6d,n:fix(1) or [fix(1)])=t.1
+proc dim(t:tuple7d,n:fix(1) or [fix(1)])=t.1
+proc dim(t:tuple2d,n:fix(2) or [fix(2)])=t.2
+proc dim(t:tuple3d,n:fix(2) or [fix(2)])=t.2
+proc dim(t:tuple4d,n:fix(2) or [fix(2)])=t.2
+proc dim(t:tuple5d,n:fix(2) or [fix(2)])=t.2
+proc dim(t:tuple6d,n:fix(2) or [fix(2)])=t.2
+proc dim(t:tuple7d,n:fix(2) or [fix(2)])=t.2
+proc dim(t:tuple3d,n:fix(3) or [fix(3)])=t.3
+proc dim(t:tuple4d,n:fix(3) or [fix(3)])=t.3
+proc dim(t:tuple5d,n:fix(3) or [fix(3)])=t.3
+proc dim(t:tuple6d,n:fix(3) or [fix(3)])=t.3
+proc dim(t:tuple7d,n:fix(3) or [fix(3)])=t.3
+proc dim(t:tuple4d,n:fix(4) or [fix(4)])=t.4
+proc dim(t:tuple5d,n:fix(4) or [fix(4)])=t.4
+proc dim(t:tuple6d,n:fix(4) or [fix(4)])=t.4
+proc dim(t:tuple7d,n:fix(4) or [fix(4)])=t.4
+proc dim(t:tuple5d,n:fix(5) or [fix(5)])=t.5
+proc dim(t:tuple6d,n:fix(5) or [fix(5)])=t.5
+proc dim(t:tuple7d,n:fix(5) or [fix(5)])=t.5
+proc dim(t:tuple6d,n:fix(6) or [fix(6)])=t.6
+proc dim(t:tuple7d,n:fix(6) or [fix(6)])=t.6
+proc dim(t:tuple7d,n:fix(7) or [fix(7)])=t.7
 
 proc indices(x:tuple1d)=[fix(1)]
 proc indices(x:tuple2d)=[fix(1),fix(2)]
@@ -1034,7 +1030,6 @@ proc string(x:tuple4d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++" ]"
 proc string(x:tuple5d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++" ]"
 proc string(x:tuple6d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++", "++x.6++" ]"
 proc string(x:tuple7d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++", "++x.6++", "++x.7++" ]"
-
 
 //  *****************************************************
 //  RANGES AND SEQUENCES
@@ -1446,8 +1441,9 @@ type iterable_dim is grid_slice_dim,cyclic_range,...
 type iterable_grid is tuple(iterable_dim),grid_slice
 proc _shp(x:iterable_dim)=0..size(x)-1
 proc size(x:iterable_dim)->(int)...
-proc element(x:iterable_dim,y)=error_type()check "Cannot index this type with a non-integer index"=>fix(false)
-proc element(x:iterable_dim,y:int)->(any)...
+proc element(x:iterable_dim,y)=error_type()
+       check "Cannot index this type with a non-integer index"=>fix(false)
+proc element(x:iterable_dim,y:int)->(any)... 
 proc element(x:iterable_dim,y:tuple1d)=element(x,y.1)
 proc _shp(x:stretch_dim)=null
 proc _shp(x:null)=x
@@ -1521,6 +1517,129 @@ proc expand(x:grid_slice,y:grid)=map($expand,x,y)
 proc contact(x:grid_slice,y:grid)=map($contract,x,y)
 PM__intrinsic gcd(x:int,y:int)->(int) : "gcd"
 
+//  **************************************
+//  ARRAYS
+//  **************************************
+
+//  Array types
+type array(e,d:shape) is varray(e,d),farray(e,d)
+type varray(e,d:shape) is e^var d,array_template(e,d,fix(true))
+type farray(e,d:shape) is e^let d,e^invar d,e^fix d,array_template(e,d,fix(false))
+type farray(e,d:mshape) is ...,
+    array_slice(e^let any),array_slice(e^var any),array_slice(e^invar any),array_slice(e^fix any)
+
+//  Array operations
+proc _arb(x:any^mshape)=_get_aelem(x,0)
+PM__if_compiling
+proc size(x:any^mshape)=size(#x)
+PM__else
+PM__intrinsic size(x:any^mshape)->(int) : "get_size"
+PM__endif
+
+PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any,v:fix(false))->(=x) : "array"
+PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any,v:fix(true))->(=x) : "var_array"
+PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
+PM__intrinsic<<needs_type>> PM__dim_noinit(x:any,y:any,z:any)->(=x) : "array_noinit"
+proc #%(x:invar any^any)=_array_shape(x <<PM__ignore>>)
+proc #%(x)=_get_shape(x)
+proc _get_shape(x)=#x
+proc #(x:any^any)=_array_shape(x)
+PM__intrinsic _array_shape(x:any^any)->(=x) : "get_dom"
+proc dims(x:any^mshape)=dims(#x)
+PM__intrinsic PM__extractelm(x:any^any)->(=x) : "extractelm"
+proc element(a:any^mshape,t:index)=_get_aelem(a,index(#(a),t))
+proc _set_elem(&a:any^mshape,v,t:index){
+  PM__setaelem(&a,index(#(a),t),v) 
+}
+ 
+proc _make_subref(a:any^mshape,t:index)=_make_subref(a,index(#(a),t))
+PM__intrinsic _make_subref(a:any^mshape,i:int)->(=a) : "make_rf"
+PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
+PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
+
+//  Linear index of tuple mshape (zero base,unit stride)
+proc _indx(g:null,s)=literal(0)
+proc _indx(g:range(int),s)=int(s)
+proc _indx(g:any_int,s)=int(s)
+proc _sz(x:null)=literal(1)
+proc _sz(x:int)=x
+proc _sz(x:range(int))=x._n
+proc _offset(x:mshape)=x._o
+proc _offset(x)=literal(0)
+proc _point2index(g:mshape1d or tuple(int,1),s:any_int)=int(_indx(g.1,s))+_offset(g)
+proc _point2index(g:mshape1d or tuple(int,1),s:tuple1d_of(any_int))=int(_indx(g.1,s.1))+_offset(g)
+proc _point2index(g:mshape2d or tuple(int,2),s:tuple2d_of(any_int))=int(_indx(g.1,s.1)+_sz(g.1)*_indx(g.2,s.2))+_offset(g)
+proc _point2index(g:mshape3d or tuple(int,3),s:tuple3d_of(any_int))=int(_indx(g.1,s.1)+_sz(g.1)*(_indx(g.2,s.2)+_sz(g.2)*_indx(g.3,s.3)))+_offset(g)
+proc _point2index(g:mshape4d or tuple(int,4),s:tuple4d_of(any_int))= int(_indx(g.1,s.1)+_sz(g.1)* (_indx(g.2,s.2)+_sz(g.2)* (_indx(g.3,s.3)+_sz(g.3)* _indx(g.4,s.4))))+_offset(g)
+proc _point2index(g:mshape5d or tuple(int,5),s:tuple5d_of(any_int))= int(_indx(g.1,s.1)+_sz(g.1)* (_indx(g.2,s.2)+_sz(g.2)* (_indx(g.3,s.3)+_sz(g.3)* (_indx(g.4,s.4)+_sz(g.4)* _indx(g.5,s.5)))))+_offset(g)
+proc _point2index(g:mshape6d or tuple(int,6),s:tuple6d_of(any_int))= int(_indx(g.1,s.1)+_sz(g.1)* (_indx(g.2,s.2)+_sz(g.2)* (_indx(g.3,s.3)+_sz(g.3)* (_indx(g.4,s.4)+_sz(g.4)* (_indx(g.5,s.5)+_sz(g.5)* _indx(g.6,s.6))))))+_offset(g)
+proc _point2index(g:mshape7d or tuple(int,7),s:tuple7d_of(any_int))= int(_indx(g.1,s.1)+_sz(g.1)* (_indx(g.2,s.2)+_sz(g.2)* (_indx(g.3,s.3)+_sz(g.3)* (_indx(g.4,s.4)+_sz(g.4)* (_indx(g.5,s.5)+_sz(g.5)* (_indx(g.6,s.6)+_sz(g.6)* (_indx(g.7,s.7))))))))+_offset(g)
+
+proc _index2point(i:int,s:range(int))=[i+s._lo]
+proc _index2point(i:int,s:int)=[i]
+proc _index2point(i:int,s:tuple(int,1))=[i]
+proc _index2point(i:int,s:tuple(int,2))=[i1,i2] where i1=i-i2*_sz(s.1) where i2=i/_sz(s.1)
+proc _index2point(i:int,s:tuple(int,3))=[i1,i2,i3] where i1=i-j2*_sz(s.1) where i2=j2-i3*_sz(s.2) where i3=j2/_sz(s.2) where j2=i/_sz(s.1)
+proc _index2point(i:int,s:tuple(int,4))=[i1,i2,i3,i4] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-i4*_sz(s.3) where i4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1) 
+proc _index2point(i:int,s:tuple(int,5))=[i1,i2,i3,i4,i5] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-j4*_sz(s.3) where i4=j4-i5*_sz(s.4) where i5=j4/_sz(s.4) where j4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1)  
+proc _index2point(i:int,s:tuple(int,6))=[i1,i2,i3,i4,i5,i6] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-j4*_sz(s.3) where i4=j4-j5*_sz(s.4) where i5=j5-i6*_sz(s.5) where i6=j5/_sz(s.5) where j5=j4/_sz(s.4) where j4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1)  
+proc _index2point(i:int,s:tuple(int,7))=[i1,i2,i3,i4,i5,i6,i7] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-j4*_sz(s.3) where i4=j4-j5*_sz(s.4) where i5=j5-j6*_sz(s.5) where i6=j6-i7*_sz(s.6) where i7=j6/_sz(s.6) where j6=j5/_sz(s.5) where j5=j4/_sz(s.4) where j4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1)
+
+
+/*
+//  Numeric array operations
+proc -(x:num^any)={
+  -xx:xx in x
+}
+proc +(x:num^any,y:num)={
+  xx+y:xx in x
+}
+proc -(x:num^any,y:num)={
+  xx-y:xx in x
+}
+proc *(x:num^any,y:num)={
+  xx*y:xx in x
+}
+proc *(x:num,y:num^any)={
+  x*yy:yy in y
+}
+proc /(x:num^any,y:num)={
+  xx/y:xx in x
+}
+*/
+
+//  *****************************************
+//  ARRAY TEMPLATES
+//  *****************************************
+//  Array templates
+type array_template(a,d:mshape or dshape,v:fix(bool)) is rec {_a:a,_d:d,_s:int,_v:v}
+proc array(a:any,s:dshape)=rec array_template {
+  _a=a,_d=s,_s=s._size,_v=fix(false)
+}
+proc array(a:any,s:mshape(tuple(range(int))))=rec array_template {
+  _a=a,_d=s,_s=size(s),_v=fix(false)
+}
+proc array(a:any,s:tuple(range(any_int)))=array(a,shape(s))
+proc varray(a:any,s:mshape or dshape)=rec array_template {
+  _a=a,_d=s,_s=size(s),_v=fix(true)
+}
+proc varray(a:any,s:tuple(range(any_int)))=varray(a,shape(s))
+proc _zero(x)=0
+proc varray(a:any,s:tuple(null))=varray(a,shape(map($_zero,s)))
+//  Treat a template as if it were an array
+proc _arb(a:array_template)=a._a
+proc #(a:array_template(,mshape,))=a._d
+proc dims(a:array_template(,mshape,))=dims(a._d)
+proc size(a:array_template)=a._s
+proc redim(a:array_template,d:mshape)= rec array_template {
+_a=a,_d=d,_s=size(d),_v=a._v} check "New dshape does not have same size in redim"=> size(d)==a._s 
+proc element(a:array_template,...:subs)=a._a
+//  Array creation from template
+
+proc PM__dup(a:array_template(,shape,))=_array(PM__dup(a._a),a._d,int(a._s),a._v)
+proc PM__dup(a:array_template(,shape,fix(true)))=_array(PM__dup(a._a),PM__dup(a._d),PM__dup(int(a._s)),a._v)
+proc PM__do_dim(a:any,d:mshape)=_array(a,d,size(d),fix(false))
+
 
 // ***************************************************
 // LOOPS AND PARALLEL STATEMENTS
@@ -1529,11 +1648,10 @@ PM__intrinsic gcd(x:int,y:int)->(int) : "gcd"
 proc PM__for_stmt'(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<inline>> {
     PM__for shape {
       here_in_tile=PM__generate(shape,shape) 
-      old_dump(here_in_tile)
       PM__context PM__topology,PM__outer,PM__region,PM__schedule,here_in_tile,PM__mask {
         var inouts=PM__import(PM__inouts)
         var inout_a=PM__get_elem(PM__inout_a,here_in_tile)
-       PM__block_proc.'(&inouts,
+        PM__block_proc.'(&inouts,
            PM__import(PM__ins),
            &inout_a,
            PM__get_elem(PM__in_a,here_in_tile),

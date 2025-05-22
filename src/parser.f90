@@ -2256,7 +2256,9 @@ contains
     integer:: n,sym
     iserr=.true.
     call scan(parser)
-    n=0
+    n=1
+    call push_sym_val(parser,sym_topology)
+    call make_node(parser,sym_name,1)
     sym=sym_list
     do
        if(parser%sym==sym_dotdotdot) then
@@ -2272,7 +2274,7 @@ contains
        if(parser%sym/=sym_comma) exit
        call scan(parser)
     enddo
-    if(n>7) then
+    if(n>8) then
        call parse_error(parser,'Cannot have more than seven dimensions in tuple or subscript')
     endif
     call make_node(parser,sym,n)
@@ -4018,6 +4020,11 @@ contains
     case(sym_any)
        call scan(parser)
        call make_node(parser,sym_any,0)
+    case(sym_number)
+       call push_num_val(parser,parser%lexval)
+       call make_node(parser,sym_number,1)
+       call scan(parser)
+       call make_node(parser,sym_literal,1)
     case(sym_fix,sym_literal)
        call scan(parser)
        if(sym==sym_literal.and.parser%sym/=sym_open) then
@@ -4664,7 +4671,7 @@ contains
     thispar=-1
     open=sym_open
     close=sym_close
-
+    
     ! Line and position of procedure start
     call get_sym_pos(parser,line,pos)
     call scan(parser)
@@ -4713,7 +4720,7 @@ contains
        dot_type=pm_null_obj
        
     endif
-       
+    
     ! Communicating proc flags
     if(.not.isref) then
        if(parser%sym==sym_pct) then
@@ -4756,11 +4763,11 @@ contains
     ! Return types ->(typelist)
     if(parser%sym==sym_arrow) then
        call scan(parser)
-       if(expect(parser,sym_open)) return
+       if(expect(parser,sym_open)) goto 999
        if(parser%sym==sym_close) then
           nret=0
        else
-          if(moded_typ_list(parser,iscomm,nret)) return
+          if(moded_typ_list(parser,iscomm,nret)) goto 999
           if(expect(parser,sym_close)) return
        endif
        call make_node(parser,sym_list,nret)
@@ -4773,7 +4780,7 @@ contains
     endif
 
     if(parser%sym==sym_yield) then
-       if(yield_clause()) return
+       if(yield_clause()) goto 999
     endif
 
     if(iscomm) then
@@ -4816,6 +4823,7 @@ contains
        flags=ior(flags,proc_is_open)
     endif
 
+    
     ! = expr or  [ check expr ] block
     if(parser%sym==sym_assign.and.nret==-1) then
 
@@ -4898,14 +4906,13 @@ contains
        endif
     endif
     call push_null_val(parser) ! Code tree
-
-
-    if(parser%error_count>scount) then
+    
+    if(parser%error_count>0) then
        parser%vtop=sbase
+       if(parser%error_count==scount) iserr=.false.
        goto 999
     endif
 
-    if(parser%error_count>0) goto 999
 
     ! Assign flags to proc_flags slot
     parser%vstack(parser%vtop-&
@@ -4951,6 +4958,14 @@ contains
       integer:: m,n,i,k,base,first
       type(pm_ptr):: params,amps
       iserr=.true.
+      
+      if(parser%error_count>0) then
+         call scan(parser)
+         if(proctyp(parser,yield=.true.)) return
+         iserr=.false.
+         return
+      endif
+      
       if(iand(flags,proccall_is_ref)/=0) then
          call parse_error(parser,'Cannot have a "yield" clause in a method')
       elseif(iand(flags,proccall_is_comm)/=0) then

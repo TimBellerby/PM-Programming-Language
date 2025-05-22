@@ -3866,7 +3866,7 @@ contains
     logical:: is_present,also_present,type_present
     logical:: dotdotdot_present,multiple_modules,twice,has_constraints
     integer:: name,nargs,sym,i,base,parbase,ibase,npars,idepth
-    integer:: new_type
+    integer:: new_type,gatebase
 
     ! Type name and arguments
     nargs=node_numargs(node)-1
@@ -4068,9 +4068,10 @@ contains
              also_present=.true.
              also_dec=dec
              pargs=node_get(dec,type_params)
+             gatebase=-1
              call make_type_vars(coder,name,&
                   pnode,node,pargs,base-nargs,nargs,&
-                  parbase,npars)
+                  parbase,npars,gatebase=gatebase)
              inc=node_get(dec,type_includes)
              if(.not.pm_fast_isnull(inc)) then
                 do i=1,node_numargs(inc)
@@ -4079,6 +4080,9 @@ contains
                       call check_constraints(top_word(coder),dec)
                    endif
                 enddo
+             endif
+             if(gatebase>=0) then
+                call make_type(coder,coder%wtop-gatebase)
              endif
              call pop_type_vars(coder)
           else
@@ -4282,15 +4286,16 @@ contains
   ! If parbase is not present, leave parameters on wstack
   !===========================================================
   subroutine make_type_vars(coder,parent,pnode,callnode,pnames,argbase,nargs,&
-       parbase,nbasepars)
+       parbase,nbasepars,gatebase)
     type(code_state),intent(inout):: coder
     integer,intent(in):: parent
     type(pm_ptr),intent(in):: pnode,callnode,pnames
     integer,intent(in):: argbase,nargs
     integer,intent(in),optional:: parbase
     integer,intent(in),optional:: nbasepars
+    integer,intent(out),optional:: gatebase
     integer:: k,base,wbase,npars
-    integer:: vtyp,partyp,name,pname
+    integer:: vtyp,partyp,vvtyp,name,pname
     logical:: check_against_base
     check_against_base=.false.
     name=node_num_arg(callnode,node_numargs(callnode))
@@ -4322,7 +4327,7 @@ contains
     coder%top=coder%top+1
     coder%stack(coder%top)=typevar_start
     coder%var(coder%top)=pm_null_obj
- 
+
     base=coder%top
     wbase=coder%wtop
     if(.not.present(parbase)) then
@@ -4359,7 +4364,19 @@ contains
              call push_word(coder,min(vtyp,partyp))
              call push_word(coder,max(vtyp,partyp))
              call make_type(coder,4)
+             vvtyp=vtyp
              vtyp=pop_word(coder)
+
+             ! Push information on vstack to make gated type
+             ! which checks for null intersections between
+             ! arguments and parameters
+             if(gatebase<0) then
+                gatebase=coder%wtop
+                call push_word(coder,pm_type_new_gated)
+                call push_word(coder,0)
+             endif
+             call push_word(coder,vvtyp)
+             call push_word(coder,partyp)
           endif
           
        else

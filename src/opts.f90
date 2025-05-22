@@ -41,6 +41,7 @@ module pm_options
      logical:: old_files
      integer:: proc_list
      logical:: show_variants
+     logical:: show_details
      logical:: check_alias
      logical:: show_all_ref
      logical:: print_immediate
@@ -86,6 +87,7 @@ contains
     pm_opts%see_all_procs=.false.
     pm_opts%proc_list=11
     pm_opts%show_variants=.false.
+    pm_opts%show_details=.false.
     pm_opts%check_alias=.not.pm_is_compiling
     pm_opts%show_all_ref=.false.
     pm_opts%print_immediate=.false.
@@ -166,6 +168,7 @@ contains
        write(*,*) '  -fshow-elems     Show structure/record elements in error messages.'
        write(*,*) '  -fshow-members   Show members of user defined types in error messages'
        write(*,*) '  -fshow-variants  Show all variants for proc types'
+       write(*,*) '  -fshow-details   Show extra details of types'
        write(*,*) '  -fshow-hidden    Show hidden procedure parameters'
        write(*,*) '  -fsee-all-procs  List all alternative procedures in error messages'
        write(*,*) '  -fproc-list=n    Maximum number of procs to list if see-all-procs not invoked'
@@ -291,6 +294,8 @@ contains
              pm_opts%show_members=.true.
 	  elseif(arg=='-fshow-variants') then
              pm_opts%show_variants=.true.
+          elseif(arg=='-fshow-details') then
+             pm_opts%show_details=.true.
           elseif(arg=='-fsee-all-procs') then
              pm_opts%see_all_procs=.true.
           elseif(arg=='-falias-check') then

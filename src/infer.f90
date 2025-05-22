@@ -3817,7 +3817,7 @@ contains
     type(pm_ptr),intent(in):: node
     integer:: name
     integer:: istart,n,tno,nret,i
-    character(len=512):: str,str2,buf1,buf2
+    character(len=1024):: str,str2,buf1,buf2
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
     name=cnode_get_num(node,pr_name)
