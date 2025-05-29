@@ -949,7 +949,6 @@ contains
     pos=parser%n
   end subroutine get_pos
    
-  
   !======================================================
   ! Next token must be specific token or error raised
   ! (moves past the token)
@@ -1891,10 +1890,11 @@ contains
           call make_node(parser,sym,0)
           call scan(parser)
        endif
-    case(sym_true,sym_false) 
+    case(sym_true,sym_false,sym_underscore) 
        call make_node(parser,sym,0)
        call scan(parser)
        goto 20
+  
        ! ** These are for internal use by the compiler only **
     case(sym_caret)
        call scan(parser)
@@ -3398,13 +3398,15 @@ contains
   !======================================================
   ! List of statements
   !======================================================
-  recursive subroutine stmt_list(parser,single)
+  recursive subroutine stmt_list(parser,single,num_to_include)
     type(parse_state),intent(inout):: parser
     logical,intent(in),optional:: single
+    integer,intent(in),optional:: num_to_include
     logical:: ok
     integer:: i,n,m,k,name,sym,label,line,pos
     type(pm_ptr):: p
     k=0
+    if(present(num_to_include)) k=num_to_include
     do
        sym=parser%sym
        select case(sym)
@@ -5362,7 +5364,10 @@ contains
     if(proc_sig(parser,iand(flags,proccall_is_comm)/=0)) return
 
     if(expect(parser,sym_colon)) goto 999
-    if(expect(parser,sym_string)) goto 999
+    if(parser%sym/=sym_string) then
+       call parse_error(parser,'Expected string operation name in "PM__intrinsic"')
+       goto 999
+    endif
     p=pm_dict_lookup(parser%context,parser%op_names,&
          pm_type_val(parser%context,&
          parser%lexval))
@@ -5371,6 +5376,7 @@ contains
             pm_value_as_string(parser%context,pm_type_val(parser%context,parser%lexval)))
        goto 999
     endif
+    call scan(parser)
     opcode=p%offset
     
     if(parser%sym==sym_open) then
@@ -5892,7 +5898,7 @@ contains
     integer:: dt
     type(pm_ptr):: old,p
     integer:: m,sym,name,name2,base,top,kind,line,pos
-    integer:: serror
+    integer:: serror,num_tests
     logical:: ok
     if(.not.(parser%modl==parser%sysmodl)) then
        call push_sym_val(parser,sym_pm_system)
@@ -5916,6 +5922,7 @@ contains
           call skip_past_error(parser,.false.)
        endif
     enddo
+    num_tests=0
     do
        select case(parser%sym)
        case(sym_proc)
@@ -5926,6 +5933,7 @@ contains
           if(param_decl(parser)) goto 999
        case(sym_test)
           if(test_stmt(parser)) goto 999
+          num_tests=num_tests+1
        case(sym_pm_if_compiling)
           call scan(parser)
           if(.not.pm_is_compiling) then
@@ -5958,10 +5966,13 @@ contains
        call skip_past_error(parser,.false.)
     enddo
     if(is_root_module) then
-       call stmt_list(parser)
-    elseif(parser%sym/=sym_eof) then
+       call stmt_list(parser,num_to_include=num_tests)
+    else
+       if(parser%sym/=sym_eof) then
           call parse_error(parser,&
                'Library module cannot contain non-"debug" statement')
+       end if
+       call push_null_val(parser)
     end if
     if(parser%sym/=sym_eof) then
        call parse_error(parser,'Expected end of module')

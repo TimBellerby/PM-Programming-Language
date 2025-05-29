@@ -972,7 +972,7 @@ module pm_symbol
   data sym_names(sym_dims)             /'dims'/
   data sym_names(sym_make_dollar)      /'PM__makeidxdim'/
   data sym_names(sym_make_dtuple)      /'PM__makeidx'/
-  data sym_names(sym_stretch_dim)      /'PM__strdim'/
+  data sym_names(sym_stretch_dim)      /'PM__underscore'/
   data sym_names(sym_pm_nhd)           /'PM__nhd'/
   data sym_names(sym_envelope)         /'envelope'/
   data sym_names(sym_set_nhd)          /'PM__set_nhd'/

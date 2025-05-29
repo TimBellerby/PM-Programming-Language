@@ -617,7 +617,7 @@ contains
     integer,intent(in):: atype,ptype
     integer:: rtype,mode,atype1
     integer,dimension(1):: key
-    integer:: k,t1,n
+    integer:: k,t1,n,opcode
     type(pm_ptr):: tv,v
     logical:: isstatic,iscomm
 
@@ -638,6 +638,13 @@ contains
        endif
     endif
 
+    opcode=cnode_get_num(procnode,bi_opcode)
+
+    if(opcode==op_error_type) then
+       rtype=error_type
+       return
+    endif
+    
     if(cnode_flags_set(procnode,pr_flags,proccall_is_comm)) then
        atype1=pm_type_arg(coder%context,atype,1+num_comm_args)
     else
@@ -646,7 +653,7 @@ contains
     endif
 
     ! special handling of return types for some operations
-    select case(cnode_get_num(procnode,bi_opcode))
+    select case(opcode)
     case(first_fold:last_fold)
        rtype=fold(coder,procnode,atype,rtype)
        call code_num(coder,sp_sig_setval)
@@ -1263,20 +1270,28 @@ contains
           endif
           call inf_cblock(coder,cnode_arg(args,4))
           tno=arg_type(3)
-          if(pm_type_strip_to_basic(coder%context,arg_type(1))/=pm_string_type&
+          if(tno==coder%false_fix.or.tno==coder%false_literal) then
+             tno2=pm_type_strip_mode(coder%context,arg_type(1),mode)
+             t=pm_type_vect(coder%context,tno2)
+             if(pm_tv_kind(t)==pm_type_is_literal_value) then
+                if(pm_tv_arg(t,1)==pm_string_type) then
+                   call pm_strval(pm_type_val(coder%context,tno2),str)
+                   call inf_error_with_trace(coder,callnode,str(1:len_trim(str)))
+                else
+                   call inf_error_with_trace(coder,callnode,&
+                        'Check condition will always fail and check message is not a string') 
+                endif
+             else
+                write(*,*) '@',pm_tv_kind(t),tno2
+                call inf_error_with_trace(coder,callnode,&
+                     'Check condition will always fail') 
+             endif
+          elseif(pm_type_strip_to_basic(coder%context,arg_type(1))/=pm_string_type&
                .and.arg_type(1)/=error_type) then
              call inf_error_with_trace(coder,cnode_arg(args,1),&
                   'Check message is not a string, got:'//&
                   trim(pm_type_as_string(coder%context,arg_type(1))))
-          elseif(tno==coder%false_fix) then
-             if(cnode_get_kind(cnode_arg(args,1))==cnode_is_const) then
-                call pm_strval(cnode_arg(cnode_arg(args,1),1),str)
-                call inf_error_with_trace(coder,callnode,str(1:len_trim(str)))
-             else
-                call inf_error_with_trace(coder,callnode,&
-                     'Check condition will always fail') 
-             endif
-          elseif(tno/=coder%true_fix) then
+          elseif(tno/=coder%true_fix.and.tno/=coder%true_literal) then
              call check_logical(3,.false.)
              coder%stack(coder%base-2)=ior(coder%stack(coder%base-2),proc_is_impure)
           endif

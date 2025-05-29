@@ -729,7 +729,8 @@ module pm_vmdefs
   integer,parameter:: op_type_include_fold = -30
   integer,parameter:: first_fold=-30
   integer,parameter:: op_clone_var = -31
-  integer,parameter:: min_op=op_clone_var
+  integer,parameter:: op_error_type = -32
+  integer,parameter:: min_op=op_error_type
  
   integer,dimension(0:num_op):: op_flags
   integer,parameter:: op_is_call=1
@@ -2112,6 +2113,7 @@ contains
     op_names(op_num_elems_fold)='num_elems_fold'
     op_names(op_type_include_fold)='type_include_fold'
     op_names(op_clone_var)='clone_var'
+    op_names(op_error_type)='error_type'
      
 !!$    do i=op_call,op_comm_loop_par
 !!$       if(op_names(i)=='??')then

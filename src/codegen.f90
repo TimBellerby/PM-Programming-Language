@@ -2192,18 +2192,15 @@ contains
           call make_literal_const(coder,cblock,p,node_num_arg(mess,1))
           call code_null(coder)
        else
-          call make_sys_var(coder,cblock,p,sym_check,var_is_shadowed)
           cblock2=make_cblock(coder,cblock,p,sym_check)
           call trav_expr(coder,cblock2,p,mess)
-          call init_var(coder,cblock2,p,&
-               coder%vstack(coder%vtop-2))
           call close_cblock(coder,cblock2)
+          call swap_code(coder)
        endif
-       call make_sys_var(coder,cblock,p,sym_query,var_is_shadowed)
        cblock3=make_cblock(coder,cblock,p,sym_check)
        call trav_expr(coder,cblock3,p,node_arg(p,i+1))
-       call init_var(coder,cblock3,p,coder%vstack(coder%vtop-2))
        call close_cblock(coder,cblock3)
+       call swap_code(coder)
        call make_sp_call(coder,cblock,p,sym_check,4,0)
     end do
   contains
@@ -2732,6 +2729,17 @@ contains
     else
        var=find_var_and_entry(coder,name,var_index)
        if(pm_fast_isnull(var)) then
+          if(.not.islhs) then
+             var=find_param(coder,cblock,pnode,name)
+             if(pm_fast_isnull(var)) then
+                call code_error(coder,pnode,&
+                     'Variable, constant or parameter has not been defined: ',name)
+                call make_temp_var(coder,cblock,pnode)
+                return
+             endif
+             call code_val(coder,var)
+             return
+          endif
           call code_error(coder,pnode,&
                'Variable or constant has not been defined: ',name)
           call make_temp_var(coder,cblock,pnode)
@@ -3345,7 +3353,7 @@ contains
           call code_val(coder,p)
        endif
     else
-       call trav_ref_to_var(coder,cblock,p,name,.false.)
+       call trav_ref_to_var(coder,cblock,node,name,.false.)
     endif
 
   contains
