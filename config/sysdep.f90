@@ -54,10 +54,13 @@ module pm_sysdep
   character(len=4),parameter:: pm_file_suffix='.pmm'
 
   ! Environment variable holding location of library files
-  character(len=15),parameter:: pm_env_var='PMMLIB'
+  character(len=12),parameter:: pm_env_var='PM_LANG_LIBS'
 
   ! Directory separator (one character only)
   character(len=1),parameter:: pm_file_dirsep='/' 
+
+  ! Path separator (one character only)
+  character(len=1),parameter:: pm_lib_path_sep=':' 
   
   ! Maximum size of file name
   integer,parameter:: pm_max_filename_size=4096
@@ -65,6 +68,9 @@ module pm_sysdep
   ! Character value used to signal end of file
   character(len=1),parameter:: pm_eof_char=achar(0)
 
+  ! Default library path
+  character(len=22):: pm_default_lib_path='/usr/share/pm-lang/lib'
+  logical:: pm_default_lib_path_set=.true.
 
   ! ************ Compiler defaults ****************
   integer,parameter:: pm_default_ftn_dims=15
@@ -180,16 +186,42 @@ module pm_sysdep
 
 contains
 
-  function pm_argc() result(n)
-    integer:: n
-    n=iargc()
-  end function pm_argc
+   function pm_argc() result(n)
+     integer:: n
+     n=command_argument_count()
+   end function pm_argc
+  
+   subroutine pm_getarg(n,str)
+     integer,intent(in)::n
+     character(len=*):: str
+     call get_command_argument(n,str)
+   end subroutine pm_getarg
+    
+  subroutine pm_get_env_var(varname,str,ok)
+    character(len=*):: varname,str
+    logical:: ok
+    integer:: status
+    call get_environment_variable(varname,str,status=status)
+    ok=status==0
+  end subroutine pm_get_env_var
 
-  subroutine pm_getarg(n,str)
-    integer,intent(in)::n
-    character(len=*):: str
-    call getarg(n,str)
-  end subroutine pm_getarg
+!!$  function pm_argc() result(n)
+!!$    integer:: n
+!!$    n=iargc()
+!!$  end function pm_argc
+!!$
+!!$  subroutine pm_getarg(n,str)
+!!$    integer,intent(in)::n
+!!$    character(len=*):: str
+!!$    call getarg(n,str)
+!!$  end subroutine pm_getarg
+
+!!$   subroutine pm_get_env_var(varname,str,ok)
+!!$    character(len=*):: varname,str
+!!$    logical:: ok
+!!$    call getenv(varname,str)
+!!$    ok=str/=' '
+!!$  end subroutine pm_get_env_var
 
   function pm_isatty(l) result(ok)
     integer,intent(in)::l
@@ -204,29 +236,59 @@ contains
  !   ok=pm_colour_messages
  ! end function pm_isatty
 
-  subroutine pm_module_filename(inbuffer,buffer)
-   character(len=*):: inbuffer,buffer
-   integer:: n,m
-   character(len=pm_max_filename_size):: libpath
-   buffer=inbuffer
-   n=len_trim(buffer)
-   if(n>len(pm_file_suffix)) then
-     if(buffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) return
-   endif
-   if(buffer(1:4)=='lib.') then
-      call get_environment_variable(pm_env_var,libpath)
-      m=len_trim(libpath)
-      if(m>0) then
-         buffer(m+1:m+n)=buffer(1:n)
-         buffer(1:m)=libpath
-      endif
-   endif
-   do m=1,n
-      if(buffer(m:m)=='.') then
-         buffer(m:m)=pm_file_dirsep
-      endif
-   enddo
-   buffer(n+1:n+len(pm_file_suffix))=pm_file_suffix
- end subroutine pm_module_filename
+  subroutine pm_module_filename(inbuffer,buffer,lib_path_set,lib_path)
+    character(len=*),intent(in):: inbuffer,lib_path
+    character(len=*),intent(out):: buffer
+    logical,intent(in):: lib_path_set
+    integer:: n,m,i,tot,pathlen
+    logical:: ok
+    n=len_trim(inbuffer)
+    if(n>len(pm_file_suffix)) then
+       if(inbuffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) return
+    endif
+    if(inbuffer(1:4)=='lib.'.and.lib_path_set) then
+       i=1
+       do
+          m=index(lib_path(i:),pm_lib_path_sep)
+!!$          write(*,*) 'm=',m,trim(lib_path(i:m-1))
+          if(m==0) then
+             m=len_trim(lib_path)
+          else
+             m=m+i-2
+          endif
+          if(m>=i) then
+             pathlen=m-i+1
+             tot=pathlen+n-3
+             if(tot+len(pm_file_suffix)>len(buffer)) return
+             buffer(1:pathlen)=lib_path(i:m)
+             do i=4,n
+                if(inbuffer(i:i)=='.') then
+                   buffer(i+pathlen-3:i+pathlen-3)=pm_file_dirsep
+                else
+                   buffer(i+pathlen-3:i+pathlen-3)=inbuffer(i:i)
+                endif
+             enddo
+             buffer(tot+1:)=pm_file_suffix
+!!$             write(*,*) 'TRY:',trim(buffer)
+             inquire(file=trim(buffer),exist=ok)
+             if(ok) return
+          else
+             exit
+          endif
+          if(m+2>len(lib_path)) exit
+          i=m+2
+       end do
+    endif
+    do m=1,n
+       if(inbuffer(m:m)=='.') then
+          buffer(m:m)=pm_file_dirsep
+       else
+          buffer(m:m)=inbuffer(m:m)
+       endif
+    end do
+    if(n+len(pm_file_suffix)<=len(buffer)) then 
+       buffer(n+1:)=pm_file_suffix
+    endif
+  end subroutine pm_module_filename
   
 end module pm_sysdep
