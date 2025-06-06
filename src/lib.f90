@@ -103,7 +103,7 @@ contains
    !if(.not.pm_main_process) call pm_panic('pm_get_source_line - not main process')
    iserr=.true.
    if(modl_name==sym_pm_system) then
-      call pm_module_filename('lib.sys.pm',buffer)
+      call pm_module_filename('lib.sys.pm',buffer,pm_opts%lib_path_set,pm_opts%lib_path)
       open(unit=3,file=buffer,status='OLD',err=20)
       do i=1,lineno
          read(3,'(A1024)',err=20,end=20) buffer
@@ -111,7 +111,7 @@ contains
       close(3)
    else
       call pm_module_filename(trim(pm_name_as_string(context,&
-           modl_name)),buffer)
+           modl_name)),buffer,pm_opts%lib_path_set,pm_opts%lib_path)
       open(unit=3,file=buffer,status='OLD',err=20)
       do i=1,lineno
          read(3,'(A1024)',err=20,end=20) buffer

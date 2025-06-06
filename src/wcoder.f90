@@ -1347,7 +1347,8 @@ contains
              new_ve=alloc_var(wcd,pm_ve_type)
              call wc_call(wcd,callnode,op_andnot_ve,0,3,1,ve)
              call wc(wcd,-new_ve)
-             call wc_arg(wcd,cnode_arg(args,3),.false.,rv,ve)
+             ! Use arg_slot here as this is a single-use variable we are using later
+             call wc(wcd,arg_slot(wcd,cnode_arg(args,3)))
              break=wcode_cblock(wcd,cnode_arg(args,2),rv,new_ve)
              call release_var(wcd,new_ve)
              if(break) call wcode_error(wcd,callnode,&

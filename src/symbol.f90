@@ -341,9 +341,10 @@ module pm_symbol
   integer,parameter:: sym_dot_call = node0 + 50
   integer,parameter:: sym_key = node0 + 51
   integer,parameter:: sym_reference = node0 + 52
+  integer,parameter:: sym_repl_line = node0 + 53
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 53
+  integer,parameter:: hook = node0 + 54
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -409,7 +410,8 @@ module pm_symbol
   integer,parameter:: sym_check_task = hook + 62
   integer,parameter:: sym_init_var = hook + 63
   integer,parameter:: sym_init_const = hook + 64
-  integer,parameter:: hook1 = hook + 64
+  integer,parameter:: sym_print = hook + 65
+  integer,parameter:: hook1 = hook + 65
   
   integer,parameter:: sym_d1= hook1 + 1
   integer,parameter:: sym_d2= hook1 + 2
@@ -816,6 +818,7 @@ module pm_symbol
   data sym_names(sym_dot_call)         /'<dot-call>'/
   data sym_names(sym_key)              /'<key>'/
   data sym_names(sym_reference)        /'<reference>'/
+  data sym_names(sym_repl_line)        /'<repl-line>'/
   
   ! Misc. symbols referenced by compiler
   
@@ -886,6 +889,7 @@ module pm_symbol
   data sym_names(sym_check_task)       /'PM__check_task'/
   data sym_names(sym_init_var)         /'PM__init_var'/
   data sym_names(sym_init_const)       /'PM__init_const'/
+  data sym_names(sym_print)            /'print'/
   
   data sym_names(sym_d1)               /'PM__d1'/
   data sym_names(sym_d2)               /'PM__d2'/

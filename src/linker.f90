@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2023
+! Copyright (c) Tim Bellerby, 2025
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,8 @@ module pm_linker
   implicit none
 
   integer,parameter:: max_link_errors=20
-
+  logical,parameter:: debug_linker=.false.
+  
 contains
 
   !=================================================
@@ -41,53 +42,60 @@ contains
   ! modules
   !=================================================
 
-  ! Process all include statements
+  ! Process all 'use' statements in all modules
   subroutine link_includes(context,nerror,modl_dict)
     type(pm_context),pointer:: context
     integer,intent(inout):: nerror
-    type(pm_ptr):: modl_dict
-    type(pm_ptr),target:: modls,modl,dict
-    type(pm_ptr),target:: incls,node,imodl
-    type(pm_ptr)::p
-    type(pm_reg),pointer:: reg
-    integer:: i,j
-    character(len=100):: str
-    reg=>pm_register(context,'link includes',modls,modl,&
-         dict,incls,node,imodl)
+    type(pm_ptr),intent(in):: modl_dict
+    type(pm_ptr):: modls,modl
+    integer:: j
     modls=pm_dict_vals(context,modl_dict)
     ! Loop through all loaded modules
     do j=0,pm_dict_size(context,modl_dict)-1
        modl=modls%data%ptr(modls%offset+j)
-       dict=modl%data%ptr(modl%offset+modl_include)
-       incls=pm_dict_vals(context,dict)
-       ! Loop through include definitions for given module
-       do i=0,pm_dict_size(context,dict)-1
-          node=incls%data%ptr(incls%offset+i)
-          if(pm_debug_level>5) then
-             call pm_name_string(context,&
-                  int(node%data%ptr(node%offset+node_args)%offset),str)
-             write(*,*) 'including',trim(str)
-             p=pm_dict_key(context,dict,int(i+1,pm_ln))
-             write(*,*) '..',trim(pm_name_as_string(context,int(p%offset)))
-          endif
-          imodl=node%data%ptr(node%offset+node_args+1)
-          if(modl==imodl) then
-             call link_error(context,nerror,node,'Module cannot include itself')
-          endif
-          if(node_sym(node)==sym_use) then
-             call link_include(context,nerror,node,modl,imodl)
-          else
-             call link_include_mod(context,nerror,node,modl,imodl)
-          endif
-          if(pm_debug_level>5) then
-             write(*,*) '... included ',trim(str)
-          endif
-       enddo
+       call link_includes_for_module(context,nerror,modl)
     enddo
-    call pm_delete_register(context,reg)
   end subroutine link_includes
 
-  ! Process a single unmodified include statement
+  ! Process all 'use' statements in a single module
+  subroutine link_includes_for_module(context,nerror,modl)
+    type(pm_context),pointer:: context
+    integer,intent(inout):: nerror
+    type(pm_ptr),intent(in):: modl
+    type(pm_ptr):: modls,dict
+    type(pm_ptr)::incls,node,imodl
+    type(pm_ptr)::p
+    type(pm_reg),pointer:: reg
+    integer:: i
+    character(len=100):: str
+    dict=modl%data%ptr(modl%offset+modl_include)
+    incls=pm_dict_vals(context,dict)
+    ! Loop through include definitions for given module
+    do i=0,pm_dict_size(context,dict)-1
+       node=incls%data%ptr(incls%offset+i)
+       if(debug_linker) then
+          call pm_name_string(context,&
+               int(node%data%ptr(node%offset+node_args)%offset),str)
+          write(*,*) 'including',trim(str)
+          p=pm_dict_key(context,dict,int(i+1,pm_ln))
+          write(*,*) '..',trim(pm_name_as_string(context,int(p%offset)))
+       endif
+       imodl=node%data%ptr(node%offset+node_args+1)
+       if(modl==imodl) then
+          call link_error(context,nerror,node,'Module cannot include itself')
+       endif
+       if(node_sym(node)==sym_use) then
+          call link_include(context,nerror,node,modl,imodl)
+       else
+          call link_include_mod(context,nerror,node,modl,imodl)
+       endif
+       if(debug_linker) then
+          write(*,*) '... included ',trim(str)
+       endif
+    enddo
+  end subroutine link_includes_for_module
+
+  ! Process a single unmodified 'use' statement
   subroutine link_include(context,nerror,node,modl,imodl)
     type(pm_context),pointer:: context
     integer,intent(inout):: nerror
@@ -106,7 +114,7 @@ contains
     enddo
   end subroutine link_include
 
-  ! Process a modified include statement
+  ! Process a modified 'use' statement
   subroutine link_include_mod(context,nerror,node,modl,imodl)
     type(pm_context),pointer:: context
     integer,intent(inout):: nerror
@@ -142,7 +150,7 @@ contains
     type(pm_ptr),intent(in):: node,modl,elem,imodl,val
     type(pm_ptr),target:: dict,lcl_dict,idict,old,v1,v2
     logical:: changed
-    if(pm_debug_level>2) then
+    if(debug_linker) then
        write(*,*) 'Include elem: ',trim(pm_name_as_string(context,int(elem%offset))),&
             ' to ',trim(pm_name_as_string(context,get_modl_name(modl))),&
             ' from ',trim(pm_name_as_string(context,get_modl_name(modl)))

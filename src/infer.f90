@@ -664,10 +664,11 @@ contains
        if(k/=0) rtype=pm_type_replace_mode(coder%context,rtype,k)
        call code_num(coder,sp_sig_dup)
        goto 10
-    case(op_extractelm)
+    case(op_array_get_elem,op_extractelm)
        rtype=pm_type_arg(coder%context,atype1,1)
     case(op_get_dom)
        rtype=pm_type_arg(coder%context,atype1,2)
+       write(*,*) 'dom',pm_type_as_string(coder%context,atype1)
     case(op_as,op_get_poly_or)
        rtype=pm_type_arg(coder%context,atype,3)
     case(op_import_varg,op_broadcast_val,&
@@ -717,12 +718,13 @@ contains
              rtype=pm_tv_arg(tv,n)
           endif
        endif
-    case(op_make_array,op_pack)
+    case(op_array,op_make_array,op_pack)
        rtype=pm_new_arr_type(coder%context,sym_const,atype1,&
-            pm_type_arg(coder%context,atype,2),int(pm_long))
+            pm_type_arg(coder%context,atype,3),int(pm_long))
+       write(*,*) 'make array',pm_type_as_string(coder%context,atype)
     case(op_var_array)
        rtype=pm_new_arr_type(coder%context,sym_var,atype1,&
-            pm_type_arg(coder%context,atype,2),int(pm_long))
+            pm_type_arg(coder%context,atype,3),int(pm_long))
     case(op_redim)
        tv=pm_type_vect(coder%context,atype1)
        rtype=pm_new_arr_type(coder%context,pm_tv_name(tv),&
@@ -1186,6 +1188,8 @@ contains
           endif
        case(sym_cast)
           ! Arg 3 is type to cast to (-ve if in a conditional context)
+!!$          write(*,*) 'CAST',pm_type_as_string(coder%context,arg_type(2)),&
+!!$               pm_type_as_string(coder%context,arg_type(3))
           tno=arg_type(3)
           if(tno==error_type) then
              call set_arg_to_error_type(1)
@@ -2848,7 +2852,7 @@ contains
     error=.false.
     flags=cnode_get_num(callnode,call_flags)
     if(iand(flags,call_is_fixed)==0) then
-       at2=pm_type_convert(coder%context,pt,at,.true.,ipass>=2,.false.)
+       at2=pm_type_convert(coder%context,pt,at,iand(flags,call_keep_literals)==0,ipass>=2,.false.)
        if(at2>0) at=at2
     endif
     if(pm_type_includes(coder%context,&
@@ -2860,7 +2864,7 @@ contains
        new_at=at
        return
     else
-       at2=pm_type_convert(coder%context,pt,at,.true.,ipass>=2,.false.)
+       at2=pm_type_convert(coder%context,pt,at,iand(flags,call_keep_literals)==0,ipass>=2,.false.)
        if(at2>0) then
           new_at=at2
           return
@@ -3250,7 +3254,8 @@ contains
     endif
     if(.not.ok) then
        call inf_error(coder,node,&
-            'Value cannot be cast to the given type')
+            'Value of type "'//trim(pm_type_as_string(coder%context,tno2))//&
+            '" cannot be cast to type "'//trim(pm_type_as_string(coder%context,tno1))//"'")
        call inf_trace(coder)
     endif
   contains

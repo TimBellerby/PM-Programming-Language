@@ -154,6 +154,7 @@ module pm_ast
   integer,parameter:: call_is_unlabelled =    2**17
   integer,parameter:: call_takes_uninit =     2**18
   integer,parameter:: call_converts_uninit =  2**19
+  integer,parameter:: call_keep_literals =    2**20
   
 contains
 

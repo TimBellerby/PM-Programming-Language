@@ -46,6 +46,8 @@ module pm_options
      logical:: show_all_ref
      logical:: print_immediate
      logical:: show_hidden
+     logical:: lib_path_set
+     character(len=pm_max_filename_size):: lib_path
      
      logical:: out_sysmod
      logical:: out_typelist
@@ -66,6 +68,8 @@ module pm_options
      logical:: ftn_name_params
      logical:: ftn_name_types
      logical:: ftn_name_elems
+
+     logical:: is_repl
 
      character(len=25):: error
      character(len=7):: error_start
@@ -92,6 +96,7 @@ contains
     pm_opts%show_all_ref=.false.
     pm_opts%print_immediate=.false.
     pm_opts%show_hidden=.false.
+    pm_opts%lib_path_set=.false.
     
     pm_opts%out_sysmod=.false.
     pm_opts%out_typelist=.false.
@@ -127,6 +132,14 @@ contains
        pm_opts%error='Error: '
     endif
     pm_opts%colour=colour
+
+    call pm_get_env_var(pm_env_var,pm_opts%lib_path,pm_opts%lib_path_set)
+    if(.not.pm_opts%lib_path_set) then
+       pm_opts%lib_path_set=pm_default_lib_path_set
+       pm_opts%lib_path=pm_default_lib_path
+    endif
+
+    pm_opts%is_repl=.false.
   end subroutine init_opts
 
   subroutine print_usage
@@ -153,6 +166,9 @@ contains
        write(*,*) '  Only the main (program) module must be named - other modules are'
        write(*,*) '  included automatically.'
        write(*,*)
+       write(*,*) '  CONFIGURATION OPTIONS'
+       write(*,*) '  -L<library path> Look for library files in <library path> rather than lib'
+       write(*,*) 
        write(*,*) '  LANGUAGE OPTIONS'
        write(*,*) '  -fno-inline      Do not inline any procedures.'
        write(*,*) '  -fno-check       Do not run "check" or "test" statements.'
@@ -231,7 +247,7 @@ contains
   subroutine pm_get_command_line(context,mname)
     type(pm_context),pointer:: context
     character(len=*),intent(out):: mname
-    character(len=pm_max_filename_size):: arg
+    character(len=pm_max_filename_size+5):: arg
     integer:: i,n
     call init_opts(context)
     n=pm_get_cl_count()
@@ -243,6 +259,9 @@ contains
              write(*,*) 'Not a command line option: ',trim(arg)
              call usage()
           endif
+       elseif(arg(1:2)=='-L') then
+          pm_opts%lib_path_set=.true.
+          pm_opts%lib_path=arg(3:)
        elseif(arg=='-N') then
           pm_opts%error='Error:'
           pm_opts%colour=.false.
@@ -397,6 +416,8 @@ contains
     call pm_get_cl_arg(i,mname)
     if(mname=='--help') then
        call help
+    elseif(mname=='-i') then
+       pm_opts%is_repl=.true.
     elseif(mname(1:1)=='-') then
        call usage()
     endif

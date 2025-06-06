@@ -694,6 +694,9 @@ contains
           call get_lex_scope(coder,node)
           call make_sp_call(coder,cblock,node,sym_pm_foreach,3,0)
           call pop_lex_scope(coder)
+       case(sym_repl_line)
+          call trav_xexpr(coder,cblock,node,node_arg(node,1))
+          call make_sys_call(coder,cblock,node,sym_print,1,0)
        case default
           if(sym>0.and.sym<num_sym) then
              write(*,*) 'SYM=',sym_names(sym)
@@ -3138,7 +3141,7 @@ contains
        call trav_expr(coder,cblock,&
             node,node_arg(node,2))
        call make_sys_call_rtn(coder,cblock,node,&
-            sym,2,1,aflags=call_takes_uninit+call_converts_uninit)
+            sym,2,1,aflags=call_takes_uninit+call_converts_uninit+call_keep_literals)
     case(sym_pm_list)
        call make_temp_var(coder,cblock,node)
        call dup_code(coder)
@@ -3528,7 +3531,7 @@ contains
     call make_const(coder,cblock,node,&
          pm_fast_tinyint(coder%context,tno),int(pm_tiny_int))
     call make_sp_call_rtn(coder,cblock,node,sym_type_val,1,1)
-    call make_sys_call_rtn(coder,cblock,node,sym_as,2,1)
+    call make_sys_call_rtn(coder,cblock,node,sym_as,2,1,aflags=call_keep_literals)
   contains
     include 'ftiny.inc'
   end subroutine make_cast
@@ -7591,7 +7594,7 @@ contains
     character(len=*):: message
     type(pm_ptr),intent(in),optional:: name
     logical,intent(in),optional:: warn
-    character(len=256):: str
+    character(len=2048):: str
     if(pm_main_process) then
        call pm_error_header(coder%context,&
             cnode_get_name(node,cnode_modl_name),&

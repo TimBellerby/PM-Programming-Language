@@ -243,6 +243,26 @@ contains
     endif
   end subroutine dcl_type
 
+  subroutine parse_expr_from_string(parser,line,use_sysmod)
+    type(parse_state),intent(inout):: parser
+    character(len=*),intent(in):: line
+    logical,intent(in):: use_sysmod
+    if(use_sysmod) then
+       call push_sym_val(parser,sym_pm_system)
+       call push_val(parser,parser%sysmodl)
+       call push_null_val(parser)
+       call make_node(parser,sym_use,3)
+       call new_import(parser,sym_pm_system,pop_val(parser))
+    endif
+    call parse_from_string(parser,line)
+    call scan(parser)
+    call xexpr(parser)
+    call make_node(parser,sym_repl_line,1)
+    call make_node(parser,sym_list,1)
+    parser%modl%data%ptr(parser%modl%offset&
+         +modl_stmts)=pop_val(parser)
+  end subroutine parse_expr_from_string
+
   !======================================================
   ! Start parsing PM code from a string
   !======================================================
@@ -5970,7 +5990,7 @@ contains
     else
        if(parser%sym/=sym_eof) then
           call parse_error(parser,&
-               'Library module cannot contain non-"debug" statement')
+               'A library module cannot contain executable statements apart from "test"')
        end if
        call push_null_val(parser)
     end if
@@ -6476,10 +6496,10 @@ contains
     modl=pm_dict_lookup(parser%context,parser%modl_dict,&
          nameval)
     if(pm_fast_isnull(modl)) then
-       if(pm_main_process.and.name/=sym_pm_system) then
+       if(pm_main_process.and.name/=sym_pm_system.and..false.) then
           call pm_name_string(parser%context,&
             int(nameval%offset),str)
-          call pm_module_filename(str,str2)
+          call pm_module_filename(str,str2,pm_opts%lib_path_set,pm_opts%lib_path)
           inquire(file=trim(str2),exist=ok)
           if(.not.ok) then
              call parse_error(parser,'module does not correspond to a source file, need: '//&

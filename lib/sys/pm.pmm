@@ -1,0 +1,1887 @@
+/*
+ PM (Parallel Models) Programming Language
+
+ Released under the MIT License (MIT)
+ Copyright (c) Tim Bellerby, 2025
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE.
+*/
+
+
+PM__intrinsic num_elements(any)->(literal(int)) : "num_elems_fold"
+
+PM__intrinsic mod(literal(int),literal(int))->(literal(int)) : "mod_fold"
+PM__intrinsic ==(literal(int),literal(int))->(literal(bool)) : "eq_fold"
+PM__intrinsic /=(literal(int),literal(int))->(literal(bool)) : "ne_fold"
+PM__intrinsic >=(literal(int),literal(int))->(literal(bool)) : "ge_fold"
+PM__intrinsic >(literal(int),literal(int))->(literal(bool)) : "gt_fold"
+PM__intrinsic +(literal(int),literal(int))->(literal(int)) : "add_fold"
+PM__intrinsic -(literal(int),literal(int))->(literal(int)) : "sub_fold"
+PM__intrinsic *(literal(int),literal(int))->(literal(int)) : "mult_fold"
+PM__intrinsic /(literal(int),literal(int))->(literal(int)) : "divide_fold"
+PM__intrinsic **(literal(int),literal(int))->(literal(int)) : "pow_fold"
+PM__intrinsic max(literal(int),literal(int))->(literal(int)) : "max_fold"
+PM__intrinsic min(literal(int),literal(int))->(literal(int)) : "min_fold"
+PM__intrinsic -(literal(int))->(literal(int)) : "uminus_fold"
+PM__intrinsic string(literal(int))->(literal(string)) : "string_fold"
+PM__intrinsic abs(literal(int))->(literal(int)) : "abs_fold"
+PM__intrinsic ~(literal(int))->(literal(int)) : "bnot_fold"
+PM__intrinsic &(literal(int),literal(int))->(literal(int)) : "band_fold"
+PM__intrinsic |(literal(int),literal(int))->(literal(int)) : "bor_fold"
+PM__intrinsic ~(literal(int),literal(int))->(literal(int)) : "bxor_fold"
+PM__intrinsic shift(literal(int),literal(int))->(literal(int)) : "bshift_fold"
+PM__intrinsic pdiff(literal(int),literal(int))->(literal(int)) : "pdiff_fold"
+PM__intrinsic sign(literal(int),literal(int))->(literal(int)) : "sign_fold"
+PM__intrinsic rem(literal(int),literal(int))->(literal(int)) : "modulo_fold"
+PM__intrinsic and(literal(bool),literal(bool))->(literal(bool)) : "and_fold"
+PM__intrinsic or(literal(bool),literal(bool))->(literal(bool)) : "or_fold"
+PM__intrinsic except(literal(bool),literal(bool))->(literal(bool)) : "except_fold"
+PM__intrinsic ==(literal(bool),literal(bool))->(literal(bool)) : "eq_fold"
+PM__intrinsic /=(literal(bool),literal(bool))->(literal(bool)) : "ne_fold"
+PM__intrinsic ==(literal(string),literal(string))->(literal(bool)) : "eq_fold"
+PM__intrinsic /=(literal(string),literal(string))->(literal(bool)) : "ne_fold"
+PM__intrinsic ==(literal(real),literal(real))->(literal(bool)) : "eq_fold"
+PM__intrinsic /=(literal(real),literal(real))->(literal(bool)) : "ne_fold"
+PM__intrinsic ++(literal(string),literal(string))->(literal(string)) : "concat_fold"
+PM__intrinsic mod(fix(int),fix(int))->(fix(int)) : "mod_fold"
+PM__intrinsic ==(fix(int),fix(int))->(fix(bool)) : "eq_fold"
+PM__intrinsic /=(fix(int),fix(int))->(fix(bool)) : "ne_fold"
+PM__intrinsic >=(fix(int),fix(int))->(fix(bool)) : "ge_fold"
+PM__intrinsic >(fix(int),fix(int))->(fix(bool)) : "gt_fold"
+PM__intrinsic +(fix(int),fix(int))->(fix(int)) : "add_fold"
+PM__intrinsic -(fix(int),fix(int))->(fix(int)) : "sub_fold"
+PM__intrinsic *(fix(int),fix(int))->(fix(int)) : "mult_fold"
+PM__intrinsic /(fix(int),fix(int))->(fix(int)) : "divide_fold"
+PM__intrinsic **(fix(int),fix(int))->(fix(int)) : "pow_fold"
+PM__intrinsic max(fix(int),fix(int))->(fix(int)) : "max_fold"
+PM__intrinsic min(fix(int),fix(int))->(fix(int)) : "min_fold"
+PM__intrinsic -(fix(int))->(fix(int)) : "uminus_fold"
+PM__intrinsic string(fix(int))->(fix(string)) : "string_fold"
+PM__intrinsic abs(fix(int))->(fix(int)) : "abs_fold"
+PM__intrinsic ~(fix(int))->(fix(int)) : "bnot_fold"
+PM__intrinsic &(fix(int),fix(int))->(fix(int)) : "band_fold"
+PM__intrinsic |(fix(int),fix(int))->(fix(int)) : "bor_fold"
+PM__intrinsic ~(fix(int),fix(int))->(fix(int)) : "bxor_fold"
+PM__intrinsic shift(fix(int),fix(int))->(fix(int)) : "bshift_fold"
+PM__intrinsic pdiff(fix(int),fix(int))->(fix(int)) : "pdiff_fold"
+PM__intrinsic sign(fix(int),fix(int))->(fix(int)) : "sign_fold"
+PM__intrinsic rem(fix(int),fix(int))->(fix(int)) : "modulo_fold"
+PM__intrinsic and(fix(bool),fix(bool))->(fix(bool)) : "and_fold"
+PM__intrinsic or(fix(bool),fix(bool))->(fix(bool)) : "or_fold"
+PM__intrinsic except(fix(bool),fix(bool))->(fix(bool)) : "except_fold"
+PM__intrinsic ==(fix(bool),fix(bool))->(fix(bool)) : "eq_fold"
+PM__intrinsic /=(fix(bool),fix(bool))->(fix(bool)) : "ne_fold"
+PM__intrinsic ==(fix(string),fix(string))->(fix(bool)) : "eq_fold"
+PM__intrinsic /=(fix(string),fix(string))->(fix(bool)) : "ne_fold"
+PM__intrinsic ==(fix(real),fix(real))->(fix(bool)) : "eq_fold"
+PM__intrinsic /=(fix(real),fix(real))->(fix(bool)) : "ne_fold"
+PM__intrinsic ++(fix(string),fix(string))->(fix(string)) : "concat_fold"
+
+//  **************************************
+//   BASIC TYPES
+//  **************************************
+
+//  String type
+PM__intrinsic<<is_impure>> print(string): "print"
+
+proc print(x) {
+  print(string(x)) 
+}
+  
+PM__intrinsic<<is_impure>> print_all(string): "print"(1)
+
+proc print_all(x) {
+  print_all(string(x)) 
+}
+ 
+PM__intrinsic ++(string,string)->(string) : "concat"
+
+proc ++(x:string,y)=$++.(x,string(y))
+proc ++(x,y)=$++.(string(x),string(y))
+proc string(x:string)=x
+proc string(x:null)="null"
+proc fmt(x,y)=x:compile_error( """fmt"" operator not yet implmented")
+
+//  sint type
+PM__intrinsic PM__assign_var(&sint,sint): "assign_i"
+PM__intrinsic mod(sint,sint)->(sint) : "mod_i"
+PM__intrinsic ==(sint,sint)->(bool) : "eq_i"
+PM__intrinsic /=(sint,sint)->(bool) : "ne_i"
+PM__intrinsic >=(sint,sint)->(bool) : "ge_i"
+PM__intrinsic >(sint,sint)->(bool) : "gt_i"
+PM__intrinsic +(sint,sint)->(sint) : "add_i"
+PM__intrinsic -(sint,sint)->(sint) : "sub_i"
+PM__intrinsic *(sint,sint)->(sint) : "mult_i"
+PM__intrinsic /(sint,sint)->(sint) : "divide_i"
+PM__intrinsic **(sint,sint)->(sint) : "pow_i"
+PM__intrinsic max(sint,sint)->(sint) : "max_i"
+PM__intrinsic min(sint,sint)->(sint) : "min_i"
+PM__intrinsic -(sint)->(sint) : "uminus_i"
+PM__intrinsic string(sint)->(string) : "string_i"
+PM__intrinsic int(sint)->(int) : "long_i"
+PM__intrinsic sreal(sint)->(sreal) : "real_i"
+PM__intrinsic real(sint)->(real) : "double_i"
+proc sint(x:sint)=x
+PM__intrinsic abs(sint)->(sint) : "abs_i"
+PM__intrinsic bit_not(sint)->(sint) : "bnot_i"
+PM__intrinsic &(sint,sint)->(sint) : "band_i"
+PM__intrinsic |(sint,sint)->(sint) : "bor_i"
+PM__intrinsic ~(sint,sint)->(sint) : "bxor_i"
+PM__intrinsic shift(sint,sint)->(sint) : "bshift_i"
+PM__intrinsic pdiff(sint,sint)->(sint) : "pdiff_i"
+PM__intrinsic sign(sint,sint)->(sint) : "sign_i"
+PM__intrinsic rem(sint,sint)->(sint) : "modulo_i"
+PM__intrinsic int8(sint)->(int8) : "i8_i"
+PM__intrinsic int16(sint)->(int16) : "i16_i"
+PM__intrinsic int32(sint)->(int32) : "i32_i"
+PM__intrinsic int64(sint)->(int64) : "i64_i"
+PM__intrinsic lint(sint)->(lint) : "offset_i"
+
+//  int type
+PM__intrinsic PM__assign_var(&int,int): "assign_ln"
+PM__intrinsic mod(int,int)->(int) : "mod_ln"
+PM__intrinsic ==(int,int)->(bool) : "eq_ln"
+PM__intrinsic /=(int,int)->(bool) : "ne_ln"
+PM__intrinsic >=(int,int)->(bool) : "ge_ln"
+PM__intrinsic >(int,int)->(bool) : "gt_ln"
+PM__intrinsic +(int,int)->(int) : "add_ln"
+PM__intrinsic -(int,int)->(int) : "sub_ln"
+PM__intrinsic *(int,int)->(int) : "mult_ln"
+proc *(x:int,y:fix(1))=x
+PM__intrinsic /(int,int)->(int) : "divide_ln"
+proc /(x:int,y:fix(1))=x
+PM__intrinsic **(int,int)->(int) : "pow_ln"
+PM__intrinsic max(int,int)->(int) : "max_ln"
+PM__intrinsic min(int,int)->(int) : "min_ln"
+PM__intrinsic -(int)->(int) : "uminus_ln"
+PM__intrinsic string(int)->(string) : "string_ln"
+PM__intrinsic sint(int)->(sint) : "int_ln"
+PM__intrinsic sreal(int)->(sreal) : "real_ln"
+PM__intrinsic real(int)->(real) : "double_ln"
+proc int(x:int)=x
+PM__intrinsic abs(int)->(int) : "abs_ln"
+PM__intrinsic ~(int)->(int) : "bnot_ln"
+PM__intrinsic &(int,int)->(int) : "band_ln"
+PM__intrinsic |(int,int)->(int) : "bor_ln"
+PM__intrinsic ~(int,int)->(int) : "bxor_ln"
+PM__intrinsic shift(int,int)->(int) : "bshift_ln"
+PM__intrinsic pdiff(int,int)->(int) : "pdiff_ln"
+PM__intrinsic sign(int,int)->(int) : "sign_ln"
+PM__intrinsic rem(int,int)->(int) : "modulo_ln"
+PM__intrinsic int8(int)->(int8) : "i8_ln"
+PM__intrinsic int16(int)->(int16) : "i16_ln"
+PM__intrinsic int32(int)->(int32) : "i32_ln"
+PM__intrinsic int64(int)->(int64) : "i64_ln"
+PM__intrinsic lint(int)->(lint) : "offset_ln"
+
+//  lint type
+PM__intrinsic PM__assign_var(&lint,lint): "assign_offset"
+PM__intrinsic mod(lint,lint)->(lint) : "mod_offset"
+PM__intrinsic ==(lint,lint)->(bool) : "eq_offset"
+PM__intrinsic /=(lint,lint)->(bool) : "ne_offset"
+PM__intrinsic >=(lint,lint)->(bool) : "ge_offset"
+PM__intrinsic >(lint,lint)->(bool) : "gt_offset"
+PM__intrinsic +(lint,lint)->(lint) : "add_offset"
+proc +(x:lint,y:fix(0))=x
+proc +(x:fix(0),y:lint)=y
+PM__intrinsic -(lint,lint)->(lint) : "sub_offset"
+proc -(x:lint,y:fix(0))=x
+PM__intrinsic *(lint,lint)->(lint) : "mult_offset"
+proc *(x:lint,y:fix(1))=x
+proc *(x:fix(1),y:lint)=y
+PM__intrinsic /(lint,lint)->(lint) : "divide_offset"
+proc /(x:lint,y:fix(1))=x
+PM__intrinsic **(lint,lint)->(lint) : "pow_offset"
+proc **(x:lint,y:fix(0))=1
+proc **(x:lint,y:fix(1))=x
+proc **(x:lint,y:fix(2))=x*x
+PM__intrinsic max(lint,lint)->(lint) : "max_offset"
+PM__intrinsic min(lint,lint)->(lint) : "min_offset"
+PM__intrinsic -(lint)->(lint) : "uminus_offset"
+PM__intrinsic string(lint)->(string) : "string_offset"
+PM__intrinsic sint(lint)->(sint) : "int_offset"
+PM__intrinsic sreal(lint)->(sreal) : "real_offset"
+PM__intrinsic real(lint)->(real) : "double_offset"
+proc lint(x:lint)=x
+PM__intrinsic abs(lint)->(lint) : "abs_offset"
+PM__intrinsic ~(lint)->(lint) : "bnot_offset"
+PM__intrinsic &(lint,lint)->(lint) : "band_offset"
+PM__intrinsic |(lint,lint)->(lint) : "bor_offset"
+PM__intrinsic ~(lint,lint)->(lint) : "bxor_offset"
+PM__intrinsic shift(lint,lint)->(lint) : "bshift_offset"
+PM__intrinsic pdiff(lint,lint)->(lint) : "pdiff_offset"
+PM__intrinsic sign(lint,lint)->(lint) : "sign_offset"
+PM__intrinsic rem(lint,lint)->(lint) : "modulo_offset"
+PM__intrinsic int8(lint)->(int8) : "i8_offset"
+PM__intrinsic int16(lint)->(int16) : "i16_offset"
+PM__intrinsic int32(lint)->(int32) : "i32_offset"
+PM__intrinsic int64(lint)->(int64) : "i64_offset"
+PM__intrinsic int(lint)->(int) : "long_offset"
+
+//  int8 type
+PM__intrinsic PM__assign_var(&int8,int8): "assign_i8"
+PM__intrinsic mod(int8,int8)->(int8) : "mod_i8"
+PM__intrinsic ==(int8,int8)->(bool) : "eq_i8"
+PM__intrinsic /=(int8,int8)->(bool) : "ne_i8"
+PM__intrinsic >=(int8,int8)->(bool) : "ge_i8"
+PM__intrinsic >(int8,int8)->(bool) : "gt_i8"
+PM__intrinsic +(int8,int8)->(int8) : "add_i8"
+proc +(x:int8,y:fix(0))=x
+proc +(x:fix(0),y:int8)=y
+PM__intrinsic -(int8,int8)->(int8) : "sub_i8"
+proc -(x:int8,y:fix(0))=x
+PM__intrinsic *(int8,int8)->(int8) : "mult_i8"
+proc *(x:int8,y:fix(1))=x
+proc *(x:fix(1),y:int8)=y
+PM__intrinsic /(int8,int8)->(int8) : "divide_i8"
+proc /(x:int8,y:fix(1))=x
+PM__intrinsic **(int8,int8)->(int8) : "pow_i8"
+proc **(x:int8,y:fix(0))=1
+proc **(x:int8,y:fix(1))=x
+proc **(x:int8,y:fix(2))=x*x
+PM__intrinsic max(int8,int8)->(int8) : "max_i8"
+PM__intrinsic min(int8,int8)->(int8) : "min_i8"
+PM__intrinsic -(int8)->(int8) : "uminus_i8"
+PM__intrinsic sint(int8)->(sint) : "int_i8"
+PM__intrinsic sreal(int8)->(sreal) : "real_i8"
+PM__intrinsic real(int8)->(real) : "double_i8"
+proc int8(x:int8)=x
+PM__intrinsic abs(int8)->(int8) : "abs_i8"
+PM__intrinsic ~(int8)->(int8) : "bnot_i8"
+PM__intrinsic &(int8,int8)->(int8) : "band_i8"
+PM__intrinsic |(int8,int8)->(int8) : "bor_i8"
+PM__intrinsic ~(int8,int8)->(int8) : "bxor_i8"
+PM__intrinsic shift(int8,int8)->(int8) : "bshift_i8"
+PM__intrinsic pdiff(int8,int8)->(int8) : "pdiff_i8"
+PM__intrinsic sign(int8,int8)->(int8) : "sign_i8"
+PM__intrinsic rem(int8,int8)->(int8) : "modulo_i8"
+PM__intrinsic int16(int8)->(int16) : "i16_i8"
+PM__intrinsic int32(int8)->(int32) : "i32_i8"
+PM__intrinsic int64(int8)->(int64) : "i64_i8"
+PM__intrinsic int(int8)->(int) : "long_i8"
+PM__intrinsic lint(int8)->(lint) : "offset_i8"
+
+//  int16 type
+PM__intrinsic PM__assign_var(&int16,int16): "assign_i16"
+PM__intrinsic mod(int16,int16)->(int16) : "mod_i16"
+PM__intrinsic ==(int16,int16)->(bool) : "eq_i16"
+PM__intrinsic /=(int16,int16)->(bool) : "ne_i16"
+PM__intrinsic >=(int16,int16)->(bool) : "ge_i16"
+PM__intrinsic >(int16,int16)->(bool) : "gt_i16"
+PM__intrinsic +(int16,int16)->(int16) : "add_i16"
+proc +(x:int16,y:fix(0))=x
+proc +(x:fix(0),y:int16)=y
+PM__intrinsic -(int16,int16)->(int16) : "sub_i16"
+proc -(x:int16,y:fix(0))=x
+PM__intrinsic *(int16,int16)->(int16) : "mult_i16"
+proc *(x:int16,y:fix(1))=x
+proc *(x:fix(1),y:int16)=y
+PM__intrinsic /(int16,int16)->(int16) : "divide_i16"
+proc /(x:int16,y:fix(1))=x
+PM__intrinsic **(int16,int16)->(int16) : "pow_i16"
+proc **(x:int16,y:fix(0))=1
+proc **(x:int16,y:fix(1))=x
+proc **(x:int16,y:fix(2))=x*x
+PM__intrinsic max(int16,int16)->(int16) : "max_i16"
+PM__intrinsic min(int16,int16)->(int16) : "min_i16"
+PM__intrinsic -(int16)->(int16) : "uminus_i16"
+PM__intrinsic sint(int16)->(sint) : "int_i16"
+PM__intrinsic sreal(int16)->(sreal) : "real_i16"
+PM__intrinsic real(int16)->(real) : "double_i16"
+proc int16(x:int16)=x
+PM__intrinsic abs(int16)->(int16) : "abs_i16"
+PM__intrinsic ~(int16)->(int16) : "bnot_i16"
+PM__intrinsic &(int16,int16)->(int16) : "band_i16"
+PM__intrinsic |(int16,int16)->(int16) : "bor_i16"
+PM__intrinsic ~(int16,int16)->(int16) : "bxor_i16"
+PM__intrinsic shift(int16,int16)->(int16) : "bshift_i16"
+PM__intrinsic pdiff(int16,int16)->(int16) : "pdiff_i16"
+PM__intrinsic sign(int16,int16)->(int16) : "sign_i16"
+PM__intrinsic rem(int16,int16)->(int16) : "modulo_i16"
+PM__intrinsic int8(int16)->(int16) : "i8_i16"
+PM__intrinsic int32(int16)->(int32) : "i32_i16"
+PM__intrinsic int64(int16)->(int64) : "i64_i16"
+PM__intrinsic int(int16)->(int) : "long_i16"
+PM__intrinsic lint(int16)->(lint) : "offset_i16"
+
+//  int32 type
+PM__intrinsic PM__assign_var(&int32,int32): "assign_i32"
+PM__intrinsic mod(int32,int32)->(int32) : "mod_i32"
+PM__intrinsic ==(int32,int32)->(bool) : "eq_i32"
+PM__intrinsic /=(int32,int32)->(bool) : "ne_i32"
+PM__intrinsic >=(int32,int32)->(bool) : "ge_i32"
+PM__intrinsic >(int32,int32)->(bool) : "gt_i32"
+PM__intrinsic +(int32,int32)->(int32) : "add_i32"
+proc +(x:int32,y:fix(0))=x
+proc +(x:fix(0),y:int32)=y
+PM__intrinsic -(int32,int32)->(int32) : "sub_i32"
+proc -(x:int32,y:fix(0))=x
+PM__intrinsic *(int32,int32)->(int32) : "mult_i32"
+proc *(x:int32,y:fix(1))=x
+proc *(x:fix(1),y:int32)=y
+PM__intrinsic /(int32,int32)->(int32) : "divide_i32"
+proc /(x:int32,y:fix(1))=x
+PM__intrinsic **(int32,int32)->(int32) : "pow_i32"
+proc **(x:int32,y:fix(0))=1
+proc **(x:int32,y:fix(1))=x
+proc **(x:int32,y:fix(2))=x*x
+PM__intrinsic max(int32,int32)->(int32) : "max_i32"
+PM__intrinsic min(int32,int32)->(int32) : "min_i32"
+PM__intrinsic -(int32)->(int32) : "uminus_i32"
+PM__intrinsic sint(int32)->(sint) : "int_i32"
+PM__intrinsic sreal(int32)->(sreal) : "real_i32"
+PM__intrinsic real(int32)->(real) : "double_i32"
+proc int32(x:int32)=x
+PM__intrinsic abs(int32)->(int32) : "abs_i32"
+PM__intrinsic ~(int32)->(int32) : "bnot_i32"
+PM__intrinsic &(int32,int32)->(int32) : "band_i32"
+PM__intrinsic |(int32,int32)->(int32) : "bor_i32"
+PM__intrinsic ~(int32,int32)->(int32) : "bxor_i32"
+PM__intrinsic shift(int32,int32)->(int32) : "bshift_i32"
+PM__intrinsic pdiff(int32,int32)->(int32) : "pdiff_i32"
+PM__intrinsic sign(int32,int32)->(int32) : "sign_i32"
+PM__intrinsic rem(int32,int32)->(int32) : "modulo_i32"
+PM__intrinsic int8(int32)->(int32) : "i8_i32"
+PM__intrinsic int16(int32)->(int32) : "i16_i32"
+PM__intrinsic int64(int32)->(int64) : "i64_i32"
+PM__intrinsic int(int32)->(int) : "long_i32"
+PM__intrinsic lint(int32)->(lint) : "offset_i32"
+
+//  int64 type
+PM__intrinsic PM__assign_var(&int64,int64): "assign_i64"
+PM__intrinsic mod(int64,int64)->(int64) : "mod_i64"
+PM__intrinsic ==(int64,int64)->(bool) : "eq_i64"
+PM__intrinsic /=(int64,int64)->(bool) : "ne_i64"
+PM__intrinsic >=(int64,int64)->(bool) : "ge_i64"
+PM__intrinsic >(int64,int64)->(bool) : "gt_i64"
+PM__intrinsic +(int64,int64)->(int64) : "add_i64"
+proc +(x:int64,y:fix(0))=x
+proc +(x:fix(0),y:int64)=y
+PM__intrinsic -(int64,int64)->(int64) : "sub_i64"
+proc -(x:int64,y:fix(0))=x
+PM__intrinsic *(int64,int64)->(int64) : "mult_i64"
+proc *(x:int64,y:fix(1))=x
+proc *(x:fix(1),y:int64)=y
+PM__intrinsic /(int64,int64)->(int64) : "divide_i64"
+proc /(x:int64,y:fix(1))=x
+PM__intrinsic **(int64,int64)->(int64) : "pow_i64"
+proc **(x:int64,y:fix(0))=1
+proc **(x:int64,y:fix(1))=x
+proc **(x:int64,y:fix(2))=x*x
+PM__intrinsic max(int64,int64)->(int64) : "max_i64"
+PM__intrinsic min(int64,int64)->(int64) : "min_i64"
+PM__intrinsic -(int64)->(int64) : "uminus_i64"
+PM__intrinsic string(int64)->(string) : "string_i64"
+PM__intrinsic sint(int64)->(sint) : "int_i64"
+PM__intrinsic sreal(int64)->(sreal) : "real_i64"
+PM__intrinsic real(int64)->(real) : "double_i64"
+proc int64(x:int64)=x
+PM__intrinsic abs(int64)->(int64) : "abs_i64"
+PM__intrinsic ~(int64)->(int64) : "bnot_i64"
+PM__intrinsic &(int64,int64)->(int64) : "band_i64"
+PM__intrinsic |(int64,int64)->(int64) : "bor_i64"
+PM__intrinsic ~(int64,int64)->(int64) : "bxor_i64"
+PM__intrinsic shift(int64,int64)->(int64) : "bshift_i64"
+PM__intrinsic pdiff(int64,int64)->(int64) : "pdiff_i64"
+PM__intrinsic sign(int64,int64)->(int64) : "sign_i64"
+PM__intrinsic rem(int64,int64)->(int64) : "modulo_i64"
+PM__intrinsic int8(int64)->(int64) : "i8_i64"
+PM__intrinsic int16(int64)->(int64) : "i16_i64"
+PM__intrinsic int32(int64)->(int64) : "i32_i64"
+PM__intrinsic int(int64)->(int) : "long_i64"
+PM__intrinsic lint(int64)->(lint) : "offset_i64"
+
+//  sreal type
+PM__intrinsic PM__assign_var(&sreal,sreal): "assign_r"
+PM__intrinsic mod(sreal,sreal)->(sreal) : "mod_r"
+PM__intrinsic ==(sreal,sreal)->(bool) : "eq_r"
+PM__intrinsic /=(sreal,sreal)->(bool) : "ne_r"
+PM__intrinsic >=(sreal,sreal)->(bool) : "ge_r"
+PM__intrinsic >(sreal,sreal)->(bool) : "gt_r"
+PM__intrinsic +(sreal,sreal)->(sreal) : "add_r"
+PM__intrinsic -(sreal,sreal)->(sreal) : "sub_r"
+PM__intrinsic *(sreal,sreal)->(sreal) : "mult_r"
+PM__intrinsic /(sreal,sreal)->(sreal) : "divide_r"
+PM__intrinsic **(sreal,sreal)->(sreal) : "pow_r"
+PM__intrinsic max(sreal,sreal)->(sreal) : "max_r"
+PM__intrinsic min(sreal,sreal)->(sreal) : "min_r"
+PM__intrinsic -(sreal)->(sreal) : "uminus_r"
+PM__intrinsic string(sreal)->(string) : "string_r"
+PM__intrinsic strunc(sreal)->(sint) : "int_r"
+PM__intrinsic trunc(sreal)->(int) : "long_r"
+PM__intrinsic ltrunc(sreal)->(lint) : "offset_r"
+PM__intrinsic real(sreal)->(real) : "double_r"
+proc sreal(x:sreal)=x
+PM__intrinsic abs(sreal)->(sreal) : "abs_r"
+PM__intrinsic acos(sreal)->(sreal) : "acos_r"
+PM__intrinsic asin(sreal)->(sreal) : "asin_r"
+PM__intrinsic atan(sreal)->(sreal) : "atan_r"
+PM__intrinsic atan2(sreal,sreal)->(sreal) : "atan2_r"
+PM__intrinsic cos(sreal)->(sreal) : "cos_r"
+PM__intrinsic cosh(sreal)->(sreal) : "cosh_r"
+PM__intrinsic exp(sreal)->(sreal) : "exp_r"
+PM__intrinsic log(sreal)->(sreal) : "log_r"
+PM__intrinsic log10(sreal)->(sreal) : "log10_r"
+PM__intrinsic sin(sreal)->(sreal) : "sin_r"
+PM__intrinsic sinh(sreal)->(sreal) : "sinh_r"
+PM__intrinsic sqrt(sreal)->(sreal) : "sqrt_r"
+PM__intrinsic tan(sreal)->(sreal) : "tan_r"
+PM__intrinsic tanh(sreal)->(sreal) : "tanh_r"
+PM__intrinsic floor(sreal)->(sreal) : "floor_r"
+PM__intrinsic ceil(sreal)->(sreal) : "ceil_r"
+PM__intrinsic rem(sreal,sreal)->(sreal) : "modulo_r"
+PM__intrinsic sign(sreal,sreal)->(sreal) : "sign_r"
+PM__intrinsic pdiff(sreal,sreal)->(sreal) : "pdiff_r"
+PM__intrinsic lint(sreal)->(lint) : "offset_r"
+PM__intrinsic scpx(sreal)->(scpx) : "complex_r"
+PM__intrinsic _scpx2(sreal,sreal)->(scpx) : "complex2_r"
+proc scpx(x:any_real,y:any_real)=_scpx2(sreal(x),sreal(y))
+
+//  real type
+PM__intrinsic PM__assign_var(&real,real): "assign_d"
+PM__intrinsic mod(real,real)->(real) : "mod_d"
+PM__intrinsic ==(real,real)->(bool) : "eq_d"
+PM__intrinsic /=(real,real)->(bool) : "ne_d"
+PM__intrinsic >=(real,real)->(bool) : "ge_d"
+PM__intrinsic >(real,real)->(bool) : "gt_d"
+PM__intrinsic +(real,real)->(real) : "add_d"
+PM__intrinsic -(real,real)->(real) : "sub_d"
+PM__intrinsic *(real,real)->(real) : "mult_d"
+PM__intrinsic /(real,real)->(real) : "divide_d"
+PM__intrinsic **(real,real)->(real) : "pow_d"
+PM__intrinsic max(real,real)->(real) : "max_d"
+PM__intrinsic min(real,real)->(real) : "min_d"
+PM__intrinsic -(real)->(real) : "uminus_d"
+PM__intrinsic string(real)->(string) : "string_d"
+PM__intrinsic strunc(real)->(sint) : "int_d"
+PM__intrinsic trunc(real)->(int) : "long_d"
+PM__intrinsic ltrunc(real)->(lint) : "offset_d"
+PM__intrinsic sreal(real)->(sreal) : "real_d"
+proc real(x:real)=x
+PM__intrinsic abs(real)->(real) : "abs_d"
+PM__intrinsic acos(real)->(real) : "acos_d"
+PM__intrinsic asin(real)->(real) : "asin_d"
+PM__intrinsic atan(real)->(real) : "atan_d"
+PM__intrinsic atan2(real,real)->(real) : "atan2_d"
+PM__intrinsic cos(real)->(real) : "cos_d"
+PM__intrinsic cosh(real)->(real) : "cosh_d"
+PM__intrinsic exp(real)->(real) : "exp_d"
+PM__intrinsic log(real)->(real) : "log_d"
+PM__intrinsic log10(real)->(real) : "log10_d"
+PM__intrinsic sin(real)->(real) : "sin_d"
+PM__intrinsic sinh(real)->(real) : "sinh_d"
+PM__intrinsic sqrt(real)->(real) : "sqrt_d"
+PM__intrinsic tan(real)->(real) : "tan_d"
+PM__intrinsic tanh(real)->(real) : "tanh_d"
+PM__intrinsic floor(real)->(real) : "floor_d"
+PM__intrinsic ceil(real)->(real) : "ceil_d"
+PM__intrinsic rem(real,real)->(real) : "modulo_d"
+PM__intrinsic sign(real,real)->(real) : "sign_d"
+PM__intrinsic pdiff(real,real)->(real) : "pdiff_d"
+PM__intrinsic lint(real)->(lint) : "offset_d"
+PM__intrinsic cpx(real)->(cpx) : "complex_d"
+PM__intrinsic _cpx2(real,real)->(cpx) : "complex2_d"
+proc cpx(x:real_num,y:real_num)=_cpx2(real(x),real(y))
+
+//  scpx type
+PM__intrinsic PM__assign_var(&scpx,scpx): "assign_c"
+PM__intrinsic +(scpx,scpx)->(scpx) : "add_c"
+PM__intrinsic -(scpx,scpx)->(scpx) : "sub_c"
+PM__intrinsic *(scpx,scpx)->(scpx) : "mult_c"
+PM__intrinsic /(scpx,scpx)->(scpx) : "divide_c"
+PM__intrinsic **(scpx,sreal)->(scpx) : "rpow_c"
+PM__intrinsic **(scpx,scpx)->(scpx) : "pow_c"
+PM__intrinsic -(scpx)->(scpx) : "uminus_c"
+PM__intrinsic ==(scpx,scpx)->(bool) : "eq_c"
+PM__intrinsic /=(scpx,scpx)->(bool) : "ne_c"
+PM__intrinsic re(scpx)->(sreal) : "real_c"
+PM__intrinsic abs(scpx)->(scpx) : "abs_c"
+PM__intrinsic acos(scpx)->(scpx) : "acos_c"
+PM__intrinsic asin(scpx)->(scpx) : "asin_c"
+PM__intrinsic atan(scpx)->(scpx) : "atan_c"
+PM__intrinsic atan2(scpx,scpx)->(scpx) : "atan2_c"
+PM__intrinsic cos(scpx)->(scpx) : "cos_c"
+PM__intrinsic cosh(scpx)->(scpx) : "cosh_c"
+PM__intrinsic exp(scpx)->(scpx) : "exp_c"
+PM__intrinsic log(scpx)->(scpx) : "log_c"
+PM__intrinsic sin(scpx)->(scpx) : "sin_c"
+PM__intrinsic sinh(scpx)->(scpx) : "sinh_c"
+PM__intrinsic sqrt(scpx)->(scpx) : "sqrt_c"
+PM__intrinsic tan(scpx)->(scpx) : "tan_c"
+PM__intrinsic tanh(scpx)->(scpx) : "tanh_c"
+PM__intrinsic im(scpx)->(sreal) : "imag_c"
+PM__intrinsic conj(scpx)->(scpx) : "conj_c"
+
+//  cpx type
+PM__intrinsic PM__assign_var(&cpx,cpx): "assign_dc"
+PM__intrinsic +(cpx,cpx)->(cpx) : "add_dc"
+PM__intrinsic -(cpx,cpx)->(cpx) : "sub_dc"
+PM__intrinsic *(cpx,cpx)->(cpx) : "mult_dc"
+PM__intrinsic /(cpx,cpx)->(cpx) : "divide_dc"
+PM__intrinsic **(cpx,real)->(cpx) : "dpow_dc"
+proc **(x:cpx,y:sreal)=x**real(y)
+PM__intrinsic **(cpx,cpx)->(cpx) : "pow_dc"
+PM__intrinsic -(cpx)->(cpx) : "uminus_dc"
+PM__intrinsic ==(cpx,cpx)->(bool) : "eq_dc"
+PM__intrinsic /=(cpx,cpx)->(bool) : "ne_dc"
+PM__intrinsic re(cpx)->(real) : "real_dc"
+PM__intrinsic abs(cpx)->(cpx) : "abs_dc"
+PM__intrinsic acos(cpx)->(cpx) : "acos_dc"
+PM__intrinsic asin(cpx)->(cpx) : "asin_dc"
+PM__intrinsic atan(cpx)->(cpx) : "atan_dc"
+PM__intrinsic atan2(cpx,cpx)->(cpx) : "atan2_dc"
+PM__intrinsic cos(cpx)->(cpx) : "cos_dc"
+PM__intrinsic cosh(cpx)->(cpx) : "cosh_dc"
+PM__intrinsic exp(cpx)->(cpx) : "exp_dc"
+PM__intrinsic log(cpx)->(cpx) : "log_dc"
+PM__intrinsic sin(cpx)->(cpx) : "sin_dc"
+PM__intrinsic sinh(cpx)->(cpx) : "sinh_dc"
+PM__intrinsic sqrt(cpx)->(cpx) : "sqrt_dc"
+PM__intrinsic tan(cpx)->(cpx) : "tan_dc"
+PM__intrinsic tanh(cpx)->(cpx) : "tanh_dc"
+PM__intrinsic im(cpx)->(real) : "imag_dc"
+PM__intrinsic conj(cpx)->(cpx) : "conj_dc"
+
+//  Cannot convert real to int (must use nint or trunc)
+proc sint(x:any_real)=sint(0) :compile_error("Cannot convert real to integer")
+proc int(x:any_real)=0 :compile_error("Cannot convert real to integer")
+proc lint(x:any_real)=lint(0) :compile_error("Cannot convert real to integer")
+
+//  Some numeric conversions not hard-coded
+proc cpx(x:real_num)=cpx(real(x))
+proc scpx(x:real_num)=cpx(sreal(x))
+proc string(x:any_int)=string(int64(x))
+proc string(x:any_cpx)= string(re(x))++if(im>=0=>"+"++string(im),"-"++string(-im))++"i" where im=im(x) 
+proc int(x:fix(int))=x
+
+
+//  Abstract numeric types
+type any_int is sint,int,lint,int8,int16,int32,int64
+type any_real is sreal,real
+type any_cpx is scpx,cpx
+type int_num is any_int
+type real_num is int_num, any_real
+type cpx_num is real_num,any_cpx
+type num is cpx_num
+
+//  Numeric type conversion
+proc convert(x,y)=x
+proc convert(x:int_num,y:sint)=sint(x)
+proc convert(x:int_num,y:int)=int(x)
+proc convert(x:int_num,y:lint)=lint(x)
+proc convert(x:int_num,y:int8)=int8(x)
+proc convert(x:int_num,y:int16)=int16(x)
+proc convert(x:int_num,y:int32)=int32(x)
+proc convert(x:int_num,y:int64)=int64(x)
+proc convert(x:int_num,y:sreal)=sreal(x)
+proc convert(x:int_num,y:real)=real(x)
+proc convert(x:real_num,y:cpx)=cpx(x)
+proc convert(x:real_num,y:scpx)=scpx(x)
+proc as(x:int_num,y:<sint>)=sint(x)
+proc as(x:int_num,y:<int>)=int(x)
+proc as(x:int_num,y:<lint>)=lint(x)
+proc as(x:int_num,y:<int8>)=int8(x)
+proc as(x:int_num,y:<int16>)=int16(x)
+proc as(x:int_num,y:<int32>)=int32(x)
+proc as(x:int_num,y:<int64>)=int64(x)
+proc as(x:real_num,y:<sreal>)=sreal(x)
+proc as(x:real_num,y:<real>)=real(x)
+proc as(x:real_num,y:<scpx>)=scpx(x)
+proc as(x:real_num,y:<cpx>)=cpx(x)
+
+//  Auto-conversion on assignment
+proc PM__assign(&x:num,y:num) {
+  _assign_element(&x,convert(y,x))
+}
+
+proc PM__assign_var(&x:num,y:num) {
+  PM__assign(&x,convert(y,x))
+}
+
+//  Mixed arithmatic
+type _to_sint is int
+type _to_lint is sint,int
+type _to_int8 is sint,int,lint
+type _to_int16 is sint,int,lint,int8
+type _to_int32 is sint,int,lint,int8,int16
+type _to_int64 is sint,int,lint,int8,int16,int32
+type _to_real is any_int
+type _to_sreal is any_int,real
+type _to_cpx is real_num
+type _to_scpx is real_num,cpx
+proc balance(x:sint,y:sint)=x,y
+proc balance(x:int,y:int)=x,y
+proc balance(x:lint,y:lint)=x,y
+proc balance(x:int8,y:int8)=x,y
+proc balance(x:int16,y:int16)=x,y
+proc balance(x:int32,y:int32)=x,y
+proc balance(x:int64,y:int64)=x,y
+proc balance(x:sreal,y:sreal)=x,y
+proc balance(x:real,y:real)=x,y
+proc balance(x:scpx,y:scpx)=x,y
+proc balance(x:cpx,y:cpx)=x,y
+proc balance(x:sint,y:_to_sint)=x,sint(y)
+proc balance(x:lint,y:_to_lint)=x,lint(y)
+proc balance(x:int8,y:_to_int8)=x,int8(y)
+proc balance(x:int16,y:_to_int16)=x,int16(y)
+proc balance(x:int32,y:_to_int32)=x,int32(y)
+proc balance(x:int64,y:_to_int64)=x,int64(y)
+proc balance(x:sreal,y:_to_sreal)=x,sreal(y)
+proc balance(x:real,y:_to_real)=x,real(y)
+proc balance(x:scpx,y:_to_scpx)=x,scpx(y)
+proc balance(x:cpx,y:_to_cpx)=x,cpx(y)
+proc balance(x:_to_sint,y:sint)=sint(x),y
+proc balance(x:_to_lint,y:lint)=lint(x),y
+proc balance(x:_to_int8,y:int8)=int8(x),y
+proc balance(x:_to_int16,y:int16)=int16(x),y
+proc balance(x:_to_int32,y:int32)=int32(x),y
+proc balance(x:_to_int64,y:int64)=int64(x),y
+proc balance(x:_to_sreal,y:sreal)=sreal(x),y
+proc balance(x:_to_real,y:real)=real(x),y
+proc balance(x:_to_scpx,y:scpx)=scpx(x),y
+proc balance(x:_to_cpx,y:cpx)=cpx(x),y
+proc div(x:any_int,y:any_int)=if(sz=>r,-1-r) where r=if(sz=>x,abs(x)-1)/if(sz=>y,abs(y))where sz=sign(x,y)==x
+proc _divz(x:any_int,y:any_int)=z {
+  var z,_=balance(x,y)
+  if(sign(x,y)==x):z=x/y else: z=-1-(abs(x)-1)/abs(y)
+}
+proc mod(x:real_num,y:real_num)=xx mod yy where xx,yy=balance(x,y)
+proc ==(x:num,y:num)=xx==yy where xx,yy=balance(x,y)
+proc /=(x:num,y:num)=xx/=yy where xx,yy=balance(x,y)
+proc >=(x:real_num,y:real_num)=xx>=yy where xx,yy=balance(x,y)
+proc >(x:real_num,y:real_num)=xx>yy where xx,yy=balance(x,y)
+proc +(x:num,y:num)=xx+yy where xx,yy=balance(x,y)
+proc -(x:num,y:num)=xx-yy where xx,yy=balance(x,y)
+proc *(x:num,y:num)=xx*yy where xx,yy=balance(x,y)
+proc /(x:num,y:num)=xx/yy where xx,yy=balance(x,y)
+proc **(x:num,y:num)=xx**yy where xx,yy=balance(x,y)
+proc &(x:num,y:num)=xx&yy where xx,yy=balance(x,y)
+proc |(x:num,y:num)=xx|yy where xx,yy=balance(x,y)
+proc ~(x:num,y:num)=xx ~ yy where xx,yy=balance(x,y)
+proc shift(x:num,y:num)=xx shift yy where xx,yy=balance(x,y)
+proc max(x:num,y:num)=max(xx,yy) where xx,yy=balance(x,y)
+proc min(x:num,y:num)=min(xx,yy) where xx,yy=balance(x,y)
+
+// Indexed arithmetic
+proc +'(x,y)=$+.(x,y)
+proc -'(x,y)=$-.(x,y)
+proc *'(x,y)=$*.(x,y)
+proc /'(x,y)=$/.(x,y)
+proc -'(x)=$-.(x)
+
+//  bool type
+PM__intrinsic PM__assign_var(&bool,bool): "assign_l"
+PM__intrinsic string(bool)->(string) : "string_l"
+PM__intrinsic and(bool,bool)->(bool) : "and"
+PM__intrinsic or(bool,bool)->(bool) : "or"
+PM__intrinsic not(bool)->(bool) : "not"
+PM__intrinsic ==(bool,bool)->(bool) : "eq_l"
+PM__intrinsic /=(bool,bool)->(bool) : "ne_l"
+
+
+//  val function having null effect
+proc val(x)=x
+
+
+//  ********************************************
+//  TUPLES
+//  ********************************************
+
+//  Tuple types
+
+type tuple1d(t1,r:1) is rec {PM__d1:t1,_r:r}
+type tuple2d(t1,t2,r:2) is rec {PM__d1:t1,PM__d2:t2,_r:r}
+type tuple3d(t1,t2,t3,r:3) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,_r:r}
+type tuple4d(t1,t2,t3,t4,r:4) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,PM__d4:t4,_r:r}
+type tuple5d(t1,t2,t3,t4,t5,r:5) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,PM__d4:t4,PM__d5:t5,_r:r}
+type tuple6d(t1,t2,t3,t4,t5,t6,r:6) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,PM__d4:t4,PM__d5:t5,PM__d6:t6,_r:r}
+type tuple7d(t1,t2,t3,t4,t5,t6,t7,r:7) is rec {PM__d1:t1,PM__d2:t2,PM__d3:t3,PM__d4:t4,PM__d5:t5,PM__d6:t6,PM__d7:t7,_r:r}
+
+type dimension_number is 1,2,3,4,5,6,7
+type tuple(t,r:dimension_number)
+type tuple(t,r:1) is ...,tuple1d(t,r)
+type tuple(t,r:2) is ...,tuple2d(t,t,r)
+type tuple(t,r:3) is ...,tuple3d(t,t,t,r)
+type tuple(t,r:4) is ...,tuple4d(t,t,t,t,r)
+type tuple(t,r:5) is ...,tuple5d(t,t,t,t,t,r)
+type tuple(t,r:6) is ...,tuple6d(t,t,t,t,t,t,r)
+type tuple(t,r:7) is ...,tuple7d(t,t,t,t,t,t,t,r)
+
+proc tuple(x)=rec tuple1d {
+    PM__d1=x,_r=1
+}
+proc tuple(x,y)=rec tuple2d {
+    PM__d1=x,PM__d2=y,_r=2
+}
+proc tuple(x,y,z)=rec tuple3d {
+    PM__d1=x,PM__d2=y,PM__d3=z,_r=3
+}
+proc tuple(x,y,z,t)=rec tuple4d {
+    PM__d1=x,PM__d2=y,PM__d3=z,PM__d4=t,_r=4
+}
+proc tuple(x,y,z,t,u)=rec tuple5d {
+    PM__d1=x,PM__d2=y,PM__d3=z,PM__d4=t,PM__d5=u,_r=5
+}
+proc tuple(x,y,z,t,u,v)=rec tuple6d {
+    PM__d1=x,PM__d2=y,PM__d3=z,PM__d4=t,PM__d5=u,PM__d6=v,_r=6
+}
+proc tuple(x,y,z,t,u,v,w)=rec tuple7d {
+    PM__d1=x,PM__d2=y,PM__d3=z,PM__d4=t,PM__d5=u,PM__d6=v,PM__d7=w,_r=7
+}
+
+proc dim(t:tuple1d,n:literal(1) or [literal(1)])=t.1
+proc dim(t:tuple2d,n:literal(1) or [literal(1)])=t.1
+proc dim(t:tuple3d,n:literal(1) or [literal(1)])=t.1
+proc dim(t:tuple4d,n:literal(1) or [literal(1)])=t.1
+proc dim(t:tuple5d,n:literal(1) or [literal(1)])=t.1
+proc dim(t:tuple6d,n:literal(1) or [literal(1)])=t.1
+proc dim(t:tuple7d,n:literal(1) or [literal(1)])=t.1
+proc dim(t:tuple2d,n:literal(2) or [literal(2)])=t.2
+proc dim(t:tuple3d,n:literal(2) or [literal(2)])=t.2
+proc dim(t:tuple4d,n:literal(2) or [literal(2)])=t.2
+proc dim(t:tuple5d,n:literal(2) or [literal(2)])=t.2
+proc dim(t:tuple6d,n:literal(2) or [literal(2)])=t.2
+proc dim(t:tuple7d,n:literal(2) or [literal(2)])=t.2
+proc dim(t:tuple3d,n:literal(3) or [literal(3)])=t.3
+proc dim(t:tuple4d,n:literal(3) or [literal(3)])=t.3
+proc dim(t:tuple5d,n:literal(3) or [literal(3)])=t.3
+proc dim(t:tuple6d,n:literal(3) or [literal(3)])=t.3
+proc dim(t:tuple7d,n:literal(3) or [literal(3)])=t.3
+proc dim(t:tuple4d,n:literal(4) or [literal(4)])=t.4
+proc dim(t:tuple5d,n:literal(4) or [literal(4)])=t.4
+proc dim(t:tuple6d,n:literal(4) or [literal(4)])=t.4
+proc dim(t:tuple7d,n:literal(4) or [literal(4)])=t.4
+proc dim(t:tuple5d,n:literal(5) or [literal(5)])=t.5
+proc dim(t:tuple6d,n:literal(5) or [literal(5)])=t.5
+proc dim(t:tuple7d,n:literal(5) or [literal(5)])=t.5
+proc dim(t:tuple6d,n:literal(6) or [literal(6)])=t.6
+proc dim(t:tuple7d,n:literal(6) or [literal(6)])=t.6
+proc dim(t:tuple7d,n:literal(7) or [literal(7)])=t.7
+
+proc indices(x:tuple1d)=[literal(1)]
+proc indices(x:tuple2d)=[literal(1),literal(2)]
+proc indices(x:tuple3d)=[literal(1),literal(2),literal(3)]
+proc indices(x:tuple4d)=[literal(1),literal(2),literal(3),literal(4)]
+proc indices(x:tuple5d)=[literal(1),literal(2),literal(3),literal(4),literal(5)]
+proc indices(x:tuple6d)=[literal(1),literal(2),literal(3),literal(4),literal(5),literal(6)]
+proc indices(x:tuple7d)=[literal(1),literal(2),literal(3),literal(4),literal(5),literal(6),literal(7)]
+
+proc full_rank(x:tuple1d)=1
+proc full_rank(x:tuple2d)=2
+proc full_rank(x:tuple3d)=3
+proc full_rank(x:tuple4d)=4
+proc full_rank(x:tuple5d)=5
+proc full_rank(x:tuple6d)=6
+proc full_rank(x:tuple7d)=7
+proc rank(x:tuple)=full_rank(x)
+
+proc reduce(p:proc,x:tuple1d)=x.1
+proc reduce(p:proc,x:tuple2d)=p.(x.2,x.1)
+proc reduce(p:proc,x:tuple3d)=p.(p.(x.3,x.2),x.1)
+proc reduce(p:proc,x:tuple4d)=p.(p.(p.(x.4,x.3),x.2),x.1)
+proc reduce(p:proc,x:tuple5d)=p.(p.(p.(p.(x.5,x.4),x.3),x.2),x.1)
+proc reduce(p:proc,x:tuple6d)=p.(p.(p.(p.(p.(x.6,x.5),x.4),x.3),x.2),x.1)
+proc reduce(p:proc,x:tuple7d)=p.(p.(p.(p.(p.(p.(x.7,x.6),x.5),x.4),x.3),x.2),x.1)
+
+proc map(p:proc,x:tuple1d)=[p.(x.1)]
+proc map(p:proc,x:tuple2d)=[p.(x.1),p.(x.2)]
+proc map(p:proc,x:tuple3d)=[p.(x.1),p.(x.2),p.(x.3)]
+proc map(p:proc,x:tuple4d)=[p.(x.1),p.(x.2),p.(x.3),p.(x.4)]
+proc map(p:proc,x:tuple5d)=[p.(x.1),p.(x.2),p.(x.3),p.(x.4),p.(x.5)]
+proc map(p:proc,x:tuple6d)=[p.(x.1),p.(x.2),p.(x.3),p.(x.4),p.(x.5),p.(x.6)]
+proc map(p:proc,x:tuple7d)=[p.(x.1),p.(x.2),p.(x.3),p.(x.4),p.(x.5),p.(x.6),p.(x.7)]
+proc map(p:proc,x:tuple,y:tuple)=compile_error("Number of dimensions does not match")
+proc map(p:proc,x:tuple1d,y:tuple1d)=[p.(x.1,y.1)]
+proc map(p:proc,x:tuple2d,y:tuple2d)=[p.(x.1,y.1),p.(x.2,y.2)]
+proc map(p:proc,x:tuple3d,y:tuple3d)=[p.(x.1,y.1),p.(x.2,y.2),p.(x.3,y.3)]
+proc map(p:proc,x:tuple4d,y:tuple4d)=[p.(x.1,y.1),p.(x.2,y.2),p.(x.3,y.3),p.(x.4,y.4)]
+proc map(p:proc,x:tuple5d,y:tuple5d)=[p.(x.1,y.1),p.(x.2,y.2),p.(x.3,y.3),p.(x.4,y.4),p.(x.5,y.5)]
+proc map(p:proc,x:tuple6d,y:tuple6d)=[p.(x.1,y.1),p.(x.2,y.2),p.(x.3,y.3),p.(x.4,y.4),p.(x.5,y.5),p.(x.6,y.6)]
+proc map(p:proc,x:tuple7d,y:tuple7d)=[p.(x.1,y.1),p.(x.2,y.2),p.(x.3,y.3),p.(x.4,y.4),p.(x.5,y.5),p.(x.6,y.6),p.(x.7,y.7)]
+proc map(p:proc,x:tuple,y:tuple,z:tuple)=error_type() :compile_error("Number of dimensions does not match")
+proc map(p:proc,x:tuple1d,y:tuple1d,z:tuple1d)=[p.(x.1,y.1,z.1)]
+proc map(p:proc,x:tuple2d,y:tuple2d,z:tuple2d)=[p.(x.1,y.1,z.1),p.(x.2,y.2,z.2)]
+proc map(p:proc,x:tuple3d,y:tuple3d,z:tuple3d)=[p.(x.1,y.1,z.1),p.(x.2,y.2,z.2),p.(x.3,y.3,z.3)]
+proc map(p:proc,x:tuple4d,y:tuple4d,z:tuple4d)=[p.(x.1,y.1,z.1),p.(x.2,y.2,z.2),p.(x.3,y.3,z.3),p.(x.4,y.4,z.4)]
+proc map(p:proc,x:tuple5d,y:tuple5d,z:tuple5d)=[p.(x.1,y.1,z.1),p.(x.2,y.2,z.2),p.(x.3,y.3,z.3),p.(x.4,y.4,z.4),p.(x.5,y.5,z.5)]
+proc map(p:proc,x:tuple6d,y:tuple6d,z:tuple6d)=[p.(x.1,y.1,z.1),p.(x.2,y.2,z.2),p.(x.3,y.3,z.3),p.(x.4,y.4,z.4),p.(x.5,y.5,z.5),p.(x.6,y.6,z.6)]
+proc map(p:proc,x:tuple7d,y:tuple7d,z:tuple7d)=[p.(x.1,y.1,z.1),p.(x.2,y.2,z.2),p.(x.3,y.3,z.3),p.(x.4,y.4,z.4),p.(x.5,y.5,z.5),p.(x.6,y.6,z.6),p.(x.7,y.7,z.7)]
+
+proc map(p:proc,w:tuple,x:tuple,y:tuple,z:tuple)=error_type() :compile_error("Number of dimensions does not match")
+proc map(p:proc,w:tuple1d,x:tuple1d,y:tuple1d,z:tuple1d)=[p.(w.1,x.1,y.1,z.1)]
+proc map(p:proc,w:tuple2d,x:tuple2d,y:tuple2d,z:tuple2d)=[p.(w.1,x.1,y.1,z.1),p.(w.2,x.2,y.2,z.2)]
+proc map(p:proc,w:tuple3d,x:tuple3d,y:tuple3d,z:tuple3d)=[p.(w.1,x.1,y.1,z.1),p.(w.2,x.2,y.2,z.2),p.(w.3,x.3,y.3,z.3)]
+proc map(p:proc,w:tuple4d,x:tuple4d,y:tuple4d,z:tuple4d)=[p.(w.1,x.1,y.1,z.1),p.(w.2,x.2,y.2,z.2),p.(w.3,x.3,y.3,z.3),p.(w.4,x.4,y.4,z.4)]
+proc map(p:proc,w:tuple5d,x:tuple5d,y:tuple5d,z:tuple5d)=[p.(w.1,x.1,y.1,z.1),p.(w.2,x.2,y.2,z.2),p.(w.3,x.3,y.3,z.3),p.(w.4,x.4,y.4,z.4),p.(w.5,x.5,y.5,z.5)]
+proc map(p:proc,w:tuple6d,x:tuple6d,y:tuple6d,z:tuple6d)=[p.(w.1,x.1,y.1,z.1),p.(w.2,x.2,y.2,z.2),p.(w.3,x.3,y.3,z.3),p.(w.4,x.4,y.4,z.4),p.(w.5,x.5,y.5,z.5),p.(w.6,x.6,y.6,z.6)]
+proc map(p:proc,w:tuple7d,x:tuple7d,y:tuple7d,z:tuple7d)=[p.(w.1,x.1,y.1,z.1),p.(w.2,x.2,y.2,z.2),p.(w.3,x.3,y.3,z.3),p.(w.4,x.4,y.4,z.4),p.(w.5,x.5,y.5,z.5),p.(w.6,x.6,y.6,z.6),p.(w.7,x.7,y.7,z.7)]
+
+proc map(p:proc,x:tuple1d,y:tuple1d)=[u1],[v1]where u1,v1=p.(x.1,y.1)
+proc map(p:proc,x:tuple2d,y:tuple2d)=[u1,u2],[v1,v2]where u1,v1=p.(x.1,y.1),u2,v2=p.(x.2,y.2)
+proc map(p:proc,x:tuple3d,y:tuple3d)=[u1,u2,u3],[v1,v2,v3]where u1,v1=p.(x.1,y.1),u2,v2=p.(x.2,y.2),u3,v3=p.(x.3,y.3)
+proc map(p:proc,x:tuple4d,y:tuple4d)=[u1,u2,u3,u4],[v1,v2,v3,v4]where u1,v1=p.(x.1,y.1),u2,v2=p.(x.2,y.2),u3,v3=p.(x.3,y.3),u4,v4=p.(x.4,y.4)
+proc map(p:proc,x:tuple5d,y:tuple5d)=[u1,u2,u3,u4,u5],[v1,v2,v3,v4,v5]where u1,v1=p.(x.1,y.1),u2,v2=p.(x.2,y.2),u3,v3=p.(x.3,y.3),u4,v4=p.(x.4,y.4),u5,v5=p.(x.5,y.5)
+proc map(p:proc,x:tuple6d,y:tuple6d)=[u1,u2,u3,u4,u5,u6],[v1,v2,v3,v4,v5,v6]where u1,v1=p.(x.1,y.1),u2,v2=p.(x.2,y.2),u3,v3=p.(x.3,y.3),u4,v4=p.(x.4,y.4),u5,v5=p.(x.5,y.5),u6,v6=p.(x.6,y.6)
+proc map(p:proc,x:tuple7d,y:tuple7d)=[u1,u2,u3,u4,u5,u6,u7],[v1,v2,v3,v4,v5,v6,v7]where u1,v1=p.(x.1,y.1),u2,v2=p.(x.2,y.2),u3,v3=p.(x.3,y.3),u4,v4=p.(x.4,y.4),u5,v5=p.(x.5,y.5),u6,v6=p.(x.6,y.6),u7,v7=p.(x.7,y.7)
+
+proc map_const(p:proc,x:tuple1d,y)=[p.(x.1,y)]
+proc map_const(p:proc,x:tuple2d,y)=[p.(x.1,y),p.(x.2,y)]
+proc map_const(p:proc,x:tuple3d,y)=[p.(x.1,y),p.(x.2,y),p.(x.3,y)]
+proc map_const(p:proc,x:tuple4d,y)=[p.(x.1,y),p.(x.2,y),p.(x.3,y),p.(x.4,y)]
+proc map_const(p:proc,x:tuple5d,y)=[p.(x.1,y),p.(x.2,y),p.(x.3,y),p.(x.4,y),p.(x.5,y)]
+proc map_const(p:proc,x:tuple6d,y)=[p.(x.1,y),p.(x.2,y),p.(x.3,y),p.(x.4,y),p.(x.5,y),p.(x.6,y)]
+proc map_const(p:proc,x:tuple7d,y)=[p.(x.1,y),p.(x.2,y),p.(x.3,y),p.(x.4,y),p.(x.5,y),p.(x.6,y),p.(x.7,y)]
+
+proc map_reduce(q:proc,p:proc,x:tuple1d)=q.(x.1)
+proc map_reduce(q:proc,p:proc,x:tuple2d)=p.(q.(x.2),q.(x.1))
+proc map_reduce(q:proc,p:proc,x:tuple3d)=p.(p.(q.(x.3),q.(x.2)),q.(x.1))
+proc map_reduce(q:proc,p:proc,x:tuple4d)=p.(p.(p.(q.(x.4),q.(x.3)),q.(x.2)),q.(x.1))
+proc map_reduce(q:proc,p:proc,x:tuple5d)=p.(p.(p.(p.(q.(x.5),q.(x.4)),q.(x.3)),q.(x.2)),q.(x.1))
+proc map_reduce(q:proc,p:proc,x:tuple6d)=p.(p.(p.(p.(p.(q.(x.6),q.(x.5)),q.(x.4)),q.(x.3)),q.(x.2)),q.(x.1))
+proc map_reduce(q:proc,p:proc,x:tuple7d)=p.(p.(p.(p.(p.(p.(q.(x.7),q.(x.6)),q.(x.5)),q.(x.4)),q.(x.3)),q.(x.2)),q.(x.1))
+
+proc map_reduce(q:proc,p:proc,x:tuple,y:tuple)=error_type() :compile_error("Number of dimensions does not match")
+proc map_reduce(q:proc,p:proc,x:tuple1d,y:tuple1d)=q.(x.1,y.1)
+proc map_reduce(q:proc,p:proc,x:tuple2d,y:tuple2d)=p.(q.(x.2,y.2),q.(x.1,y.1))
+proc map_reduce(q:proc,p:proc,x:tuple3d,y:tuple3d)=p.(p.(q.(x.3,y.3),q.(x.2,y.2)),q.(x.1,y.1))
+proc map_reduce(q:proc,p:proc,x:tuple4d,y:tuple4d)=p.(p.(p.(q.(x.4,y.4),q.(x.3,y.3)),q.(x.2,y.2)),q.(x.1,y.1))
+proc map_reduce(q:proc,p:proc,x:tuple5d,y:tuple5d)=p.(p.(p.(p.(q.(x.5,y.5),q.(x.4,y.4)),q.(x.3,y.3)),q.(x.2,y.2)),q.(x.1,y.1))
+proc map_reduce(q:proc,p:proc,x:tuple6d,y:tuple6d)=p.(p.(p.(p.(p.(q.(x.6,y.6),q.(x.5,y.5)),q.(x.4,y.4)),q.(x.3,y.3)),q.(x.2,y.2)),q.(x.1,y.1))
+proc map_reduce(q:proc,p:proc,x:tuple7d,y:tuple7d)=p.(p.(p.(p.(p.(p.(q.(x.7,y.7),q.(x.6,y.6)),q.(x.5,y.5)),q.(x.4,y.4)),q.(x.3,y.3)),q.(x.2,y.2)),q.(x.1,y.1))
+
+proc map_reduce(q:proc,p:proc,x:tuple,y:tuple,z:tuple)=error_type() :compile_error("Number of dimensions does not match")
+proc map_reduce(q:proc,p:proc,x:tuple1d,y:tuple1d,z:tuple1d)=q.(x.1,y.1,z.1)
+proc map_reduce(q:proc,p:proc,x:tuple2d,y:tuple2d,z:tuple2d)=p.(q.(x.2,y.2,z.2),q.(x.1,y.1,z.1))
+proc map_reduce(q:proc,p:proc,x:tuple3d,y:tuple3d,z:tuple3d)=p.(p.(q.(x.3,y.3,z.3),q.(x.2,y.2,z.2)),q.(x.1,y.1,z.1))
+proc map_reduce(q:proc,p:proc,x:tuple4d,y:tuple4d,z:tuple4d)=p.(p.(p.(q.(x.4,y.4,z.4),q.(x.3,y.3,z.3)),q.(x.2,y.2,z.2)),q.(x.1,y.1,z.1))
+proc map_reduce(q:proc,p:proc,x:tuple5d,y:tuple5d,z:tuple5d)=p.(p.(p.(p.(q.(x.5,y.5,z.5),q.(x.4,y.4,z.4)),q.(x.3,y.3,z.3)),q.(x.2,y.2,z.2)),q.(x.1,y.1,z.1))
+proc map_reduce(q:proc,p:proc,x:tuple6d,y:tuple6d,z:tuple6d)=p.(p.(p.(p.(p.(q.(x.6,y.6,z.6),q.(x.5,y.5,z.5)),q.(x.4,y.4,z.4)),q.(x.3,y.3,z.3)),q.(x.2,y.2,z.2)),q.(x.1,y.1,z.1))
+proc map_reduce(q:proc,p:proc,x:tuple7d,y:tuple7d,z:tuple7d)=p.(p.(p.(p.(p.(p.(q.(x.7,y.7,z.7),q.(x.6,y.6,z.6)),q.(x.5,y.5,z.5)),q.(x.4,y.4,z.4)),q.(x.3,y.3,z.3)),q.(x.2,y.2,z.2)),q.(x.1,y.1,z.1))
+
+proc apply(p:proc,x:tuple1d)=p.(x.1)
+proc apply(p:proc,x:tuple2d)=p.(x.1,x.2)
+proc apply(p:proc,x:tuple3d)=p.(x.1,x.2,x.3)
+proc apply(p:proc,x:tuple4d)=p.(x.1,x.2,x.3,x.4)
+proc apply(p:proc,x:tuple5d)=p.(x.1,x.2,x.3,x.4,x.5)
+proc apply(p:proc,x:tuple6d)=p.(x.1,x.2,x.3,x.4,x.5,x.6)
+proc apply(p:proc,x:tuple7d)=p.(x.1,x.2,x.3,x.4,x.5,x.6,x.7)
+
+proc map_apply(q:proc,p:proc,x:tuple1d)=p.(q.(x.1))
+proc map_apply(q:proc,p:proc,x:tuple2d)=p.(q.(x.1),q.(x.2))
+proc map_apply(q:proc,p:proc,x:tuple3d)=p.(q.(x.1),q.(x.2),q.(x.3))
+proc map_apply(q:proc,p:proc,x:tuple4d)=p.(q.(x.1),q.(x.2),q.(x.3),q.(x.4))
+proc map_apply(q:proc,p:proc,x:tuple5d)=p.(q.(x.1),q.(x.2),q.(x.3),q.(x.4),q.(x.5))
+proc map_apply(q:proc,p:proc,x:tuple6d)=p.(q.(x.1),q.(x.2),q.(x.3),q.(x.4),q.(x.5),q.(x.6))
+proc map_apply(q:proc,p:proc,x:tuple7d)=p.(q.(x.1),q.(x.2),q.(x.3),q.(x.4),q.(x.5),q.(x.6),q.(x.7))
+
+proc map_apply(q:proc,p:proc,x:tuple,y:tuple)=error_type():compile_error("Number of dimensions does not match")
+proc map_apply(q:proc,p:proc,x:tuple1d,y:tuple1d)=p.(q.(x.1,y.1))
+proc map_apply(q:proc,p:proc,x:tuple2d,y:tuple2d)=p.(q.(x.1,y.1),q.(x.2,y.2))
+proc map_apply(q:proc,p:proc,x:tuple3d,y:tuple3d)=p.(q.(x.1,y.1),q.(x.2,y.2),q.(x.3,y.3))
+proc map_apply(q:proc,p:proc,x:tuple4d,y:tuple4d)=p.(q.(x.1,y.1),q.(x.2,y.2),q.(x.3,y.3),q.(x.4,y.4))
+proc map_apply(q:proc,p:proc,x:tuple5d,y:tuple5d)=p.(q.(x.1,y.1),q.(x.2,y.2),q.(x.3,y.3),q.(x.4,y.4),q.(x.5,y.5))
+proc map_apply(q:proc,p:proc,x:tuple6d,y:tuple6d)=p.(q.(x.1,y.1),q.(x.2,y.2),q.(x.3,y.3),q.(x.4,y.4),q.(x.5,y.5),q.(x.6,y.6))
+proc map_apply(q:proc,p:proc,x:tuple7d,y:tuple7d)=p.(q.(x.1,y.1),q.(x.2,y.2),q.(x.3,y.3),q.(x.4,y.4),q.(x.5,y.5),q.(x.6,y.6),q.(x.7,y.7))
+
+proc map_apply(q:proc,p:proc,x:tuple,y:tuple,z:tuple)=error_type() :compile_error("Number of dimensions does not match")
+proc map_apply(q:proc,p:proc,x:tuple1d,y:tuple1d,z:tuple1d)=p.(q.(x.1,y.1,z.1))
+proc map_apply(q:proc,p:proc,x:tuple2d,y:tuple2d,z:tuple2d)=p.(q.(x.1,y.1,z.1),q.(x.2,y.2,z.2))
+proc map_apply(q:proc,p:proc,x:tuple3d,y:tuple3d,z:tuple3d)=p.(q.(x.1,y.1,z.1),q.(x.2,y.2,z.2),q.(x.3,y.3,z.3))
+proc map_apply(q:proc,p:proc,x:tuple4d,y:tuple4d,z:tuple4d)=p.(q.(x.1,y.1,z.1),q.(x.2,y.2,z.2),q.(x.3,y.3,z.3),q.(x.4,y.4,z.4))
+proc map_apply(q:proc,p:proc,x:tuple5d,y:tuple5d,z:tuple5d)=p.(q.(x.1,y.1,z.1),q.(x.2,y.2,z.2),q.(x.3,y.3,z.3),q.(x.4,y.4,z.4),q.(x.5,y.5,z.5))
+proc map_apply(q:proc,p:proc,x:tuple6d,y:tuple6d,z:tuple6d)=p.(q.(x.1,y.1,z.1),q.(x.2,y.2,z.2),q.(x.3,y.3,z.3),q.(x.4,y.4,z.4),q.(x.5,y.5,z.5),q.(x.6,y.6,z.6))
+proc map_apply(q:proc,p:proc,x:tuple7d,y:tuple7d,z:tuple7d)=p.(q.(x.1,y.1,z.1),q.(x.2,y.2,z.2),q.(x.3,y.3,z.3),q.(x.4,y.4,z.4),q.(x.5,y.5,z.5),q.(x.6,y.6,z.6),q.(x.7,y.7,z.7))
+
+proc scan(p:proc,x:tuple1d)=x.1
+proc scan(p:proc,x:tuple2d)=[x.1,p.(x.1,x.2)]
+proc scan(p:proc,x:tuple3d)=[x.1,x2,p.(x2,x.3)] where x2=p.(x.1,x.2)
+proc scan(p:proc,x:tuple4d)=[x.1,x2,x3,p.(x3,x.4)] where x3=p.(x2,x.3) where x2=p.(x.1,x.2)
+proc scan(p:proc,x:tuple5d)=[x.1,x2,x3,x4,p.(x4,x.5)] where x4=p.(x3,x.4) where x3=p.(x2,x.3) where x2=p.(x.1,x.2)
+proc scan(p:proc,x:tuple6d)=[x.1,x2,x3,x4,x5,p.(x5,x.6)] where x5=p.(x4,x.5) where x4=p.(x3,x.4) where x3=p.(x2,x.3) where x2=p.(x.1,x.2) 
+proc scan(p:proc,x:tuple7d)=[x.1,x2,x3,x4,x5,x6,p.(x6,x.7)] where x6=p.(x5,x.6) where x5=p.(x4,x.5) where x4=p.(x3,x.4) where x3=p.(x2,x.3) where x2=p.(x.1,x.2) 
+
+proc pre_scan(p:proc,x:tuple1d,x0)=x0
+proc pre_scan(p:proc,x:tuple2d,x0)=[x0,x.1]
+proc pre_scan(p:proc,x:tuple3d,x0)=[x0,x.1,p.(x.1,x.2)]
+proc pre_scan(p:proc,x:tuple4d,x0)=[x0,x.1,x2,p.(x2,x.3)] where x2=p.(x.1,x.2)
+proc pre_scan(p:proc,x:tuple5d,x0)=[x0,x.1,x2,x3,p.(x3,x.4)] where x3=p.(x2,x.3) where x2=p.(x.1,x.2)
+proc pre_scan(p:proc,x:tuple6d,x0)=[x0,x.1,x2,x3,x4,p.(x4,x.5)] where x4=p.(x3,x.4) where x3=p.(x2,x.3) where x2=p.(x.1,x.2)
+proc pre_scan(p:proc,x:tuple7d,x0)=[x0,x.1,x2,x3,x4,x5,p.(x5,x.6)] where x5=p.(x4,x.5) where x4=p.(x3,x.4) where x3=p.(x2,x.3) where x2=p.(x.1,x.2) 
+
+type empty_head is unique{empty_head}
+
+proc head(x:null)=empty_head
+proc head(x:tuple)=x.1
+
+proc tail(x:null)=null
+proc tail(x:tuple1d)=null
+proc tail(x:tuple2d)=[x.2]
+proc tail(x:tuple3d)=[x.2,x.3]
+proc tail(x:tuple4d)=[x.2,x.3,x.4]
+proc tail(x:tuple5d)=[x.2,x.3,x.4,x.5]
+proc tail(x:tuple6d)=[x.2,x.3,x.4,x.5,x.6]
+proc tail(x:tuple7d)=[x.2,x.3,x.4,x.5,x.6,x.7]
+
+proc prepend(y,x:null)=[y]
+proc prepend(y,x:tuple1d)=[y,x.1]
+proc prepend(y,x:tuple2d)=[y,x.1,x.2]
+proc prepend(y,x:tuple3d)=[y,x.1,x.2,x.3]
+proc prepend(y,x:tuple4d)=[y,x.1,x.2,x.3,x.4]
+proc prepend(y,x:tuple5d)=[y,x.1,x.2,x.3,x.4,x.5]
+proc prepend(y,x:tuple6d)=[y,x.1,x.2,x.4,x.4,x.5,x.6]
+proc prepend(y,x:tuple7d)=error_type() :compile_error("Cannot add dimension to 7d tuple")
+
+proc append(x:null,y)=[y]
+proc append(x:tuple1d,y)=[x.1,y]
+proc append(x:tuple2d,y)=[x.1,x.2,y]
+proc append(x:tuple3d,y)=[x.1,x.2,x.3,y]
+proc append(x:tuple4d,y)=[x.1,x.2,x.3,x.4,y]
+proc append(x:tuple5d,y)=[x.1,x.2,x.3,x.4,x.5,y]
+proc append(x:tuple6d,y)=[x.1,x.2,x.4,x.4,x.5,x.6,y]
+proc append(y,x:tuple7d)=error_type() :compile_error( "Cannot add dimension to 7d tuple")
+
+proc elems(x:tuple1d)=x.1
+proc elems(x:tuple2d)=x.1,x.2
+proc elems(x:tuple3d)=x.1,x.2,x,3
+proc elems(x:tuple4d)=x.1,x.2,x.3,x.4
+proc elems(x:tuple5d)=x.1,x.2,x.3,x.4,x.5
+proc elems(x:tuple6d)=x.1,x.2,x.3,x.4,x.5,x.6
+proc elems(x:tuple7d)=x.1,x.2,x.3,x.4,x.5,x.6,x.7
+
+proc replace(x:tuple1d,y:literal(1),z)=[z]
+proc replace(x:tuple2d,y:literal(1),z)=[z,x.2]
+proc replace(x:tuple3d,y:literal(1),z)=[z,x.2,x.3]
+proc replace(x:tuple4d,y:literal(1),z)=[z,x.2,x.3,x.4]
+proc replace(x:tuple5d,y:literal(1),z)=[z,x.2,x.3,x.4,x.5]
+proc replace(x:tuple6d,y:literal(1),z)=[z,x.2,x.3,x.4,x.5,x.6]
+proc replace(x:tuple7d,y:literal(1),z)=[z,x.2,x.3,x.4,x.5,x.6,x.7]
+proc replace(x:tuple2d,y:literal(2),z)=[x.1,z]
+proc replace(x:tuple3d,y:literal(2),z)=[x.1,z,x.3]
+proc replace(x:tuple4d,y:literal(2),z)=[x.1,z,x.3,x.4]
+proc replace(x:tuple5d,y:literal(2),z)=[x.1,z,x.3,x.4,x.5]
+proc replace(x:tuple6d,y:literal(2),z)=[x.1,z,x.3,x.4,x.5,x.6]
+proc replace(x:tuple7d,y:literal(2),z)=[x.1,z,x.3,x.4,x.5,x.6,x.7]
+proc replace(x:tuple3d,y:literal(3),z)=[x.1,x.2,z]
+proc replace(x:tuple4d,y:literal(3),z)=[x.1,x.2,z,x.4]
+proc replace(x:tuple5d,y:literal(3),z)=[x.1,x.2,z,x.4,x.5]
+proc replace(x:tuple6d,y:literal(3),z)=[x.1,x.2,z,x.4,x.5,x.6]
+proc replace(x:tuple7d,y:literal(3),z)=[x.1,x.2,z,x.4,x.5,x.6,x.7]
+proc replace(x:tuple4d,y:literal(4),z)=[x.1,x.2,x.3,z]
+proc replace(x:tuple5d,y:literal(4),z)=[x.1,x.2,x.3,z,x.5]
+proc replace(x:tuple6d,y:literal(4),z)=[x.1,x.2,x.3,z,x.5,x.6]
+proc replace(x:tuple7d,y:literal(4),z)=[x.1,x.2,x.3,z,x.5,x.6,x.7]
+proc replace(x:tuple5d,y:literal(5),z)=[x.1,x.2,x.3,x.4,z]
+proc replace(x:tuple6d,y:literal(5),z)=[x.1,x.2,x.3,x.4,z,x.6]
+proc replace(x:tuple7d,y:literal(5),z)=[x.1,x.2,x.3,x.4,z,x.6,x.7]
+proc replace(x:tuple6d,y:literal(6),z)=[x.1,x.2,x.3,x.4,x.5,z]
+proc replace(x:tuple7d,y:literal(6),z)=[x.1,x.2,x.3,x.4,x.5,z,x.7]
+proc replace(x:tuple7d,y:literal(7),z)=[x.1,x.2,x.3,x.4,x.5,x.6,z]
+
+proc spread(x,y:tuple1d or literal(1))=[x]
+proc spread(x,y:tuple2d or literal(2))=[x,x]
+proc spread(x,y:tuple3d or literal(3))=[x,x,x]
+proc spread(x,y:tuple4d or literal(4))=[x,x,x,x]
+proc spread(x,y:tuple5d or literal(5))=[x,x,x,x,x]
+proc spread(x,y:tuple6d or literal(6))=[x,x,x,x,x,x]
+proc spread(x,y:tuple7d or literal(7))=[x,x,x,x,x,x,x]
+
+proc +(x:tuple(num),y:tuple(num))=map($+,x,y)
+
+proc -(x:tuple(num),y:tuple(num))=map($-,x,y)
+proc *(x:tuple(num),y:tuple(num))=map($*,x,y)
+proc /(x:tuple(num),y:tuple(num))=map($/,x,y)
+proc **(x:tuple(num),y:tuple(num))=map($**,x,y)
+proc mod(x:tuple(num),y:tuple(num))=map($mod,x,y)
+proc +(x:tuple(num),y:num)=map_const($+,x,y)
+proc -(x:tuple(num),y:num)=map_const($-,x,y)
+proc *(x:tuple(num),y:num)=map_const($*,x,y)
+proc /(x:tuple(num),y:num)=map_const($/,x,y)
+proc **(x:tuple(num),y:num)=map_const($**,x,y)
+proc mod(x:tuple(num),y:num)=map_const($mod,x,y)
+proc max(x:tuple(real_num),y:tuple(real_num))=map($max,x,y)
+proc min(x:tuple(real_num),y:tuple(real_num))=map($min,x,y)
+proc max(x:tuple(real_num))=reduce($max,x)
+proc min(x:tuple(real_num))=reduce($min,x)
+proc sum(x:tuple(num))=reduce($+,x)
+proc prod(x:tuple(num))=reduce($*,x)
+proc sint(x:tuple(num))=map($sint,x)
+proc int(x:tuple(num))=map($int,x)
+proc sreal(x:tuple(num))=map($sreal,x)
+proc real(x:tuple(num))=map($real,x)
+
+proc string(x:tuple1d)="[ "++x.1++" ]"
+proc string(x:tuple2d)="[ "++x.1++", "++x.2++" ]"
+proc string(x:tuple3d)="[ "++x.1++", "++x.2++", "++x.3++" ]"
+proc string(x:tuple4d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++" ]"
+proc string(x:tuple5d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++" ]"
+proc string(x:tuple6d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++", "++x.6++" ]"
+proc string(x:tuple7d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++", "++x.6++", "++x.7++" ]"
+
+//  *****************************************************
+//  RANGES AND SEQUENCES
+//  *****************************************************
+
+// Partial ranges and sequences for slicing
+type underscore is unique{PM__underscore}
+type _subscript is any_int,range(any_int),seq(any_int,any_int),underscore,range_below(any_int),range_above(any_int),seq_above(any_int,any_int), seq_below(any_int,any_int), seq_stride(any_int)
+type subscript is _subscript or tuple(_subscript)
+type extent(ndim:dimension_number) is tuple(range(int),ndim)
+proc size(x:extent)=map_reduce($size,$*,x)
+
+proc complete(x:extent,y:subscript)=_complete(x,y) check "Subscript "++y++" is out of bounds "++x=>y in x
+proc _complete(x:tuple1d,y:_subscript)=_complete(x.1,y)
+proc _complete(x:range(int),y:any_int)=int(y)
+proc _complete(x:range(int),y:range(any_int))=int(y)
+proc _complete(x:range(int),y:seq(any_int,any_int))=int(y)
+proc _complete(x:range(int),y:underscore)=x
+proc _complete(x:range(int),y:range_below(any_int))=low(x)..int(y._t)
+proc _complete(x:range(int),y:range_above(any_int))=int(y._t)..high(x)
+proc _complete(x:range(int),y:seq_below(any_int))=low(x)..int(y._t) by int(y._st)
+proc _complete(x:range(int),y:seq_above(any_int))=int(y._t)..high(x) by int(y._st)
+proc _complete(x:range(int),y:seq_step(any_int))=x by int(y._st)
+proc _complete(x,y)=map($_complete,x,y) check "Subscript has incorrect rank"=>rank(x)==rank(y)
+
+type range_below(x:range_base) is rec {_t:x}
+type range_above(x:range_base) is rec {_t:x}
+type seq_below(x:range_base,s:step_base) is rec {_t:x,_st:step_base}
+type seq_above(x:range_base,s:step_base) is rec {_t:x,_st:step_base}
+type seq_step(x:step_base) is rec {_st:step_base}
+proc ..(x:underscore,y:range_base)=rec range_below{_t=x}
+proc ..(x:range_base,y:underscore)=rec range_above{_t=x}
+proc by(x:range_below,y:step_base)=rec seq_below{_t=x,_st=y}
+proc by(x:range_above,y:step_base)=rec seq_above{_t=x,_st=y}
+proc by(x:underscore,y:step_base)=rec seq_step{_st=y}
+proc string(x:range_below)="_.."++x._t
+proc string(x:range_above)=x._t++".._"
+proc string(x:seq_below)="_.."++x._t++" by "++x._st
+proc string(x:seq_above)=x._t++".._ by "++x._st
+proc string(x:seq_step)="_ by "++x._st
+proc low(x:range_below or seq_below or seq_step)=_
+proc high(x:range_above or seq_above or seq_step)=_
+proc step(x:range_above or range_below)=literal(1)
+proc low(x:range_above or seq_above)=x._t
+proc high(x:range_below or seq_below)=x._t
+proc step(x:seq_above or seq_below or seq_step)=x._st
+
+//  Not in operator
+proc notin(x,y)=not(x in y)
+
+//  not inc operator
+proc notinc(x,y)=not(x inc y)
+
+//  Treat null as empty sequence in some cases
+proc in(x,y:null)=literal(false)
+proc in(x:null,y:null)=literal(true)
+
+//  Range base type (might later expand to interface)
+type range_base is real_num
+type step_base is real_num
+
+//  Range types
+type range(t:range_base) is rec {_lo:t,_hi:t,_n:t}
+proc ..(x:range_base,y:range_base)=rec range {
+_lo=xx,_hi=yy,_n=max(0,int(yy-xx)+1)} where xx,yy=balance(x,y)
+proc low(x:range)=x._lo
+proc high(x:range)=x._hi
+proc step(x:range)=convert(1,x._lo)
+proc width(x:range)=literal(1)
+proc norm(x:range)=x
+proc #'(x:range(int))=[0..x._n-1]
+proc dims(x:range(int))=[x._n]
+proc size(x:range(int))=x._n
+proc +(x:range,y:range_base)=rec range {
+  _lo=x._lo+y,_hi=x._hi+y,_n=x._n
+}
+proc -(x:range,y:range_base)=rec range {
+  _lo=x._lo-y,_hi=x._hi-y,_n=x._n
+}
+proc _arb(x:range)=low(x)
+proc in(x:range_base,y:range())=x>=y._lo and x<=y._hi
+proc convert(x:range,y:range_base)=rec range {
+  _lo=convert(x._lo,y),_hi=convert(x._hi,y),_n=x._n
+}
+proc sint(x:range)=rec range {
+  _lo=sint(x._lo),_hi=sint(x._hi),_n=x._n
+}
+proc int(x:range)=rec range {
+  _lo=int(x._lo),_hi=int(x._hi),_n=x._n
+}
+proc sreal(x:range)=rec range {
+  _lo=sreal(x._lo),_hi=sreal(x._hi)
+}
+proc real(x:range)=rec range {
+  _lo=real(x._lo),_hi=real(x._hi),_n=x._n
+}
+proc inc(x:range,y:seq())= low(y)>=x._lo and high(y)<=x._hi 
+proc element(x:range(any_int),y:int)=x._lo+convert(y,x._lo)
+proc element(x:range(any_int),y:range(int))=element(x,y._lo)..element(x,y._hi)
+proc element(x:range(any_int),y:seq(int))=element(x,y._lo)..element(x,y._hi) by y._st
+proc element(x:range(any_int),y:null)=x
+proc element(x:range(any_int),y:any_seq)=y+x._lo
+proc #'(y:range(any_int),x:int)=int(x-y._lo)
+proc #'(y:range(any_int),x:range(int))=int(x._lo-y._lo)..int(x._hi-y._lo)
+proc #'(y:range(any_int),x:seq(int))=_intseq(int(x._lo-y._lo),int(x._hi-y._lo), x._st)
+proc #'(y:range(any_int),x:range_below(int))=0..int(x._t-y._lo)
+proc #'(y:range(any_int),x:range_above(int))=int(x._t-y._lo)..size(y)-1
+proc #'(y:range(any_int),x:seq_below(int))=_intseq(0,int(x._t-y._lo),x._st)
+proc #'(y:range(any_int),x:seq_above(int))=_intseq(int(x._t-y._lo),size(y)-1,int(x._st))
+proc #'(y:range(any_int),x:seq_step(int))=_intseq(0,size(y),int(x._st))
+proc #'(y:range(any_int),x:null)=0..size(y)
+proc intersect(x:range(any_int),y:range(any_int))=max(y._lo,x._lo)..min(y._hi,x._hi)
+proc overlap(x:range(any_int),y:range(any_int))=max(y._lo,x._lo)-x._lo..min(y._hi,x._hi)-x._lo
+proc expand(x:range,y:range)=x._lo+y._lo..x._hi+y._hi
+proc contract(x:range,y:range)=x._lo-y._lo..x._hi-y._hi
+proc empty(x:range)=rec range {
+  _lo=x._hi,_hi=x._lo,_n=0
+}
+proc string(x:range)=string(x._lo)++".."++(x._hi)
+
+//  Sequence (strided range) types
+type seq(t:range_base,s:step_base) is rec {_lo:t,_hi:t,_st:s,_n:int}
+proc _seq(lo,hi,st)=rec seq {
+_lo=lo,_hi=lo+(n-1)*st,_st=st,_n=n}check "Zero step size in strided range"=>st/=0 where n=max(0,1+_rdiv(int((hi-lo)),int(st)))
+proc by(x:range(int),y:range_base)=_seq(lo,hi,st) where hi=convert(x._hi,lo) where lo,st=balance(x._lo,y)
+proc by(x:seq,y:range_base)=_seq(lo,hi,st) where lo=convert(x._lo,st),hi=convert(x._hi,st) where st=x._st*y
+proc _intseq(x:int,y:int,st:int)= rec seq {
+_lo=x,_hi=x+n*s,_st=s,_n=n} where s=if(x>y=>-abs(st),abs(st)) where n=abs((y-x)/st)
+proc low(x:seq)=x._lo
+proc high(x:seq)=x._hi
+proc step(x:seq)=x._st
+proc size(x:seq)=x._n
+proc width(x:seq)=literal(1)
+proc norm(x:seq)=min(lo,hi)..max(lo,hi) by abs(x._st)where hi=lo+(x._n-1)*x._st where lo=x._lo
+proc align(x:seq)=literal(0)
+proc #'(x:seq)=[0..x._n-1]
+proc dims(x:seq)=[x._n]
+proc +(x:seq,y:range_base)=rec seq {
+  _lo=x._lo+y,_hi=x._hi+y,_st=x._st,_n=x._n
+}
+proc -(x:seq,y:range_base)=rec seq {
+  _lo=x._lo-y,_hi=x._hi-y,_st=x._st,_n=x._n
+}
+proc _arb(x:seq)=x._lo
+proc convert(x:seq,y:range_base)=rec seq {
+  _lo=convert(x._lo,y),_hi=convert(x._hi,y),_st=convert(x._st,y),_n=x._n
+}
+proc sint(x:seq)=rec seq {
+  _lo=sint(x._lo),_hi=sint(x._hi),_st=sint(x._st),_n=x._n
+}
+proc int(x:seq)=rec seq {
+  _lo=int(x._lo),_hi=int(x._hi),_st=int(x._st),_n=x._n
+}
+proc sreal(x:seq)=rec seq {
+  _lo=sreal(x._lo),_hi=sreal(x._hi),_st=sreal(x._st),_n=x._n
+}
+proc real(x:seq)=rec seq {
+  _lo=real(x._lo),_hi=real(x._hi),_st=real(x._st),_n=x._n
+}
+proc in(x:int,y:seq(int))=y._lo<=x and x<=y._hi and (x-y._lo) mod y._st==0
+proc inc(x:seq(int),y:seq(int))=y._lo in x and y._hi in x and (y._n==1 or y._lo+y._st in x)
+proc inc(x:seq(int),y:range(int))=x inc low(y)..high(y) by 1
+proc #'(y:seq,x:range_base)=int((x-y._lo)/y._st)
+proc #'(y:seq,x:range)=y#x._lo..y#x._hi
+proc #'(y:seq,x:seq)=_intseq(lo,hi,int(x._st)) where lo=y#x._lo,hi=y#x._hi  
+proc #'(y:seq,x:range_below)=0..y#x._t
+proc #'(y:seq,x:range_above)=y#x._t..size(y)-1
+proc #'(y:seq,x:seq_below)=_intseq(0,y#x._t,int((x._st+y._st/2)/y._st))
+proc #'(y:seq,x:seq_above)=_intseq(y#x._t,size(y)-1,int((x._st+y._st/2)/y._st))
+proc #'(y:seq,x:seq_step)=_intseq(0,size(y),int((x._st+y._st/2)/y._st))
+proc #'(y:seq,x:null)=0..size(y)-1
+proc string(x:seq)=x._lo++".."++x._hi++" by "++x._st
+proc element(x:seq,y:int)=x._lo+convert(y,x._lo)*x._st
+proc element(x:seq,y:range(int))=_seq(element(x,y._lo),element(x,y._hi),x._st)
+proc element(x:seq,y:seq(int))=_seq(element(x,y._lo),element(x,y._hi),convert(st*y._st,st)) where st=x._st
+proc element(x:seq,y:null)=x
+proc overlap(x:seq(any_int),y:range(any_int))= max(0,(y._lo-x._lo+x._st-1)/x._st)..min(x._n,(y._hi-x._lo)/x._st)
+proc overlap(x:range(any_int),y:seq(any_int))=max((-d+y._st-1)/y._st*y._st+d,d)..min(x._n,y._hi-x._lo) by y._st where d=y._lo-x._lo
+proc intersect(x:seq(any_int),y:range(any_int))=x._lo+max(convert(0,n1),n1)*x._st..x._lo+min(convert(x._n,n2),n2)*x._st by x._st where n1=(y._lo-x._lo+x._st-1)/x._st,n2=(y._hi-x._lo)/x._st
+proc intersect(x:range(any_int),y:seq(any_int))=intersect(y,x)
+PM__intrinsic _intersect_seq(int,int,int,int,int,int,int,int)->(int,int,int,int) : "intersect_seq"
+proc intersect(x:seq(any_int),y:seq(any_int))=rec seq {
+_lo=lo,_hi=hi,_st=st,_n=n}where lo,hi,st,n=_intersect_seq(int(x._lo),int(x._hi),int(x._st),int(x._n),int(y._lo),int(y._hi),int(y._st),int(y._n))
+proc overlap(x:seq(any_int),y:seq(any_int))=rec seq {
+_lo=(lo-x._lo)/x._st,_hi=(hi-x._lo)/x._st,_st=if(sst/=0=>sst,1),_n=n} where sst=st/x._st where lo,hi,st,n=_intersect_seq(int(x._lo),int(x._hi),int(x._st),int(x._n), int(y._lo),int(y._hi),int(y._st),int(y._n))
+proc empty(x:seq(any_int))=rec seq {
+  _lo=x._hi,_hi=x._lo,_st=x._st,_n=0
+}
+
+//  Block sequence
+type block_seq is rec { _lo:int,_hi:int,_st:int,_b:int,_n:int,_align:int}
+proc block_seq(lo:int,hi:int,st:int,b:int,align:int){
+  test "Block sequence width must be non-negative: "++b=>b>=0
+  test "Block sequence width must be less than step: "++b++">="++st=>b<=st
+  test "Block sequence alignment must be less that width: "++align++">="++b=>align<st
+  return rec block_seq {
+  _lo=lo,_hi=min(hi,lo-align+nc*st+b-1),_st=st,_b=b,_n=n,_align=align} where n=nc*b+max(0,min(b,df+1-nc*st))-align where nc=df/st where df=hi-lo+align
+}
+proc first_block(x:block_seq)=if(x._align==0=>1..0,x._lo..x._lo-x._align+x._b-1)
+proc last_block(x:block_seq)=low..min(low+x._b,x._hi) where low=x._lo-x._align+nb*x._st where nb=(x._hi-x._lo+x._align+x._st-x._b+1)/x._st
+proc middle_blocks(x:block_seq)=rec block_seq {
+_lo=low,_hi=low+nb*x._st-1,_st=x._st,_b=x._b,_n=nb*x._b,_align=0}where nb=(x._hi-low+x._st-x._b+1)/x._st where low=if(x._align==0=>x._lo,x._lo-x._align+x._st)
+proc string(x:block_seq)=x._lo++".."++x._hi++" by "++x._st++" width "++x._b++" align "++x._align
+proc low(x:block_seq)=x._lo
+proc high(x:block_seq)=x._hi
+proc step(x:block_seq)=x._st
+proc width(x:block_seq)=x._b
+proc norm(x:block_seq)=x
+proc align(x:block_seq)=x._align
+proc #'(x:block_seq)=[0..x._n-1]
+proc dims(x:block_seq)=x._n
+proc size(x:block_seq)=x._n
+proc +(x:block_seq,y:int)=rec block_seq {
+  _lo=x._lo+y,_hi=x._hi+y,_st=x._st,_b=x._b,_n=x._n,_align=x._align
+}
+proc -(x:block_seq,y:int)=rec block_seq {
+  _lo=x._lo-y,_hi=x._hi-y,_st=x._st,_b=x._b,_n=x._n,_align=x._align
+}
+proc _arb(x:block_seq)=x._lo
+proc in(x:int,y:block_seq)=x>=y._lo and x<=y._hi and (x-y._lo+y._align) mod y._st<y._b
+proc #'(y:block_seq,x:int)=nb*y._b+xx-nb*y._st where nb=xx/y._st where xx=x-y._lo+y._align 
+proc #'(y:block_seq,x:any_seq)=overlap(map_seq(y),map_seq(x))
+proc element(x:block_seq,y:int)=x._lo+y+((y+x._align)/x._b)*(x._st-x._b)
+proc intersect(x:block_seq,y:range(any_int)){
+  var lo=max(x._lo,y._lo)
+  var hi=min(x._hi,y._hi)
+  let oldbase=x._lo-x._align
+  let nblo=((lo-oldbase)/x._st)*x._st+oldbase
+  let nbhi=((hi-oldbase)/x._st)*x._st+oldbase
+  if lo-nblo>=x._b:lo=nblo+x._st
+  if hi-nbhi>=x._b:hi=nbhi+x._b-1
+  let align=base-(base/x._st)*x._st where base=lo-oldbase
+  return block_seq(lo,hi,x._st,x._b,align)
+}
+            
+proc intersect(x:range(any_int),y:block_seq)=intersect(y,x)
+proc overlap(x:range(any_int),y:block_seq) {
+  let z=intersect(y,x)
+  return block_seq(z._lo-x._lo,z._hi-x._lo,z._st,z._b,z._align)
+}
+proc overlap(x:block_seq,y:range(any_int)) {
+  let z=intersect(x,y)
+  return start..start+size(z)-1 where start=z#z._lo
+}
+proc overlap(x:block_seq,y:range(any_int)) {
+  let z=intersect(x,y)
+  return start..start+size(z)-1, block_seq(z._lo-x._lo,z._hi-x._lo,z._st,z._b,z._align) where start=z#z._lo
+}
+proc overlap(x:range(any_int),y:block_seq)=xx,yy where yy,xx=overlap(y,x)
+proc empty(x:block_seq)=block_seq(1,0,1,1,0)
+
+/*
+//  Mapped sequence
+type map_seq(t:array(int)) is rec {array:t}
+proc map_seq(x:any_seq){
+  var a=array(0,#x)
+  forall i in a,j in x:i=j
+  return rec map_seq{
+    array=a
+  }
+}
+proc map_seq(x:array(int,mshape1d))=rec map_seq {
+array=x} check "Array for ""map_seq"" must be strictly increasing or stricly decreasing"=>_mono(x)
+proc _mono(x) {
+    /*
+  xs=#x
+  var ok=true
+  if x[low(xs.1)]<x[high(xs.1)] {
+    forall i in low(xs.1)+1..high(xs.1){
+      if x[i]<x[i-1]:sync ok=false
+    }
+  } else{
+    forall i in low(xs.1)+1..high(xs.1):if x[i]>x[i-1]:sync ok=false
+  }
+  return ok
+*/
+}
+proc map_seq(x:map_seq)=x
+proc #'(x:map_seq)=#'(x.array)
+proc dims(x:map_seq)=size(x.array)
+proc size(x:map_seq)=size(x.array)
+proc +(x:map_seq,y:range_base)=rec map_seq{
+  array=x.array+y
+}
+proc -(x:map_seq,y:range_base)=rec map_seq{
+  array=x.array-y
+}
+proc _arb(x:map_seq)=_arb(x.array)
+proc element(x:map_seq,y:int)=element(x.array,y)
+PM__intrinsic _intersect_aseq(&any,any,any,any,any,&any): "intersect_aseq"
+PM__intrinsic _overlap_aseq(&any,any,any,any,any,&any): "intersect_aseq"(1)
+PM__intrinsic _overlap_aseq2(&any,any,any,any,any,&any,&any): "intersect_aseq"(2)
+PM__intrinsic _expand_aseq(&any,any,any,&any,any,any): "expand_aseq"
+PM__intrinsic _intersect_bseq(&any,any,any,any,any,any,any,any,any,any,any,any): "intersect_bseq"
+PM__intrinsic _overlap_bseq(&any,any,any,any,any,any,any,any,any,any,any,any): "intersect_bseq"(1)
+PM__intrinsic _overlap_bseq2(&any,any,any,any,any,any,any,any,any,any,any,any,any): "intersect_bseq"(2)
+PM__intrinsic _includes_aseq(any,any,any,any)->(bool) : "includes_aseq"
+PM__intrinsic _index_aseq(any,any,any)->(int) : "index_aseq"
+PM__intrinsic _in_aseq(any,any,any)->(bool) : "in_aseq"
+proc intersect(x:block_seq,y:block_seq)=intersect(map_seq(x),map_seq(y))
+proc overlap(x:block_seq,y:block_seq)=overlap(map_seq(x),map_seq(y))
+proc overlap(x:block_seq,y:block_seq)=v,w where v,w=overlap(map_seq(x),map_seq(y))
+proc intersect(x:map_seq,y:map_seq) {
+  var a=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
+  var n=0
+  _intersect_aseq(&n,x.array,size(x.array),y.array,size(y.array),&a)
+  v=rec map_seq {
+    array=a[0..n-1]
+  }
+  return v
+}
+proc overlap(x:map_seq,y:map_seq) {
+  var a=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
+  var n=0
+  _overlap_aseq(&n,x.array,size(x.array),y.array,size(y.array),&a)
+  v=rec map_seq {
+    array=a[0..n-1]
+  }
+  return v
+}
+proc overlap(x:map_seq,y:map_seq) {
+  var a=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
+  var b=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
+  var n=0
+  _overlap_aseq2(&n,x.array,size(x.array),y.array,size(y.array),&a,&b)
+  ns=[0..n-1]
+  v=rec map_seq {
+    array=a[ns]
+  }
+  w=rec map_seq {
+    array=b[ns]
+  }
+  return v,w
+}
+proc overlap(x:seq,y:seq)=overlap(x,y),overlap(y,x)
+proc expand(t:map_seq,i:range(any_int)) {
+  var a=array(0,[0..max(1,size(t)*max(1,size(i))-1)])
+  var m=0
+  _expand_aseq(&m,t.array,size(t.array),&a,low(i),high(i))
+  v=rec map_seq {
+    array=a[0..m-1]
+  }
+  return v
+}
+proc inc(x:map_seq,y:map_seq)=_includes_aseq(x.array,size(x.array),y.array,size(y.array))
+proc inc(x:map_seq,y:seq or block_seq)=x inc map_seq(y)
+proc inc(x:block_seq,y:block_seq)=map_seq(x) inc map_seq(y)
+proc inc(x:seq or block_seq,y:map_seq)=map_seq(x) inc y
+proc in(y:any_int,x:map_seq)=_in_aseq(x.array,size(x.array),int(y))
+proc #'(x:map_seq,y:any_int)=_index_aseq(x.array,size(x.array),int(y))
+proc empty(x:map_seq) {
+  a=array(0,[1..0])
+  return rec map_seq {
+    array=a
+  }
+}
+*/
+proc map_seq(x)=x
+proc _rdiv(x,y)=if(y<0=>if(x<0=>x/y,(y-x+1)/y),x>0=>x/y,(x-y+1)/y)
+
+
+type any_seq is range(int),seq(int,int),block_seq // , map_seq
+
+//  Grids (tuples of sequences)
+type _gdim is any_seq or int
+type grid1d(t1:_gdim) is [t1] except [int]
+type grid2d(t1:_gdim,t2:_gdim) is [t1,t2] except [int,int]
+type grid3d(t1:_gdim,t2:_gdim,t3:_gdim) is [t1,t2,t3] except [int,int,int]
+type grid4d(t1:_gdim,t2:_gdim,t3:_gdim,t4:_gdim) is [t1,t2,t3,t4] except [int,int,int,int]
+type grid5d(t1:_gdim,t2:_gdim,t3:_gdim,t4:_gdim,t5:_gdim) is [t1,t2,t3,t4,t5] except [int,int,int,int,int]
+type grid6d(t1:_gdim,t2:_gdim,t3:_gdim,t4:_gdim,t5:_gdim,t6:_gdim) is [t1,t2,t3,t4,t5,t6] except [int,int,int,int,int,int]
+type grid7d(t1:_gdim,t2:_gdim,t3:_gdim,t4:_gdim,t5:_gdim,t6:_gdim,t7:_gdim) is [t1,t2,t3,t4,t5,t6,t7] except [int,int,int,int,int,int,int]
+type grid(ndim:dimension_number) is tuple(_gdim,ndim) except tuple(int,ndim)
+
+PM__intrinsic _shp(x:int)->(PM__tinyint) : "miss_arg"
+proc _shp(x)=0..size(x)-1
+proc _sliceit(...)=tuple(...)
+proc #'(x:grid)=map_apply($_shp,$_sliceit,x)
+PM__intrinsic _size(x:int)->(PM__tinyint) : "miss_arg"
+proc _size(x)=size(x)
+proc extent(x:grid)=map_apply($_shp,$_sliceit,x)
+proc dims(x:grid)=map_apply($_size,$_sliceit,x)
+proc low(x:grid)=map($low,x)
+proc high(x:grid)=map($high,x)
+proc +(x:grid,y:tuple(range_base))=map($+,x,y)
+proc -(x:grid,y:tuple(range_base))=map($-,x,y)
+proc empty(x:grid)=map($empty,x)
+proc element(x:tuple(any_seq),y)=map($element,x,y)
+proc element(x:grid,y)=_gel(head(x),tail(x),head(y),tail(y))
+proc _gel(x:_gdim,xx,y,yy)=prepend(element(x,y),_gel(head(xx),tail(xx),head(yy),tail(yy)))
+proc _gel(x:int,xx,y,yy)=prepend(x,_gel(head(xx),tail(xx),y,yy))
+proc _gel(x:empty_head,xx,y:empty_head,yy)=null
+proc _gel(x:empty_head,xx,y,yy)=error_type():compile_error("Rank mismatch")
+
+
+
+//  **************************************
+//  ARRAYS
+//  **************************************
+
+/*
+//  Array types
+type array(e,d:shape) is varray(e,d),farray(e,d)
+type varray(e,d:shape) is e^var d,array_template(e,d,fix(true))
+type farray(e,d:shape) is e^let d,e^invar d,e^fix d,array_template(e,d,fix(false))
+type farray(e,d:mshape) is ...,
+    array_slice(e^let any),array_slice(e^var any),array_slice(e^invar any),array_slice(e^fix any)
+
+//  Array operations
+proc _arb(x:any^mshape)=_get_aelem(x,0)
+PM__if_compiling
+proc size(x:any^mshape)=size(#x)
+PM__else
+PM__intrinsic size(x:any^mshape)->(int) : "get_size"
+PM__endif
+
+*/
+
+PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any)->(=x) : "array"
+PM__intrinsic<<needs_type>> _varray(x:any,y:any,z:any)->(=x) : "var_array"
+
+
+PM__intrinsic _array_mshape(x:any^any)->(=x) : "get_dom"
+PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
+PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
+proc array(x,d:extent)=_array(x,_mshape(d),size(d))
+proc #'(x:any^any)=_array_mshape(x)._extent
+proc element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
+
+
+/*
+PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
+PM__intrinsic<<needs_type>> PM__dim_noinit(x:any,y:any,z:any)->(=x) : "array_noinit"
+proc #%(x:invar any^any)=_array_shape(x <<PM__ignore>>)
+proc #%(x)=_get_shape(x)
+proc _get_shape(x)=#x
+proc #'(x:any^any)=_array_shape(x)
+PM__intrinsic _array_shape(x:any^any)->(=x) : "get_dom"
+proc dims(x:any^mshape)=dims(#x)
+PM__intrinsic PM__extractelm(x:any^any)->(=x) : "extractelm"
+proc element(a:any^mshape,t:index)=_get_aelem(a,index(#(a),t))
+proc _set_elem(&a:any^mshape,v,t:index){
+  PM__setaelem(&a,index(#(a),t),v) 
+}
+ 
+proc _make_subref(a:any^mshape,t:index)=_make_subref(a,index(#(a),t))
+PM__intrinsic _make_subref(a:any^mshape,i:int)->(=a) : "make_rf"
+PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
+PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
+
+*/
+
+type _mshape(ndim:dimension_number,contig:literal(bool)) is rec {_extent:extent(ndim),_m:tuple(int,ndim),_n:int,_o:int,_c:contig}
+proc _mshape(g:extent(1))=rec _mshape{_extent=g,_m=[1],_n=size(g.1),_o=o,_c=true} where o=-_point2index(dims(g),low(g))
+proc _mshape(g:extent(2))=rec _mshape{_extent=g,_m=[1,s1],_n=s1*size(g.2),_o=o,_c=true} where s1=size(g.1) where o=-_point2index(dims(g),low(g))
+proc _mshape(g:extent(3))=rec _mshape{_extent=g,_m=[1,s1,s2],_n=s2*size(g.3),_o=o,_c=true} where s2=s1*size(g.2) where s1=size(g.1) where o=-_point2index(dims(g),low(g))
+proc _mshape(g:extent(4))=rec _mshape{_extent=g,_m=[1,s1,s3,s3],_n=s3*size(g.4),_o=o,_c=true} where s3=s2*size(g.3) where s2=s1*size(g.2) where s1=size(g.1) where o=-_point2index(dims(g),low(g))
+proc _mshape(g:extent(5))=rec _mshape{_extent=g,_m=[1,s1,s2,s3,s4],_n=s4*size(g.5),_o=o,_c=true} where s4=s3*size(g.4) where s3=s2*size(g.3) where s2=s1*size(g.2) where s1=size(g.1) where o=-_point2index(dims(g),low(g))
+proc _mshape(g:extent(6))=rec _mshape{_extent=g,_m=[1,s1,s2,s3,s4,s5],_n=s5*size(g.6),_o=o,_c=true}  where s5=s4*size(g.5) where s4=s3*size(g.4) where s3=s2*size(g.3) where s2=s1*size(g.2) where s1=size(g.1) where o=-_point2index(dims(g),low(g))
+proc _mshape(g:extent(7))=rec _mshape{_extent=g,_m=[1,s1,s2,s3,s4,s5,s6],_n=s6*size(g.7),_o=o,_c=true} where s6=s5*size(g.6) where s5=s4*size(g.5) where s4=s3*size(g.4) where s3=s2*size(g.3) where s2=s1*size(g.2) where s1=size(g.1) where o=-_point2index(dims(g),low(g))
+
+
+//  Linear index of mshape (zero base,unit stride)
+proc _point2index(g:_mshape,p:tuple(any_int))=_point2index(g,int(p))
+proc _point2index(g:_mshape(1,literal(true)),p:tuple(int,1))=g._o+g._m.1*p.1
+proc _point2index(g:_mshape(2,literal(true)),p:tuple(int,2))=g._o+g._m.1*p.1+g._m.2*p.2
+proc _point2index(g:_mshape(3,literal(true)),p:tuple(int,3))=g._o+g._m.1*p.1+g._m.2*p.2+g._m.3*p.3
+proc _point2index(g:_mshape(4,literal(true)),p:tuple(int,4))=g._o+g._m.1*p.1+g._m.2*p.2+g._m.3*p.3+g._m.4*p.4
+proc _point2index(g:_mshape(5,literal(true)),p:tuple(int,5))=g._o+g._m.1*p.1+g._m.2*p.2+g._m.3*p.3+g._m.4*p.4+g._m.5*p.5
+proc _point2index(g:_mshape(6,literal(true)),p:tuple(int,6))=g._o+g._m.1*p.1+g._m.2*p.2+g._m.3*p.3+g._m.4*p.4+g._m.5*p.5+g._m.6*p.6
+proc _point2index(g:_mshape(7,literal(true)),p:tuple(int,7))=g._o+g._m.1*p.1+g._m.2*p.2+g._m.3*p.3+g._m.4*p.4+g._m.5*p.5+g._m.6*p.6+g._m.7*p.7
+proc _point2index(g:_mshape(1,literal(false)),p:tuple(int,1))=g._o+p.1
+proc _point2index(g:_mshape(2,literal(false)),p:tuple(int,2))=g._o+p.1+g._m.2*p.2
+proc _point2index(g:_mshape(3,literal(false)),p:tuple(int,3))=g._o+p.1+g._m.2*p.2+g._m.3*p.3
+proc _point2index(g:_mshape(4,literal(false)),p:tuple(int,4))=g._o+p.1+g._m.2*p.2+g._m.3*p.3+g._m.4*p.4
+proc _point2index(g:_mshape(5,literal(false)),p:tuple(int,5))=g._o+p.1+g._m.2*p.2+g._m.3*p.3+g._m.4*p.4+g._m.5*p.5
+proc _point2index(g:_mshape(6,literal(false)),p:tuple(int,6))=g._o+p.1+g._m.2*p.2+g._m.3*p.3+g._m.4*p.4+g._m.5*p.5+g._m.6*p.6
+proc _point2index(g:_mshape(7,literal(false)),p:tuple(int,7))=g._o+p.1+g._m.2*p.2+g._m.3*p.3+g._m.4*p.4+g._m.5*p.5+g._m.6*p.6+g._m.7*p.7
+proc _point2index(g:_mshape,p:tuple(int))=0: compile_error("Rank mismatch in index")
+
+//  Linear index of tuple of ranges or ints (zero base)
+proc _indx(g:range(int),s)=int(s)-low(g)
+proc _indx(g:any_int,s)=int(s)
+proc _sz(x:int)=x
+proc _sz(x:range(int))=x._n
+proc _point2index(g:tuple(int,1) or extent(1),s:any_int)=int(_indx(g.1,s))
+proc _point2index(g:tuple(int,1) or extent(1),s:tuple(any_int,1))=int(_indx(g.1,s.1))
+proc _point2index(g:tuple(int,2) or extent(2),s:tuple(any_int,2))=int(_indx(g.1,s.1)+_sz(g.1)*_indx(g.2,s.2))
+proc _point2index(g:tuple(int,3) or extent(3),s:tuple(any_int,3))=int(_indx(g.1,s.1)+_sz(g.1)*(_indx(g.2,s.2)+_sz(g.2)*_indx(g.3,s.3)))
+proc _point2index(g:tuple(int,4) or extent(4),s:tuple(any_int,4))= int(_indx(g.1,s.1)+_sz(g.1)* (_indx(g.2,s.2)+_sz(g.2)* (_indx(g.3,s.3)+_sz(g.3)* _indx(g.4,s.4))))
+proc _point2index(g:tuple(int,5) or extent(5),s:tuple(any_int,5))= int(_indx(g.1,s.1)+_sz(g.1)* (_indx(g.2,s.2)+_sz(g.2)* (_indx(g.3,s.3)+_sz(g.3)* (_indx(g.4,s.4)+_sz(g.4)* _indx(g.5,s.5)))))
+proc _point2index(g:tuple(int,6) or extent(6),s:tuple(any_int,6))= int(_indx(g.1,s.1)+_sz(g.1)* (_indx(g.2,s.2)+_sz(g.2)* (_indx(g.3,s.3)+_sz(g.3)* (_indx(g.4,s.4)+_sz(g.4)* (_indx(g.5,s.5)+_sz(g.5)* _indx(g.6,s.6))))))
+proc _point2index(g:tuple(int,7) or extent(7),s:tuple(any_int,7))= int(_indx(g.1,s.1)+_sz(g.1)* (_indx(g.2,s.2)+_sz(g.2)* (_indx(g.3,s.3)+_sz(g.3)* (_indx(g.4,s.4)+_sz(g.4)* (_indx(g.5,s.5)+_sz(g.5)* (_indx(g.6,s.6)+_sz(g.6)* (_indx(g.7,s.7))))))))
+
+proc _index2point(i:int,s:range(int))=[i+s._lo]
+proc _index2point(i:int,s:int)=[i]
+proc _index2point(i:int,s:tuple(int,1))=[i]
+proc _index2point(i:int,s:tuple(int,2))=[i1,i2] where i1=i-i2*_sz(s.1) where i2=i/_sz(s.1)
+proc _index2point(i:int,s:tuple(int,3))=[i1,i2,i3] where i1=i-j2*_sz(s.1) where i2=j2-i3*_sz(s.2) where i3=j2/_sz(s.2) where j2=i/_sz(s.1)
+proc _index2point(i:int,s:tuple(int,4))=[i1,i2,i3,i4] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-i4*_sz(s.3) where i4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1) 
+proc _index2point(i:int,s:tuple(int,5))=[i1,i2,i3,i4,i5] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-j4*_sz(s.3) where i4=j4-i5*_sz(s.4) where i5=j4/_sz(s.4) where j4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1)  
+proc _index2point(i:int,s:tuple(int,6))=[i1,i2,i3,i4,i5,i6] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-j4*_sz(s.3) where i4=j4-j5*_sz(s.4) where i5=j5-i6*_sz(s.5) where i6=j5/_sz(s.5) where j5=j4/_sz(s.4) where j4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1)  
+proc _index2point(i:int,s:tuple(int,7))=[i1,i2,i3,i4,i5,i6,i7] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-j4*_sz(s.3) where i4=j4-j5*_sz(s.4) where i5=j5-j6*_sz(s.5) where i6=j6-i7*_sz(s.6) where i7=j6/_sz(s.6) where j6=j5/_sz(s.5) where j5=j4/_sz(s.4) where j4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1)
+
+/*
+//  Numeric array operations
+proc -(x:num^any)={
+  -xx:xx in x
+}
+proc +(x:num^any,y:num)={
+  xx+y:xx in x
+}
+proc -(x:num^any,y:num)={
+  xx-y:xx in x
+}
+proc *(x:num^any,y:num)={
+  xx*y:xx in x
+}
+proc *(x:num,y:num^any)={
+  x*yy:yy in y
+}
+proc /(x:num^any,y:num)={
+  xx/y:xx in x
+}
+
+
+//  *****************************************
+//  ARRAY TEMPLATES
+//  *****************************************
+//  Array templates
+type array_template(a,d:mshape or dshape,v:fix(bool)) is rec {_a:a,_d:d,_s:int,_v:v}
+proc array(a:any,s:dshape)=rec array_template {
+  _a=a,_d=s,_s=s._size,_v=fix(false)
+}
+proc array(a:any,s:mshape(tuple(range(int))))=rec array_template {
+  _a=a,_d=s,_s=size(s),_v=fix(false)
+}
+proc array(a:any,s:tuple(range(any_int)))=array(a,shape(s))
+proc varray(a:any,s:mshape or dshape)=rec array_template {
+  _a=a,_d=s,_s=size(s),_v=fix(true)
+}
+proc varray(a:any,s:tuple(range(any_int)))=varray(a,shape(s))
+proc _zero(x)=0
+proc varray(a:any,s:tuple(null))=varray(a,shape(map($_zero,s)))
+//  Treat a template as if it were an array
+proc _arb(a:array_template)=a._a
+proc #(a:array_template(,mshape,))=a._d
+proc dims(a:array_template(,mshape,))=dims(a._d)
+proc size(a:array_template)=a._s
+proc redim(a:array_template,d:mshape)= rec array_template {
+_a=a,_d=d,_s=size(d),_v=a._v} check "New dshape does not have same size in redim"=> size(d)==a._s 
+proc element(a:array_template,...:subs)=a._a
+//  Array creation from template
+
+proc PM__dup(a:array_template(,shape,))=_array(PM__dup(a._a),a._d,int(a._s),a._v)
+proc PM__dup(a:array_template(,shape,fix(true)))=_array(PM__dup(a._a),PM__dup(a._d),PM__dup(int(a._s)),a._v)
+proc PM__do_dim(a:any,d:mshape)=_array(a,d,size(d),fix(false))
+
+*/
+
+// ***************************************************
+// LOOPS AND PARALLEL STATEMENTS
+// ***************************************************
+
+proc PM__for_stmt'(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<inline>> {
+    PM__for shape {
+      here_in_tile=PM__generate(shape,shape) 
+      PM__context PM__topology,PM__outer,PM__region,PM__schedule,here_in_tile,PM__mask {
+        var inouts=PM__import(PM__inouts)
+        var inout_a=PM__get_elem(PM__inout_a,here_in_tile)  
+        PM__block_proc.'(&inouts,
+           PM__import(PM__ins),
+           &inout_a,
+           PM__get_elem(PM__in_a,here_in_tile),
+           PM__get_elem(PM__star_a,here_in_tile) <<inline>>)
+        PM__export(&PM__inouts,inouts)
+        PM__set_elem(&PM__inout_a,inout_a,here_in_tile)
+      }
+   }
+}
+
+proc PM__par_stmt'(num) yield() <<inline>> {  yield() }
+proc PM__check_task'(num)=true
+
+proc PM__chan_stmt'() yield() { yield() }
+proc PM__over_stmt'(x) yield() { yield() }
+
+proc #'(x)=x
+
+proc PM__check_iter(x){}
+proc PM__check_iter_amp(x){}
+proc PM__check_iter_star(x){}
+proc PM__check_iter(x,y){}
+proc PM__check_iter_amp(x,y){}
+proc PM__check_iter_star(x,y){}
+
+proc PM__get_elem(x:PM__list,h)=PM__each_index(i in num_elements(x):h)
+proc PM__get_elem(x,h)=h
+proc PM__set_elem(&x,y,h) {}
+proc PM__export(&x,y) {}
+
+proc PM__import(x:PM__list)=PM__each_index(i in num_elements(x):PM__import(element_at_index(x,i)))
+PM__intrinsic PM__import(x:any)->(=x) : "import_val"
+
+proc PM__generate(x,n)=old_dumpit(_elts(x,1,n))
+PM__intrinsic<<is_generator>> _iota(siz:int,start:int,finish:int,incr:int,totsiz:int)->(int) : "iota"
+PM__intrinsic<<is_generator>> _iota(siz:int,start:int,finish:int,incr:int,first:int,trunc:int,totsiz:int)->(int) : "iota"
+proc _n(x:int)=x
+proc _elts(x:int,siz,tot)=old_dumpit(_iota(siz,0,x,1,tot))
+proc _elts(x:tuple1d,siz,tot)=tuple(_elts(x.1,siz,tot))
+proc _elts(x:tuple2d,siz,tot)=tuple(_elts(x.1,siz,tot),_elts(x.2,siz*_n(x.1),tot) )
+proc _elts(x:tuple3d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts( x.3, s1*_n(x.2), tot)) where s1=siz*_n(x.1)
+proc _elts(x:tuple4d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts(x.3,s2,tot),_elts(x.4,s2*_n(x.3),tot)) where s2=s1*_n(x.2) where s1=siz*_n(x.1)
+proc _elts(x:tuple5d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts(x.3,s2,tot),_elts(x.4,s3,tot),_elts(x.5,s3*_n(x.4), tot)) where s3=s2*_n(x.3) where s2=s1*_n(x.2) where s1=siz*_n(x.1)
+proc _elts(x:tuple6d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts(x.3,s2,tot),_elts(x.4,s3,tot),_elts(x.5,s4,tot),_elts(x.6,s4*_n(x.5), tot)) where s4=s3*_n(x.4) where s3=s2*_n(x.3) where s2=s1*_n(x.2) where s1=siz*_n(x.1)
+proc _elts(x:tuple7d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts(x.3,s2,tot),_elts(x.4,s3,tot),_elts(x.5,s4,tot),_elts(x.6,s5,tot),_elts(x.7,s5*_n(x.6), tot)) where s5=s4*_n(x.5) where s4=s3*_n(x.4) where s3=s2*_n(x.3) where s2=s1*_n(x.2) where s1=siz*_n(x.1)
+
+//  **************************************************
+//  SUPPORT FOR OTHER LANGUAGE FEATURES
+//  **************************************************
+
+//  Keyword arguments
+proc PM__getkey(x:any,y:any)=convert(x,y)
+proc PM__getkey(x:null,y:any)=y
+
+//  Switch statement
+proc PM__checkcase(x:literal,y:literal)=match_switch_case(x,y)
+proc PM__checkcase(x,y)=match_switch_case(x,y)
+proc match_switch_case(x:literal,y:literal)=x==y
+proc match_switch_case(x:fix(any),y:fix(any))=x==y
+proc match_switch_case(x,y)=x==y
+proc match_switch_case(x:real_num,y:range(real_num))=x>=y._lo and x<=y._hi
+proc match_switch_case(x:real_num,y:_crange)=x>=y._lo and x<=y._hi
+proc match_switch_case(x:literal(int),y:_crange)=(x>=y._lo and x<=y._hi) as <literal(bool)>
+proc match_switch_case(x:fix(int),y:_crange)=x>=y._lo and x<=y._hi
+proc match_switch_case(x:<any>,y:<any>)=y inc x
+type _crange is rec{_lo,_hi}
+proc PM__caserange(x,y)=x..y
+proc PM__caserange(x:fix(int),y:fix(int))=rec _crange{
+  _lo=x,_hi=y
+}
+
+//  Conditional operators
+proc PM__if(x,y,z) check "Incompatible types in different ""if"" branches"=> same_type(y,z) {
+  var r=z
+  if x {
+    r=y 
+  }
+  return r 
+}
+   
+proc PM__if(x:fix(true),y,z)=y
+proc PM__if(x:fix(false),y,z)=z
+proc PM__if(x:fix(true),y:literal,z)=y
+proc PM__if(x:fix(false),y,z:literal)=z
+proc PM__switch(w,x,y,z) check "Incompatible types in different ""switch"" branches"=> same_type(y,z) {
+  var r=z
+  if match(w,x) {
+    r=y 
+  }
+  return r 
+}
+   
+proc PM__switch(w:fix(int),x:fix(int),y,z)=PM__if(w==x,y,z)
+proc PM__switch(w:fix(string),x:fix(string),y,z)=PM__if(w==x,y,z)
+proc PM__switch(w:fix(bool),x:fix(bool),y,z)=PM__if(w==x,y,z)
+proc PM__switch(w,x,y,...)=PM__switch(w,x,y,PM__switch(w,...))
+
+/*
+//  Assignment
+proc PM__assign_or_init(a,b)<<inline>>=a {
+  PM__assign_var(&^(a),b)
+}
+*/
+
+
+/*
+type assignment_operator is $_just_assign,$+,$*,$&,$|,$~,$and,$or,$++,...
+
+proc PM__assign(&a:any,b:any,c:assignment_operator) {
+  PM__assign(&a,c.(a,b)) 
+}
+*/
+ 
+proc PM__assign(&a:any,b:any,c:proc) {
+    compile_error("Not a recognised assignment operator") 
+}
+ 
+proc check_assign_types(x,y){
+    test "Type mismatch in assignment"=>same_type(x,y)
+}
+proc _assign(&a,b) {
+  _assign_element(&a,b)
+}
+
+/*
+proc _assign(&a:contains(farray),b) {
+  _assign_structure(&a,b)
+}
+*/
+/*
+proc _assign_structure(&a,b)<<foreach^(a,b)>>{
+  _assign_element(&a,b)
+}
+proc _assign_structure(&a:farray,b){
+  _array_assign(&a,b,fix(true))
+}
+*/
+PM__intrinsic _assign_element(&any,any): "assign"
+
+
+//  Other variable operations
+
+proc PM__assign_or_init(&a:PM__assign_or_init,b)=PM__dup(b as a)
+
+proc PM__assign_or_init(&a,b)=a:PM__assign(&a,b)
+
+proc PM__init_const(&a:PM__assign_or_init,b)=PM__dup(b as a)
+
+proc PM__init_const(&a,b)=a: compile_error( "Cannot initialise a constant twice")
+
+proc PM__assign_var(&a,b) {
+  PM__assign(&a,b)
+}
+
+proc PM__dup(x)=x
+
+proc PM__assign(&a:any,b:any) {
+  _assign(&a,c) where c=b as a
+}
+
+PM__intrinsic PM__clone(x:any)->(=x) : "clone"
+PM__intrinsic PM__make_var(x:any)->(=x) : "clone"
+PM__intrinsic PM__make_var'(x:priv)->(=x) : "clone_var" priv
+PM__intrinsic PM__make_var'(x:any)->(=x) : "clone" priv
+PM__intrinsic PM__make_const'(x:any)->(=x) : "clone_var"
+PM__intrinsic PM__make_const(x:any)->(=x) : "clone_var"
+proc PM__init_var(x:any,y:any)=PM__make_var(x,y)
+proc PM__init_const(x:any,y:any)=PM__make_const(x,y)
+proc PM__init_var'(x:any,y:any)=PM__make_var'(x,y)
+proc PM__init_const'(x:any,y:any)=PM__make_const'(x,y)
+proc PM__make_var(x,y)=PM__make_var(x as y)
+proc PM__make_const(x,y)=PM__make_const(x as y)
+PM__intrinsic PM__dechan'(x:any)->(=x): "clone_var" 
+/*
+PM__intrinsic PM__dup(x:fix(int))->(int) : "clone"
+PM__intrinsic PM__dup(x:fix(real))->(real) : "clone"
+PM__intrinsic PM__dup(x:fix(string))->(string) : "clone"
+PM__intrinsic PM__dup(x:fix(bool))->(bool) : "clone"
+PM__intrinsic PM__dup(x:literal(int))->(int) : "clone"
+PM__intrinsic PM__dup(x:literal(real))->(real) : "clone"
+PM__intrinsic PM__dup(x:literal(string))->(string) : "clone"
+PM__intrinsic PM__dup(x:literal(bool))->(bool) : "clone"
+*/
+PM__intrinsic PM__getref(x:any)->(=x) : "get_rf"
+PM__intrinsic<<needs_type>> same_type(x:any,y:any)->(==x,y) : "logical_return"
+
+/*
+proc ==(x:any,y:any) {
+  test "Cannot apply ""=="" to different types"=> same_type(x,y)
+  var ok=true
+  _eq(x,y,&ok)
+  return ok
+}
+proc /=(x:any,y:any) {
+  test "Cannot apply ""/="" to different types"=> same_type(x,y)
+  var ok=true
+  _eq(x,y,&ok)
+  return not ok
+}
+proc _eq(x:any,y:any,&ok) <<foreach^(x,y)>> {
+  ok=ok and x==y 
+}
+*/
+
+proc PM__valref(x)=x
+proc PM__check_alias(...){}
+ 
+PM__intrinsic PM__copy_out(x:any)->(=x) : "clone"
+PM__intrinsic PM__copy_back(x:any)->(=x) : "assign"
+proc next_enum(x:int)=x+convert(1,x)
+proc next_enum(x:int,y:int)=x+convert(y,x)
+
+PM__intrinsic<<needs_type>> .element_at_index(&x:any,y:fix(int))->(|x):"elem"
+PM__intrinsic<<needs_type>> element_at_index(x:any,y:fix(int))->(|x):"elem"
+
+proc elements(x)=_elements(x,1)
+proc _elements(x,i:literal(int)) {
+    let e...
+    if fix(i==num_elements(x)) {
+        let ...e=_cons(PM__element_at(x,i),_list_end)
+    } else {
+        let ...e=_cons(PM__element_at(x,i),_elements(x,i+1))
+    }
+    return e
+}
+
+//  Type values
+PM__intrinsic<<needs_type>> typeof(x:any)->(type x) : "make_type_val"
+proc is(x,t)=t inc typeof(x)
+proc isnt(x,t)=not(x is t)
+proc as(x,t:<any>)...=PM__cast(x,t)
+proc as(x,t)=PM__cast(x,typeof(t))
+PM__intrinsic<<needs_type>> inc(x:<any>,y:<any>)->( inc x,y) : "type_include_fold"
+proc ==(x:<any>,y:<any>)=x inc y and y inc x
+PM__intrinsic error_type()->(=1) : "error_type"
+
+//  Debugging
+PM__intrinsic<<is_impure>> _dump(any,any): "new_dump"
+proc PM__dump(x)<<no_inline>>:_dump("Value:",x)
+proc PM__dump(y,x)<<no_inline>>:if y:_dump("Value:",x)
+/*
+proc PM__dump%(x)<<no_inline>>{
+  print("$"++here)
+  _dump(string(here),x)
+}
+proc PM__dump%(y:bool,x)<<no_inline>>{
+  if y:_dump(string(here),x)
+}
+proc PM__dump%(y,x){
+  test "Selection expression in ""$$dump"" not ""bool""" => fix(false)
+  $$infer_type(y)
+}
+*/
+PM__intrinsic<<is_impure>> old_dump(any): "dump"
+proc old_dumpit(a) {
+  old_dump(a)
+  return a 
+}
+ 
+PM__intrinsic<<is_impure>> old_dump_id(any): "dump_id"
+
+proc PM__filesys()=1234
+
+proc PM__check_alias(a,b) {}
+proc PM__lhs_and_val(a)=a
+proc PM__rhs_and_val(a)=a
+proc PM__copy_in(a)=a
+proc PM__copy_out(&a,b):a=b
+
+proc PM__for_in(a)=a
+proc PM__for_var(a)=a
+
+proc PM__import_param'(x)=x
+proc PM__export_param'(x)=x
+proc PM__import_param'(&x,y){}
+
+proc PM__make_over'(a)=a
+
+PM__intrinsic<<needs_type>> PM__list_concat(x:PM__list,y:PM__list)->(=x):"list_concat"
+PM__intrinsic<<needs_type>> PM__list_splice(x:PM__list,y:PM__list,i:literal(int),j:literal(int))->(=x):"list_splice"
+
+proc compile_error(mess:literal(string)): test mess=>false

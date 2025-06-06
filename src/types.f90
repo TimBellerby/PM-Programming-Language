@@ -1437,7 +1437,7 @@ contains
     case(pm_type_is_any)
        do i=1,pm_tv_numargs(u)
            if(.not.pm_test_type_includes(context,p,pm_tv_arg(u,i),&
-               ior(mode,pm_type_incl_nomatch),params,base,user,ubase)) then
+                mode,params,base,user,ubase)) then
              ok=.false.
              return
           endif
@@ -1508,6 +1508,7 @@ contains
        else
           ok=.true.
        endif
+       return
     case(pm_type_is_bottom)
        ok=.true.
        return
@@ -1688,23 +1689,41 @@ contains
                mode,params,base,user,ubase)
        endif
     case(pm_type_is_any)
+       ok=.false.
        do i=1,pm_tv_numargs(t)
           if(pm_test_type_includes(context,pm_tv_arg(t,i),q,&
-               ior(mode,pm_type_incl_nomatch),params,base,user,ubase)) then
+               mode,params,base,user,ubase)) then
              ok=.true.
-             return
+             if(iand(mode,pm_type_incl_extract+pm_type_incl_nomatch)/=pm_type_incl_extract) then
+                return
+             endif
           endif
       enddo
-      ok=.false.
     case(pm_type_is_all)
        do i=1,pm_tv_numargs(t)
           if(.not.pm_test_type_includes(context,pm_tv_arg(t,i),q,&
-               mode,params,base,user,ubase)) then
+               ior(mode,pm_type_incl_nomatch),params,base,user,ubase)) then
              ok=.false.
              return
           endif
        enddo
+       ! Just when matching - need to run all and match
+       if(iand(mode,pm_type_incl_extract+pm_type_incl_nomatch)==pm_type_incl_extract) then
+          do i=1,pm_tv_numargs(t)
+             ok=pm_test_type_includes(context,pm_tv_arg(t,i),q,&
+                mode,params,base,user,ubase)
+          enddo
+       endif
        ok=.true.
+    case(pm_type_is_except)
+       ok=pm_test_type_includes(context,pm_tv_arg(t,2),q,&
+            ior(mode,pm_type_incl_nomatch),params,base,user,ubase)
+       if(.not.ok) then
+          ok=pm_test_type_includes(context,pm_tv_arg(t,1),q,&
+               mode,params,base,user,ubase)
+       else
+          ok=.false.
+       endif
     case(pm_type_is_single_name)
        ok=.false.
     case(pm_type_is_proc)
@@ -1776,13 +1795,6 @@ contains
           ok=pm_tv_arg(t,1)==q
        else
           ok=.false.
-       endif
-    case(pm_type_is_except)
-       ok=pm_test_type_includes(context,pm_tv_arg(t,1),q,&
-            mode,params,base,user,ubase)
-       if(ok) then
-          ok=.not.pm_test_type_includes(context,pm_tv_arg(t,2),q,&
-            mode,params,base,user,ubase)
        endif
     case(pm_type_is_params)
        nt=pm_tv_name(t)
@@ -2257,7 +2269,7 @@ contains
     integer:: tk,ptyp,atyp,pmode,amode
     type(pm_ptr):: tv
 !!$    write(*,*) 'Convert',trim(pm_type_as_string(context,partyp)),&
-!!$         '<-',trim(pm_type_as_string(context,argtyp)),doliteral,doproc
+!!$         '::',trim(pm_type_as_string(context,argtyp)),doliteral,doproc
     ctyp=-1
     if(partyp<0.or.argtyp<0) then
        return
@@ -2274,6 +2286,10 @@ contains
        ptyp=pm_user_type_body(context,ptyp)
        tk=pm_type_kind(context,ptyp)
     enddo
+    if(tk==pm_type_is_param) then
+       ptyp=pm_type_arg(context,ptyp,1)
+       tk=pm_type_kind(context,ptyp)
+    endif
     if(doliteral.and.pm_type_kind(context,atyp)==pm_type_is_literal_value) then
        ctyp=pm_literal_type_convert(context,ptyp,atyp)
     endif
@@ -2295,6 +2311,7 @@ contains
     integer,intent(in):: partyp,argtyp
     integer:: ctyp
     integer:: tk
+ 
     ctyp=pm_type_arg(context,argtyp,1)
     tk=pm_type_kind(context,partyp)
     if(tk==pm_type_is_fix) then
@@ -2673,7 +2690,7 @@ contains
     type(pm_context),pointer:: context
     integer,intent(in):: tno
     logical,intent(in),optional:: distr
-    character(len=1024):: str
+    character(len=2048):: str
     integer:: n
     str=''
     if(tno==0) then
@@ -2970,8 +2987,9 @@ contains
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
        if(add_char(')')) return
     case(pm_type_is_literal)
+       if(add_char('literal(')) return
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
-       if(add_char('_literal')) return
+       if(add_char(')')) return
     case(pm_type_is_except)
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
        if(add_char(' except ')) return
@@ -3090,13 +3108,25 @@ contains
        if(add_char(trim(sym_names(name)))) return
        if(add_char(' ')) return
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
-    case(pm_type_is_param,pm_type_is_params)
+    case(pm_type_is_params)
        if(pm_opts%show_details) then
-          if(add_char('{')) return
+          if(add_char('[[=')) return
+          if(add_char(trim(pm_int_as_string(pm_tv_name(tv))))) return
+          if(add_char('::')) return
        endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,noequiv=.true.)
        if(pm_opts%show_details) then
-          if(add_char('}')) return
+          if(add_char('=]]')) return
+       endif
+    case(pm_type_is_param)
+       if(pm_opts%show_details) then
+          if(add_char('<<')) return
+          if(add_char(trim(pm_int_as_string(pm_tv_name(tv))))) return
+          if(add_char('--')) return
+       endif
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,noequiv=.true.)
+       if(pm_opts%show_details) then
+          if(add_char('>>')) return
        endif
     case(pm_type_is_gated)
        if(pm_opts%show_details) then
@@ -3186,6 +3216,14 @@ contains
       integer:: i,m,name2
       logical:: tuple
       params=-1
+
+!!$      if(add_char('<%')) return
+!!$      call pm_type_to_string(context,templ,str,n)
+!!$      if(add_char('%>')) return
+!!$
+!!$      ok=.false.
+!!$      return
+
       ok=pm_type_extract_params(context,templ,typ,params)
       if(ok) then
          m=0
@@ -3201,6 +3239,7 @@ contains
          if(n>len(str)-10) return
          if(m>0) then
             if(add_char(merge('[','(',tuple))) return
+            if(tuple) m=m-1
             do i=1,m
                if(params(i)>0) then
                   call pm_type_to_string(context,params(i),str,n)

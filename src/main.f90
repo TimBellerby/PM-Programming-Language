@@ -67,7 +67,13 @@ program pm
 
   ! Command line 
   call pm_get_command_line(context,module_name)
-  
+
+  ! Run REPL if -i option is present
+  if(pm_opts%is_repl) then
+     call repl(context)
+     stop
+  endif
+
   ! Compilation
   call run_parser(module_name,root_module,module_dict,visibility)
   call run_linker(root_module,module_dict)
@@ -126,7 +132,7 @@ contains
     call dcl_module(parser,'PM__system')
     parser%sysmodl=parser%modl
 
-    call pm_module_filename('lib.sys.pm',str2)
+    call pm_module_filename('lib.sys.pm',str2,pm_opts%lib_path_set,pm_opts%lib_path)
     call pm_open_file(pm_comp_file_unit,str2,ok)
     if(.not.ok) then
        if(pm_main_process) then
@@ -154,7 +160,7 @@ contains
     endif
     
     ! Parse other modules
-    call pm_module_filename(mname,str2)
+    call pm_module_filename(mname,str2,pm_opts%lib_path_set,pm_opts%lib_path)
     if(.not.pm_file_exists(str2)) then
        if(pm_main_process) then
           write(*,*) 'Cannot open source file '//trim(str2)//&
@@ -175,7 +181,7 @@ contains
        str=' '
        module_name=get_modl_name(parser%modl)
        call pm_name_string(context,module_name,str)
-       call pm_module_filename(str,str2)
+       call pm_module_filename(str,str2,pm_opts%lib_path_set,pm_opts%lib_path)
        call pm_open_file(pm_comp_file_unit,str2,ok)
        if(.not.ok) then
           if(pm_main_process) then
@@ -383,19 +389,72 @@ contains
     endif
   end subroutine run_wcode_stage
 
-!!$  subroutine repl
-!!$    type(parse_state),target:: parser
-!!$    type(code_state):: coder
-!!$    type(wcoder),target:: wcd
-!!$    
-!!$    prog=root%data%ptr(root%offset+modl_stmts)
-!!$    if(pm_fast_isnull(prog)) call pm_stop('No program defined to run')
-!!$    call trav_prog(coder,prog)
-!!$    call prc_prog(coder)
-!!$    call init_wcoder(context,wcd,proc_cache,poly_cache)
-!!$    call wcode_prog(wcd,prog_code)
-!!$    call wcode_procs(wcd)
-!!$    
-!!$  end subroutine repl
+  subroutine repl(context)
+    type(pm_context),pointer:: context
+    type(parse_state),target:: parser
+    type(code_state):: coder
+    type(wcoder),target:: wcd
+    type(pm_ptr):: root,prog,dict
+    integer:: name,err
+    character(len=2000):: line,str2
+    logical:: first
+    call init_parser(parser,context)
+    call dcl_module(parser,'PM__system')
+    parser%sysmodl=parser%modl
+    call pm_module_filename('lib.sys.pm',str2,pm_opts%lib_path_set,pm_opts%lib_path)
+    call pm_open_file(pm_comp_file_unit,str2,ok)
+    if(.not.ok) then
+       if(pm_main_process) then
+          write(*,*) 'Cannot open system module: '//trim(str2)
+       endif
+       call pm_stop('Compilation terminated')
+    endif
+    !write(*,*) 'Parsing',trim(str)
+    call parse_file_on_unit(parser,pm_comp_file_unit,.false.)
+    close(pm_comp_file_unit)
+    if(parser%error_count>0) then
+       if(pm_main_process) then
+          write(*,*) 'Cannot parse system module: '//trim(str2)
+       endif
+       call pm_stop('Compilation terminated')
+    endif
+    name=pm_name_entry(context,'PM__REPL')
+    call new_modl(parser,name)
+    root=parser%modls
+    parser%modl=parser%modls
+    first=.true.
+    do
+       write(*,'(a)',advance='NO') 'PM> '
+       read(*,*) line
+       if(line=='exit') return
+       call parse_expr_from_string(parser,line,first)
+       first=.false.
+       dict=parser%modl_dict
+       visibility=parser%visibility
+       if(parser%error_count==0) then
+          err=0
+          call link_includes(context,err,dict)
+          if(err==0) then
+             prog=root%data%ptr(root%offset+modl_stmts)
+             if(pm_fast_isnull(prog)) call pm_stop('No program defined to run')
+             !call dump_parse_tree(context,6,prog,2)
+             call init_coder(context,coder,visibility)
+             call trav_prog(coder,prog)
+             call inf_prog(coder)
+             if(coder%num_errors==0) then
+                prog_code=coder%vstack(1)
+                proc_cache=coder%proc_cache
+                call init_wcoder(context,wcd,proc_cache,pm_null_obj)
+                call wcode_prog(wcd,prog_code)
+                code_cache=wcd%code_cache
+                call wcode_procs(wcd)
+                if(wcd%num_errors==0) then
+                   call pm_run_prog(context,pm_dict_vals(context,code_cache))
+                endif
+             endif
+          endif
+       endif
+    enddo
+  end subroutine repl
   
 end program pm
