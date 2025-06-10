@@ -290,7 +290,8 @@ module pm_vmdefs
   integer,parameter:: op_i32_i = op_start_i+33
   integer,parameter:: op_i64_i = op_start_i+34
   integer,parameter:: op_offset_i = op_start_i+35
-  integer,parameter:: op_stop_i = op_start_i+35
+  integer,parameter:: op_fmt_i = op_start_i+36
+  integer,parameter:: op_stop_i = op_start_i+36
 
   integer,parameter:: op_start_ln=op_stop_i
   integer,parameter:: op_add_ln=op_start_ln+1
@@ -326,7 +327,8 @@ module pm_vmdefs
   integer,parameter:: op_i32_ln = op_start_ln+33
   integer,parameter:: op_i64_ln = op_start_ln+34
   integer,parameter:: op_offset_ln = op_start_ln + 35
-  integer,parameter:: op_stop_ln = op_start_ln+35
+  integer,parameter:: op_fmt_ln = op_start_ln + 36
+  integer,parameter:: op_stop_ln = op_start_ln+36
 
   integer,parameter:: op_start_offset=op_stop_ln
   integer,parameter:: op_add_offset=op_start_offset+1
@@ -362,7 +364,8 @@ module pm_vmdefs
   integer,parameter:: op_i32_offset = op_start_offset+33
   integer,parameter:: op_i64_offset = op_start_offset+34
   integer,parameter:: op_long_offset = op_start_offset+35
-  integer,parameter:: op_stop_offset = op_start_offset+35
+  integer,parameter:: op_fmt_offset = op_start_offset+36
+  integer,parameter:: op_stop_offset = op_start_offset+36
 
   integer,parameter:: op_start_i8=op_stop_offset
   integer,parameter:: op_add_i8=op_start_i8+1
@@ -506,7 +509,8 @@ module pm_vmdefs
   integer,parameter:: op_i32_i64 = op_start_i64+33
   integer,parameter:: op_long_i64 = op_start_i64+34
   integer,parameter:: op_offset_i64 = op_start_i64+35
-  integer,parameter:: op_stop_i64 = op_start_i64+35
+  integer,parameter:: op_fmt_i64 = op_start_i64+36
+  integer,parameter:: op_stop_i64 = op_start_i64+36
 
   integer,parameter:: op_start_r =op_stop_i64
   integer,parameter:: op_add_r=op_start_r+1
@@ -553,7 +557,9 @@ module pm_vmdefs
   integer,parameter:: op_r64_r = op_start_r+44
   integer,parameter:: op_complex_r = op_start_r+45
   integer,parameter:: op_complex2_r = op_start_r+46
-  integer,parameter:: op_stop_r = op_start_r+46
+  integer,parameter:: op_fmt_r = op_start_r+47
+  integer,parameter:: op_fmt_dp_r = op_start_r+48
+  integer,parameter:: op_stop_r = op_start_r+48
 
   integer,parameter:: op_start_d =op_stop_r
   integer,parameter:: op_add_d=op_start_d+1
@@ -600,7 +606,9 @@ module pm_vmdefs
   integer,parameter:: op_r64_d= op_start_d+44
   integer,parameter:: op_complex_d = op_start_d+45
   integer,parameter:: op_complex2_d = op_start_d+46
-  integer,parameter:: op_stop_d = op_start_d+46
+  integer,parameter:: op_fmt_d = op_start_d+47
+  integer,parameter:: op_fmt_dp_d = op_start_d+48
+  integer,parameter:: op_stop_d = op_start_d+48
 
   integer,parameter:: op_start_c =op_stop_d
   integer,parameter:: op_add_c=op_start_c+1
@@ -1679,6 +1687,7 @@ contains
     op_names(op_gt_i)='gt_i'
     op_names(op_ge_i)='ge_i'
     op_names(op_string_i)='string_i'
+    op_names(op_fmt_i)='fmt_i'
     op_names(op_max_i)='max_i'
     op_names(op_min_i)='min_i'
     op_names(op_assign_i)='assign_i'
@@ -1713,6 +1722,7 @@ contains
     op_names(op_gt_ln)='gt_ln'
     op_names(op_ge_ln)='ge_ln'
     op_names(op_string_ln)='string_ln'
+    op_names(op_fmt_ln)='fmt_ln'
     op_names(op_max_ln)='max_ln'
     op_names(op_min_ln)='min_ln'
     op_names(op_assign_ln)='assign_ln'
@@ -1747,6 +1757,7 @@ contains
     op_names(op_gt_offset)='gt_offset'
     op_names(op_ge_offset)='ge_offset'
     op_names(op_string_offset)='string_offset'
+    op_names(op_fmt_offset)='fmt_offset'
     op_names(op_max_offset)='max_offset'
     op_names(op_min_offset)='min_offset'
     op_names(op_assign_offset)='assign_offset'
@@ -1905,6 +1916,7 @@ contains
     op_names(op_i32_i64)='i32_i64'
     op_names(op_offset_i64)='offset_i64'
     op_names(op_long_i64)='long_i64'
+    op_names(op_fmt_i64)='fmt_i64'
 
     op_names(op_add_r)='add_r'
     op_names(op_sub_r)='sub_r'
@@ -1919,6 +1931,8 @@ contains
     op_names(op_gt_r)='gt_r'
     op_names(op_ge_r)='ge_r'
     op_names(op_string_r)='string_r'
+    op_names(op_fmt_r)='fmt_r'
+    op_names(op_fmt_dp_r)='fmt_dp_r'
     op_names(op_max_r)='max_r'
     op_names(op_min_r)='min_r'
     op_names(op_assign_r)='assign_r'
@@ -1964,6 +1978,8 @@ contains
     op_names(op_gt_d)='gt_d'
     op_names(op_ge_d)='ge_d'
     op_names(op_string_d)='string_d'
+    op_names(op_fmt_d)='fmt_d'
+    op_names(op_fmt_dp_d)='fmt_dp_d'
     op_names(op_max_d)='max_d'
     op_names(op_min_d)='min_d'
     op_names(op_assign_d)='assign_d'
@@ -2131,6 +2147,7 @@ contains
     name=p%data%i16(p%offset+2)
   end function proc_get_name
 
+  ! Return line and module of given wcode offset into proc
   subroutine proc_line_module(proc,offset,line,modl)
     type(pm_ptr),intent(in):: proc
     integer,intent(in):: offset
@@ -2159,6 +2176,7 @@ contains
     include 'fesize.inc'
   end subroutine  proc_line_module
 
+  ! Return name associated with given slot no. at given code offset
   function proc_slot_name(proc,offset,slot) result(name)
     type(pm_ptr):: proc
     integer:: offset,slot
@@ -2194,6 +2212,43 @@ contains
     include 'fesize.inc'
   end function proc_slot_name
 
+  ! Return slot number associated with given name at given code offset
+  function proc_name_slot(proc,offset,name) result(slot)
+    type(pm_ptr):: proc
+    integer:: offset,name
+    integer:: slot
+    integer:: i,j,start,finish,n
+    type(pm_ptr):: p
+    integer:: k
+    name=0
+    if(pm_is_compiling) return
+    p=proc%data%ptr(proc%offset+1)
+    j=p%offset+pm_fast_esize(p)
+    do
+       k=p%data%i16(j)
+       if(k/=0) then
+          j=j-2
+       else
+          n=p%data%i16(j-1)
+          start=p%data%i16(j-2)
+          finish=p%data%i16(j-3)
+          j=j-n*2-4
+          if(offset>=start.and.offset<=finish) then
+             do i=1,n
+                if(p%data%i16(j+i*2)==name) then
+                   slot=p%data%i16(j+i*2)
+                   exit
+                endif
+             enddo
+          endif
+       endif
+       if(j<p%offset) exit
+    enddo
+  contains
+    include 'fesize.inc'
+  end function proc_name_slot
+
+  
   subroutine print_comp_procs(context,iunit,funcs)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit

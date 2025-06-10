@@ -425,7 +425,7 @@ contains
     first=.true.
     do
        write(*,'(a)',advance='NO') 'PM> '
-       read(*,*) line
+       read(*,'(a)') line
        if(line=='exit') return
        call parse_expr_from_string(parser,line,first)
        first=.false.

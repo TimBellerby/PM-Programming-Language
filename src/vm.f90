@@ -1777,6 +1777,10 @@ contains
        newve=shrink_ve(context,ve,esize)
        call set_arg(2,vector_make_string(context,&
             newve,arg(3),fmt_i_width,fmt_i))
+    case(op_fmt_i)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_make_string(context,&
+            newve,arg(3),fmt_i_width,fmt_i,arg(4)))
     case(op_assign_i)
        if(pm_fast_vkind(ve)==pm_logical) then
           where(ve%data%l(ve%offset:ve%offset+esize))
@@ -2467,6 +2471,10 @@ contains
        call set_arg(2,&
             vector_make_string(context,&
             newve,arg(3),fmt_ln_width,fmt_ln))
+    case(op_fmt_ln)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_make_string(context,&
+            newve,arg(3),fmt_ln_width,fmt_ln,arg(4)))
     case(op_assign_ln)
        if(pm_fast_vkind(ve)==pm_null) then
           arg(2)%data%ln(arg(2)%offset:arg(2)%offset+esize)=&
@@ -3164,6 +3172,11 @@ contains
        call set_arg(2,&
             vector_make_string(context,&
             newve,arg(3),fmt_lln_width,fmt_lln))
+    case(op_fmt_offset)
+       newve=shrink_ve(context,ve,esize)   
+       call set_arg(2,&
+            vector_make_string(context,&
+            newve,arg(3),fmt_lln_width,fmt_lln,arg(4)))
     case(op_assign_offset)
        if(pm_fast_vkind(ve)==pm_null) then
           arg(2)%data%lln(arg(2)%offset:arg(2)%offset+esize)=&
@@ -5913,6 +5926,11 @@ contains
        call set_arg(2,&
             vector_make_string(context,&
             newve,arg(3),fmt_i64_width,fmt_i64))
+    case(op_fmt_i64)
+       newve=shrink_ve(context,ve,esize)   
+       call set_arg(2,&
+            vector_make_string(context,&
+            newve,arg(3),fmt_i64_width,fmt_i64,arg(4)))
     case(op_assign_i64)
        if(pm_fast_vkind(ve)==pm_null) then
           arg(2)%data%i64(arg(2)%offset:arg(2)%offset+esize)=&
@@ -6598,13 +6616,18 @@ contains
           enddo
        endif
        
-       
-       
-
     case(op_string_r)
        newve=shrink_ve(context,ve,esize)
        call set_arg(2,vector_make_string(context,&
             newve,arg(3),fmt_r_width,fmt_r))
+    case(op_fmt_r)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_make_string(context,&
+            newve,arg(3),fmt_r_width,fmt_r,arg(4)))
+    case(op_fmt_dp_r)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_make_string(context,&
+            newve,arg(3),fmt_r_width,fmt_r_dp,arg(4),arg(5)))
     case(op_assign_r)
        if(pm_fast_vkind(ve)==pm_null) then
           arg(2)%data%r(arg(2)%offset:arg(2)%offset+esize)=&
@@ -7645,6 +7668,14 @@ contains
        newve=shrink_ve(context,ve,esize)
        call set_arg(2,vector_make_string(context,&
             newve,arg(3),fmt_d_width,fmt_d))
+    case(op_fmt_d)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_make_string(context,&
+            newve,arg(3),fmt_d_width,fmt_d,arg(4)))
+    case(op_fmt_dp_d)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_make_string(context,&
+            newve,arg(3),fmt_d_width,fmt_d_dp,arg(4),arg(5)))
     case(op_assign_d)
        if(pm_fast_vkind(ve)==pm_null) then
           arg(2)%data%d(arg(2)%offset:arg(2)%offset+esize)=&

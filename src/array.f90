@@ -4507,18 +4507,19 @@ contains
   !=============================================================================
   !  Apply fmt to each element of v to create vector of strings
   !=============================================================================
-  function vector_make_string(context,ve,v,buf_size,fmt) result(str)
+  function vector_make_string(context,ve,v,buf_size,fmt,wid,ndp) result(str)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: ve,v
     integer,intent(in):: buf_size
+    type(pm_ptr),intent(in),optional:: wid,ndp
     type(pm_ptr):: str
-    integer(pm_ln):: vsize,esize,i,j,jj,k
+    integer(pm_ln):: vsize,esize,i,j,jj,k,n
     interface 
-       subroutine fmt(xv,xk,xs)
+       subroutine fmt(xv,xk,xn,xs)
          use pm_kinds
          use pm_memory
          type(pm_ptr),intent(in):: xv
-         integer(pm_ln),intent(in):: xk
+         integer(pm_ln),intent(in):: xk,xn
          character(len=*),intent(out):: xs
        end subroutine fmt
     end interface
@@ -4536,15 +4537,128 @@ contains
     j=0
     do i=0,vsize
        k=ve%data%ln(ve%offset+i)
-       call fmt(v,k,mess)
-       vec%data%ptr(vec%offset+k)=pm_new_string(context,trim(mess))
-       len%data%ln(len%offset+k)=len_trim(mess)
+       if(present(ndp)) n=ndp%data%ln(ndp%offset+k)
+       call fmt(v,k,n,mess)
+       if(present(wid)) then
+          vec%data%ptr(vec%offset+k)=pm_new_string_of_width(context,trim(mess),wid%data%ln(wid%offset+k))
+          len%data%ln(len%offset+k)=abs(wid%data%ln(wid%offset+k))
+       else
+          vec%data%ptr(vec%offset+k)=pm_new_string(context,trim(mess))
+          len%data%ln(len%offset+k)=len_trim(mess)
+       endif
     enddo
     str=make_array(context,pm_array_type,int(pm_string_type),vec,len,len,off)
     call pm_delete_register(context,reg)
   contains
     include 'fesize.inc'
   end function vector_make_string
+
+  ! Integer format
+  subroutine fmt_i(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=10):: mess
+    mess=' '
+    write(mess,'(i10)') v%data%i(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_i
+
+  ! Long integer format
+  subroutine fmt_ln(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=20):: mess
+    mess=' '
+    write(mess,'(i20)') v%data%ln(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_ln
+
+  
+  subroutine fmt_lln(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=25):: mess
+    mess=' '
+    write(mess,'(i25)') v%data%lln(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_lln
+
+  subroutine fmt_i32(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=10):: mess
+    mess=' '
+    write(mess,'(i10)') v%data%i32(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_i32
+
+  subroutine fmt_i64(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=20):: mess
+    mess=' '
+    write(mess,'(i20)') v%data%i64(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_i64
+  
+  subroutine fmt_r(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=15):: mess
+    mess=' '
+    write(mess,'(g15.8)') v%data%r(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_r
+
+  subroutine fmt_d(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=25):: mess
+    mess=' '
+    write(mess,'(g25.15)') v%data%d(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_d
+
+  subroutine fmt_l(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    if(v%data%l(v%offset+n)) then
+       str='TRUE  '
+    else
+       str='FALSE '
+    endif
+  end subroutine fmt_l
+
+  subroutine fmt_r_dp(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=15):: mess,fmt
+    mess=' '
+    write(fmt,'("(G15.",i2,")")') min(abs(m),10)
+    write(mess,fmt=fmt) v%data%r(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_r_dp
+
+  subroutine fmt_d_dp(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=25):: mess,fmt
+    mess=' '
+    write(fmt,'("(G25.",i2,")")') min(abs(m),20)
+    write(mess,fmt=fmt) v%data%d(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_d_dp
+
 
   !=================================================================================
   ! Concatenate strings in each element of v1 and v2:  str <- v1 ++ v2 masked by ve
@@ -4650,91 +4764,6 @@ contains
     include 'fnewnc.inc'
     include 'fesize.inc'
   end function make_string_vector
-
-  ! Integer format
-  subroutine fmt_i(v,n,str)
-    type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
-    character(len=*),intent(out):: str
-    character(len=10):: mess
-    mess=' '
-    write(mess,'(i10)') v%data%i(v%offset+n)
-    str=adjustl(mess)
-  end subroutine fmt_i
-
-  ! Long integer format
-  subroutine fmt_ln(v,n,str)
-    type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
-    character(len=*),intent(out):: str
-    character(len=20):: mess
-    mess=' '
-    write(mess,'(i20)') v%data%ln(v%offset+n)
-    str=adjustl(mess)
-  end subroutine fmt_ln
-
-  
-  subroutine fmt_lln(v,n,str)
-    type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
-    character(len=*),intent(out):: str
-    character(len=25):: mess
-    mess=' '
-    write(mess,'(i25)') v%data%lln(v%offset+n)
-    str=adjustl(mess)
-  end subroutine fmt_lln
-
-  subroutine fmt_i32(v,n,str)
-    type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
-    character(len=*),intent(out):: str
-    character(len=10):: mess
-    mess=' '
-    write(mess,'(i10)') v%data%i32(v%offset+n)
-    str=adjustl(mess)
-  end subroutine fmt_i32
-
-  subroutine fmt_i64(v,n,str)
-    type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
-    character(len=*),intent(out):: str
-    character(len=20):: mess
-    mess=' '
-    write(mess,'(i20)') v%data%i64(v%offset+n)
-    str=adjustl(mess)
-  end subroutine fmt_i64
-  
-  subroutine fmt_r(v,n,str)
-    type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
-    character(len=*),intent(out):: str
-    character(len=15):: mess
-    mess=' '
-    write(mess,'(g15.8)') v%data%r(v%offset+n)
-    str=adjustl(mess)
-  end subroutine fmt_r
-
-  subroutine fmt_d(v,n,str)
-    type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
-    character(len=*),intent(out):: str
-    character(len=25):: mess
-    mess=' '
-    write(mess,'(g25.15)') v%data%d(v%offset+n)
-    str=adjustl(mess)
-  end subroutine fmt_d
-
-  subroutine fmt_l(v,n,str)
-    type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
-    character(len=*),intent(out):: str
-    if(v%data%l(v%offset+n)) then
-       str='TRUE  '
-    else
-       str='FALSE '
-    endif
-  end subroutine fmt_l
-
   
 !!$  subroutine advance_dim(val,max,overflow,n)
 !!$    integer(pm_ln),dimension(*),intent(inout):: val,max

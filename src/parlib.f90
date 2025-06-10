@@ -4448,9 +4448,9 @@ contains
     include 'fvkind.inc'
   end subroutine pm_file_write_disps
 
-  subroutine pm_file_error_string(v,n,str)
+  subroutine pm_file_error_string(v,n,m,str)
     type(pm_ptr),intent(in):: v
-    integer(pm_ln),intent(in):: n
+    integer(pm_ln),intent(in):: n,m
     character(len=*),intent(out):: str
     character(len=mpi_max_error_string):: mess
     integer:: length,ierr

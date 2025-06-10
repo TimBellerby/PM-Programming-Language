@@ -2325,7 +2325,10 @@ contains
           ctyp=partyp
        endif
     elseif(tk==pm_type_is_literal) then
-       ctyp=argtyp
+       if(pm_type_includes(context,pm_type_arg(context,partyp,1),ctyp,&
+            pm_type_incl_val)) then
+          ctyp=argtyp
+       endif
     endif
   end function pm_literal_type_convert
 
@@ -2963,6 +2966,10 @@ contains
        if(pm_tv_name(tv)==0) then
           call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
        else
+          if(pm_opts%show_details) then
+             call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+             if(add_char('::')) return
+          endif
           nv=pm_dict_val(context,context%tcache,int(tno,pm_ln))
           if(pm_fast_vkind(nv)==pm_logical) then
              if(nv%data%l(nv%offset)) then

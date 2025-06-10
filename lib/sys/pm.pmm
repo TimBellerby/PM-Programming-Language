@@ -171,6 +171,7 @@ PM__intrinsic max(int,int)->(int) : "max_ln"
 PM__intrinsic min(int,int)->(int) : "min_ln"
 PM__intrinsic -(int)->(int) : "uminus_ln"
 PM__intrinsic string(int)->(string) : "string_ln"
+PM__intrinsic fmt(int,int)->(string) : "fmt_ln"
 PM__intrinsic sint(int)->(sint) : "int_ln"
 PM__intrinsic sreal(int)->(sreal) : "real_ln"
 PM__intrinsic real(int)->(real) : "double_ln"
@@ -215,6 +216,7 @@ PM__intrinsic max(lint,lint)->(lint) : "max_offset"
 PM__intrinsic min(lint,lint)->(lint) : "min_offset"
 PM__intrinsic -(lint)->(lint) : "uminus_offset"
 PM__intrinsic string(lint)->(string) : "string_offset"
+PM__intrinsic fmt(lint,int)->(string) : "fmt_offset"
 PM__intrinsic sint(lint)->(sint) : "int_offset"
 PM__intrinsic sreal(lint)->(sreal) : "real_offset"
 PM__intrinsic real(lint)->(real) : "double_offset"
@@ -388,6 +390,7 @@ PM__intrinsic max(int64,int64)->(int64) : "max_i64"
 PM__intrinsic min(int64,int64)->(int64) : "min_i64"
 PM__intrinsic -(int64)->(int64) : "uminus_i64"
 PM__intrinsic string(int64)->(string) : "string_i64"
+PM__intrinsic fmt(int64,int)->(string) : "fmt_i64"
 PM__intrinsic sint(int64)->(sint) : "int_i64"
 PM__intrinsic sreal(int64)->(sreal) : "real_i64"
 PM__intrinsic real(int64)->(real) : "double_i64"
@@ -423,6 +426,7 @@ PM__intrinsic max(sreal,sreal)->(sreal) : "max_r"
 PM__intrinsic min(sreal,sreal)->(sreal) : "min_r"
 PM__intrinsic -(sreal)->(sreal) : "uminus_r"
 PM__intrinsic string(sreal)->(string) : "string_r"
+PM__intrinsic _fmt(sreal,int,int)->(string) : "fmt_dp_r"
 PM__intrinsic strunc(sreal)->(sint) : "int_r"
 PM__intrinsic trunc(sreal)->(int) : "long_r"
 PM__intrinsic ltrunc(sreal)->(lint) : "offset_r"
@@ -469,6 +473,7 @@ PM__intrinsic max(real,real)->(real) : "max_d"
 PM__intrinsic min(real,real)->(real) : "min_d"
 PM__intrinsic -(real)->(real) : "uminus_d"
 PM__intrinsic string(real)->(string) : "string_d"
+PM__intrinsic _fmt(real,int,int)->(string) : "fmt_dp_d"
 PM__intrinsic strunc(real)->(sint) : "int_d"
 PM__intrinsic trunc(real)->(int) : "long_d"
 PM__intrinsic ltrunc(real)->(lint) : "offset_d"
@@ -567,7 +572,9 @@ proc lint(x:any_real)=lint(0) :compile_error("Cannot convert real to integer")
 proc cpx(x:real_num)=cpx(real(x))
 proc scpx(x:real_num)=cpx(sreal(x))
 proc string(x:any_int)=string(int64(x))
-proc string(x:any_cpx)= string(re(x))++if(im>=0=>"+"++string(im),"-"++string(-im))++"i" where im=im(x) 
+proc string(x:any_cpx)= string(re(x))++if(im>=0=>"+"++string(im),"-"++string(-im))++"i" where im=im(x)
+proc fmt(x:real_num,f:[int,int])=_fmt(x,f.1,f.2)
+proc fmt(x:real_num,f:int)=_fmt(x,f,max(1,abs(f)-6))
 proc int(x:fix(int))=x
 
 
@@ -1452,6 +1459,7 @@ PM__endif
 
 PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any)->(=x) : "array"
 PM__intrinsic<<needs_type>> _varray(x:any,y:any,z:any)->(=x) : "var_array"
+
 
 
 PM__intrinsic _array_mshape(x:any^any)->(=x) : "get_dom"

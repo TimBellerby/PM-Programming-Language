@@ -42,7 +42,7 @@ module pm_memory
   public pm_assign_new, pm_expand, pm_ptr_assign
   public pm_new_as_root,pm_get_ptr_as_root, pm_copy, pm_copy_ptr, pm_assign_copy
   public pm_new_string, pm_concat_string, pm_strval, pm_fill_vect, &
-       pm_copy_obj, pm_set_obj
+       pm_copy_obj, pm_set_obj, pm_new_string_of_width
   public pm_add_root, pm_delete_root
   public pm_numroot, pm_delete_numroot
   public pm_register, pm_delete_register 
@@ -835,6 +835,44 @@ contains
      enddo
     endif
   end function pm_new_string
+
+  ! Create new string object from FORTRAN string
+  function pm_new_string_of_width(context,string,width) result(ptr)
+    type(pm_context),pointer:: context
+    character(len=*),intent(in):: string
+    integer(pm_ln),intent(in):: width
+    type(pm_ptr):: ptr
+    integer::i,n
+    if(width==0) then
+       ptr=pm_new_string(context,"")
+       return
+    endif
+    ptr=pm_new(context,pm_string,abs(width))
+    n=len(string)
+    if(n>abs(width)) then
+       do i=1,abs(width)
+          ptr%data%s(ptr%offset+i-1)='*'
+       enddo
+       return
+    endif
+    if(n>0) then
+       if(width<0) then
+          do i=1,n
+             ptr%data%s(ptr%offset+i-1)=string(i:i)
+          enddo
+          do i=n+1,abs(width)
+             ptr%data%s(ptr%offset+i-1)=' '
+          enddo
+       else
+          do i=1,abs(width)-n
+             ptr%data%s(ptr%offset+i-1)=' '
+          enddo
+          do i=1,n
+             ptr%data%s(ptr%offset+i+abs(width)-n-1)=string(i:i)
+          enddo
+       endif
+    endif
+  end function pm_new_string_of_width
 
   ! Get FORTRAN string from PM string
   subroutine pm_strval(ptr,str)
