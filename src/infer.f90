@@ -659,25 +659,24 @@ contains
        call code_num(coder,sp_sig_setval)
        goto 10
     case(op_clone_var)
-       k=cnode_get_num(procnode,bi_opcode2)
+       mode=cnode_get_num(procnode,bi_opcode2)
        rtype=atype1
-       if(k/=0) rtype=pm_type_replace_mode(coder%context,rtype,k)
+       if(mode/=0) rtype=pm_type_for_var(coder%context,atype1,mode)
        call code_num(coder,sp_sig_dup)
        goto 10
     case(op_array_get_elem,op_extractelm)
        rtype=pm_type_arg(coder%context,atype1,1)
     case(op_get_dom)
        rtype=pm_type_arg(coder%context,atype1,2)
-       write(*,*) 'dom',pm_type_as_string(coder%context,atype1)
     case(op_as,op_get_poly_or)
        rtype=pm_type_arg(coder%context,atype,3)
     case(op_import_varg,op_broadcast_val,&
          op_get_rf)
        rtype=atype1
     case(op_clone)
-       k=cnode_get_num(procnode,bi_opcode2)
+       mode=cnode_get_num(procnode,bi_opcode2)
        rtype=atype1
-       if(k/=0) rtype=pm_type_replace_mode(coder%context,rtype,k)
+       if(mode/=0) rtype=pm_type_for_var(coder%context,atype1,mode)
     case(op_elem)
        n=cnode_get_num(procnode,bi_opcode2)
        if(n/=0) then
@@ -719,12 +718,14 @@ contains
           endif
        endif
     case(op_array,op_make_array,op_pack)
-       rtype=pm_new_arr_type(coder%context,sym_const,atype1,&
+       rtype=pm_new_arr_type(coder%context,sym_const,&
+            pm_type_for_var(coder%context,atype1,sym_private),&
             pm_type_arg(coder%context,atype,3),int(pm_long))
        write(*,*) 'make array',pm_type_as_string(coder%context,atype)
     case(op_var_array)
-       rtype=pm_new_arr_type(coder%context,sym_var,atype1,&
-            pm_type_arg(coder%context,atype,3),int(pm_long))
+       rtype=pm_new_arr_type(coder%context,sym_var,&
+            pm_type_for_var(coder%context,atype1,sym_private),&
+            pm_type_for_var(coder%context,pm_type_arg(coder%context,atype,3),sym_private),int(pm_long))
     case(op_redim)
        tv=pm_type_vect(coder%context,atype1)
        rtype=pm_new_arr_type(coder%context,pm_tv_name(tv),&
@@ -1104,6 +1105,8 @@ contains
                      '"'//trim(sym_names(sig))//&
                      '" initial expression has wrong type for: ',&
                      pm_fast_name(coder%context,name))
+                call more_error(coder%context,'Expected: '//trim(pm_type_as_string(coder%context,tno)))
+                call more_error(coder%context,'Got:      '//trim(pm_type_as_string(coder%context,tno2)))
                 call inf_trace(coder)
                 tno2=error_type
              endif
@@ -2851,6 +2854,7 @@ contains
     nomatch=.false.
     error=.false.
     flags=cnode_get_num(callnode,call_flags)
+    
     if(iand(flags,call_is_fixed)==0) then
        at2=pm_type_convert(coder%context,pt,at,iand(flags,call_keep_literals)==0,ipass>=2,.false.)
        if(at2>0) at=at2
@@ -2864,10 +2868,16 @@ contains
        new_at=at
        return
     else
-       at2=pm_type_convert(coder%context,pt,at,iand(flags,call_keep_literals)==0,ipass>=2,.false.)
+       at2=pm_type_convert(coder%context,pt,at,iand(flags,call_keep_literals+call_is_fixed)==0,ipass>=2,.false.)
        if(at2>0) then
-          new_at=at2
-          return
+          if(pm_type_includes(coder%context,pt,at2,pm_type_incl_val)) then
+             if(debug_inference) then
+                write(*,*) 'Converted',trim(pm_type_as_string(coder%context,pt)),'<>',&
+                     trim(pm_type_as_string(coder%context,at2))
+             endif
+             new_at=at2
+             return
+          endif
        elseif(ipass==3) then
           ! On third pass check for poly conversions
           at2=convert_poly(coder,pt,at,.false.)
@@ -3235,6 +3245,11 @@ contains
     if(tno1<0.or.tno2<=0) then
        return
     endif
+    if(debug_inference) then
+       write(*,*) 'Cast:',trim(pm_type_as_string(coder%context,tno2)),' to: ',trim(pm_type_as_string(coder%context,tno1))
+    endif
+    tno3=pm_type_convert(coder%context,tno1,tno2,.true.,.false.,.false.)
+    if(tno3>=0) tno2=tno3
     ok=pm_type_includes(coder%context,tno1,tno2,pm_type_incl_val)
     if(.not.ok) then
        tno3=pm_type_convert(coder%context,tno1,tno2,.true.,.true.,.false.)
@@ -3255,9 +3270,10 @@ contains
     if(.not.ok) then
        call inf_error(coder,node,&
             'Value of type "'//trim(pm_type_as_string(coder%context,tno2))//&
-            '" cannot be cast to type "'//trim(pm_type_as_string(coder%context,tno1))//"'")
+            '" cannot be converted to type "'//trim(pm_type_as_string(coder%context,tno1))//"'")
        call inf_trace(coder)
     endif
+    if(debug_inference) write(*,*) 'Cast Converts to:',trim(pm_type_as_string(coder%context,tno2))
   contains
     include 'fisnull.inc'
   end function inf_cast

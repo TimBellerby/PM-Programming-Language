@@ -411,7 +411,8 @@ module pm_symbol
   integer,parameter:: sym_init_var = hook + 63
   integer,parameter:: sym_init_const = hook + 64
   integer,parameter:: sym_print = hook + 65
-  integer,parameter:: hook1 = hook + 65
+  integer,parameter:: sym_fix_tuple = hook + 66
+  integer,parameter:: hook1 = hook + 66
   
   integer,parameter:: sym_d1= hook1 + 1
   integer,parameter:: sym_d2= hook1 + 2
@@ -435,7 +436,8 @@ module pm_symbol
   integer,parameter:: sym_dim5= hook1 + 20
   integer,parameter:: sym_dim6= hook1 + 21
   integer,parameter:: sym_dim7= hook1 + 22
-  integer,parameter:: hook2= hook1+22
+  integer,parameter:: sym_range = hook1 + 23
+  integer,parameter:: hook2= hook1+23
 
   integer,parameter:: sym_generate = hook2 + 1
   integer,parameter:: sym_broadcast = hook2 +2
@@ -890,6 +892,7 @@ module pm_symbol
   data sym_names(sym_init_var)         /'PM__init_var'/
   data sym_names(sym_init_const)       /'PM__init_const'/
   data sym_names(sym_print)            /'print'/
+  data sym_names(sym_fix_tuple)        /'PM__fix_tuple'/
   
   data sym_names(sym_d1)               /'PM__d1'/
   data sym_names(sym_d2)               /'PM__d2'/
@@ -915,6 +918,8 @@ module pm_symbol
   data sym_names(sym_dim5)             /'tuple5d'/
   data sym_names(sym_dim6)             /'tuple6d'/
   data sym_names(sym_dim7)             /'tuple7d'/
+
+  data sym_names(sym_range)            /'range'/
   
   data sym_names(sym_generate)         /'PM__generate'/
   data sym_names(sym_broadcast)        /'PM__broadcast'/

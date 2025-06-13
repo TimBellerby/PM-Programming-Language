@@ -42,19 +42,21 @@ module pm_types
   integer,parameter:: pm_type_has_poly=256
   integer,parameter:: pm_type_has_generic=512
   integer,parameter:: pm_type_has_vect=1024
-  integer,parameter:: pm_type_has_fix_or_literal=2048
+  integer,parameter:: pm_type_has_fix=2048
   integer,parameter:: pm_type_has_params=4096
-  integer,parameter:: pm_type_is_soa=8192
-  integer,parameter:: pm_type_is_aos=16384
-  integer,parameter:: pm_type_is_seq=32768
-  integer,parameter:: pm_type_leaves=65536
+  integer,parameter:: pm_type_is_recursive=8192
+  integer,parameter:: pm_type_is_soa=16384
+  integer,parameter:: pm_type_is_aos=32768
+  integer,parameter:: pm_type_is_seq=65536
+  integer,parameter:: pm_type_leaves=131072
 
-  integer,parameter:: pm_type_is_when=8192
-  integer,parameter:: pm_type_is_yield=16384
-  integer,parameter:: pm_type_is_list=32768
+  integer,parameter:: pm_type_is_when=16384
+  integer,parameter:: pm_type_is_yield=32768
+  integer,parameter:: pm_type_is_list=65536
 
   ! Bitwise-or of flags which are not taints (only one so far)
-  integer,parameter:: pm_type_flags_untainting = pm_type_is_list + pm_type_is_when + pm_type_is_yield + &
+  integer,parameter:: pm_type_flags_untainting = &
+       pm_type_is_list + pm_type_is_when + pm_type_is_yield + &
        pm_type_is_soa + pm_type_is_aos + pm_type_is_seq
 
   ! Type kind + default flags
@@ -70,7 +72,7 @@ module pm_types
   integer,parameter:: pm_type_new_any=10+pm_type_has_generic
   integer,parameter:: pm_type_new_poly=11+pm_type_has_poly+&
        pm_type_has_storage
-  integer,parameter:: pm_type_new_fix_value=12
+  integer,parameter:: pm_type_new_fix_value=12+pm_type_has_fix
   integer,parameter:: pm_type_new_contains=13
   integer,parameter:: pm_type_new_fix=14        
   integer,parameter:: pm_type_new_dref=15
@@ -446,7 +448,7 @@ contains
   !=========================
   ! Create type a or b
   !=========================
-  function pm_type_combine(context,a,b) result(tno)
+  function pm_type_union(context,a,b) result(tno)
     type(pm_context),pointer:: context
     integer,intent(in):: a,b
     integer:: tno
@@ -467,7 +469,7 @@ contains
     args(3)=a
     args(4)=b
     tno=pm_new_type(context,args)
-  end function pm_type_combine
+  end function pm_type_union
 
   !==========================================
   ! Create new polymorphic type: @etype
@@ -867,13 +869,13 @@ contains
   !====================================================
   ! Lookup parameterless user type with given name
   !====================================================
-  function pm_user_type_lookup_by_name(context,name) result(tno)
+  function pm_user_type_lookup_by_name(context,mod,name) result(tno)
     type(pm_context),pointer:: context
-    integer,intent(in):: name
+    integer,intent(in):: mod,name
     integer:: tno
     integer:: arr(2)
     arr(1)=pm_type_new_user
-    arr(2)=name
+    arr(2)=pm_name2(context,-mod,name)
     tno=pm_user_type_lookup(context,arr)
   end function pm_user_type_lookup_by_name
 
@@ -1081,7 +1083,7 @@ contains
   ! Error codes:
   !   combined_mode=-1,-2...
   !        Shared distributed value not allowed for position -combined_mode
-  !  shared_ok -- permissible to have an argumnet with 'shared' mode
+  !  shared_ok -- permissible to have an argument with 'shared' mode
   !============================================================================================
   function pm_type_combine_modes(context,array,is_cond,shared_ok) result(combined_mode)
     type(pm_context),pointer:: context
@@ -1813,7 +1815,7 @@ contains
           if(params(nt)==-1) then
              params(nt)=q
           else
-             params(nt)=pm_type_combine(context,params(nt),q)
+             params(nt)=pm_type_union(context,params(nt),q)
           endif
        endif
     case(pm_type_is_vect,pm_type_is_uninitialised)
@@ -2290,6 +2292,10 @@ contains
        ptyp=pm_type_arg(context,ptyp,1)
        tk=pm_type_kind(context,ptyp)
     endif
+    do while(tk==pm_type_is_user)
+       ptyp=pm_user_type_body(context,ptyp)
+       tk=pm_type_kind(context,ptyp)
+    enddo
     if(doliteral.and.pm_type_kind(context,atyp)==pm_type_is_literal_value) then
        ctyp=pm_literal_type_convert(context,ptyp,atyp)
     endif
@@ -2300,6 +2306,7 @@ contains
        ctyp=pm_poly_type_convert(context,ptyp,atyp)
     endif
     ctyp=pm_type_add_mode(context,ctyp,amode)
+    !write(*,*) 'To:',trim(pm_type_as_string(context,ctyp))
   end function pm_type_convert
 
 
@@ -2324,11 +2331,8 @@ contains
        if(pm_type_name(context,partyp)==pm_type_name(context,argtyp)) then
           ctyp=partyp
        endif
-    elseif(tk==pm_type_is_literal) then
-       if(pm_type_includes(context,pm_type_arg(context,partyp,1),ctyp,&
-            pm_type_incl_val)) then
-          ctyp=argtyp
-       endif
+    elseif(tk==pm_type_is_literal.or.tk==pm_type_is_literal_value) then
+       ctyp=argtyp
     endif
   end function pm_literal_type_convert
 
@@ -2506,9 +2510,11 @@ contains
     end select
   end function pm_type_find_elem
 
+  !================================================================
   ! Find offset and type for named element in struct/rec type
   ! Returns offset and type of element
   ! If no such element offset=0
+  !================================================================
   subroutine pm_type_elem_offset(context,tv,name,change,offset,etyp)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: tv
@@ -2537,7 +2543,9 @@ contains
     include 'fesize.inc'
   end subroutine pm_type_elem_offset
 
+  !================================================================
   ! Concrete only version of a type (used/usable only for returns from builtin functions)
+  !================================================================
   recursive function pm_type_as_concrete(context,tno,params,isstatic,iserr) result(tno2)
     type(pm_context),pointer:: context
     integer,intent(in):: tno
@@ -2589,30 +2597,29 @@ contains
     end subroutine remake
   end function pm_type_as_concrete
 
-  ! Create a new type with with all literal values replaced by fix (if tofix is true)
-  ! Otherwise all fix values are changed to literal values
-  recursive function pm_type_change_fix_literal(context,tno,tofix) result(typ)
+  !================================================================
+  ! Create a new type with with all fix values converted
+  ! to base type and mode changed to new_mode
+  !================================================================
+  recursive function pm_type_for_var(context,tno,new_mode) result(typ)
     type(pm_context),pointer:: context
-    integer,intent(in):: tno
-    logical,intent(in):: tofix
+    integer,intent(in):: tno,new_mode
     integer:: typ
     type(pm_ptr):: tv
     integer:: tk
     typ=tno
     tv=pm_type_vect(context,tno)
-    if(iand(pm_tv_flags(tv),pm_type_has_fix_or_literal)==0) return
+    if(iand(pm_tv_flags(tv),pm_type_has_fix)==0) return
     tk=pm_tv_kind(tv)
     select case(tk)
+    case(pm_type_is_par_kind)
+       typ=pm_type_add_mode(context,pm_type_for_var(context,pm_tv_arg(tv,1),new_mode),new_mode)
     case(pm_type_is_user)
        typ=pm_user_type_body(context,tno)
     case(pm_type_is_rec)
        call remake(pm_tv_numargs(tv))
-    case(pm_type_is_literal_value)
-       if(tofix) typ=pm_new_fix_value_type(context,pm_type_val(context,tno),&
-            pm_tv_name(tv))
     case(pm_type_is_fix_value)
-       if(.not.tofix) typ=pm_new_literal_value_type(context,pm_type_val(context,tno),&
-            pm_tv_name(tv))
+       typ=pm_tv_arg(tv,1)
     end select
   contains
     recursive subroutine remake(n)
@@ -2622,13 +2629,258 @@ contains
       a(1)=tk
       a(2)=pm_tv_name(tv)
       do i=1,n
-         a(i+2)=pm_type_change_fix_literal(context,pm_tv_arg(tv,i),tofix)
+         a(i+2)=pm_type_for_var(context,pm_tv_arg(tv,i),new_mode)
       enddo
       typ=pm_new_type(context,a)
     end subroutine remake
-  end function pm_type_change_fix_literal
+  end function pm_type_for_var
+
+  !================================================================
+  ! Combine two types for the same variable - must be the same type
+  ! except for poly values which are merged
+  !================================================================
+  recursive function pm_type_combine(context,tno,tno2,ok,added) result(typ)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno,tno2
+    logical,intent(out):: ok,added
+    integer:: typ
+    type(pm_ptr):: tv,tv2
+    integer:: tk,tk2
+    
+    ok=.true.
+    added=.false.
+    if(tno<0) then
+       typ=tno2
+       return
+    endif
+    typ=tno
+    if(tno2<0.or.tno==tno2) return
+    tv=pm_type_vect(context,tno)
+    tv2=pm_type_vect(context,tno2)
+    if(iand(pm_tv_flags(tv),pm_type_has_poly)==0.or.&
+         iand(pm_tv_flags(tv2),pm_type_has_poly)==0) then
+       ok=.false.
+       return
+    endif
+    tk=pm_tv_kind(tv)
+    tk2=pm_tv_kind(tv2)
+    select case(tk2)
+    case(pm_type_is_par_kind)
+       if(tk==pm_type_is_par_kind) then
+          typ=pm_type_add_mode(context,pm_type_combine(context,pm_tv_arg(tv,1),pm_tv_arg(tv2,1),ok,added),pm_tv_name(tv2))
+       else
+          typ=pm_type_add_mode(context,pm_type_combine(context,tno,pm_tv_arg(tv2,1),ok,added),pm_tv_name(tv2))
+          return
+       endif
+    case(pm_type_is_user)
+       typ=pm_type_combine(context,tno,pm_user_type_body(context,tno2),ok,added)
+       return
+    end select
+    
+    select case(tk)
+    case(pm_type_is_par_kind)
+       typ=pm_type_add_mode(context,pm_type_combine(context,&
+            pm_tv_arg(tv,1),tno2,ok,added),pm_tv_name(tv))
+    case(pm_type_is_user)
+       typ=pm_type_combine(context,pm_user_type_body(context,tno),tno2,ok,added)
+    case(pm_type_is_rec,pm_type_is_array,pm_type_is_tuple,pm_type_is_vtuple)
+       if(tk/=tk2.or.pm_tv_name(tv)/=pm_tv_name(tv2)) then
+          ok=.false.
+          typ=-1
+          return
+       endif
+       call remake(pm_tv_numargs(tv))
+    case(pm_type_is_poly)
+       if(tk/=tk2.or.pm_tv_name(tv)/=pm_tv_name(tv2)) then
+          ok=.false.
+          typ=-1
+          return
+       endif
+       call combine_poly(pm_tv_numargs(tv),pm_tv_numargs(tv2))
+    case default
+       typ=-1
+       ok=.false.
+    end select
+  contains
+
+    recursive subroutine remake(n)
+      integer,intent(in):: n
+      integer,dimension(n+2):: a
+      integer:: i
+      a(1)=tk
+      a(2)=pm_tv_name(tv)
+      do i=1,n
+         a(i+2)=pm_type_combine(context,pm_tv_arg(tv,i),pm_tv_arg(tv2,i),ok,added)
+         if(.not.ok) then
+            typ=-1
+            return
+         endif
+      enddo
+      typ=pm_new_type(context,a)
+    end subroutine remake
+
+    recursive subroutine combine_poly(n,n2)
+      integer,intent(in):: n,n2
+      integer,dimension(n+n2+2):: a
+      logical,dimension(n):: mask
+      integer:: i,j,m,recur
+      a(1)=tk
+      a(2)=pm_tv_name(tv)
+      do j=1,n
+         a(2+j)=pm_tv_arg(tv,j)
+      enddo
+
+      ! Merge the two lists of concrete types
+      m=2+n
+      mask=.false.
+      outer:do i=1,n2
+         do j=1,n
+            if(.not.mask(j)) then
+               if(pm_type_includes(context,a(2+j),&
+                    pm_tv_arg(tv2,i),pm_type_incl_val)) then
+                  mask(j)=.true.
+                  cycle outer
+               endif
+            endif
+         enddo
+         added=.true.
+         m=m+1
+         a(m)=pm_tv_arg(tv2,i)
+      enddo outer
+
+      ! Nothing added so just return
+      if(.not.added) then
+         typ=tno
+         return
+      endif
+      
+      ! Handle the merging of recursive poly types
+      recur=-1
+      do i=3,m
+         if(iand(pm_type_flags(context,a(i)),&
+              pm_type_has_poly+pm_type_is_recursive)/=0) then
+            if(recur<0) then
+               recur=pm_type_new_recursive_ref(context)
+            endif
+            a(i)=pm_type_move_recursive(context,a(i),recur)
+         endif
+      enddo
+
+      ! Create new type
+      typ=pm_new_type(context,a(1:m))
+      if(recur>0) call pm_type_set_recursive_ref(context,recur,typ)
+    end subroutine combine_poly
+    
+  end function pm_type_combine
+
+  !=============================================
+  ! Create new (incomplete) recursive reference
+  !=============================================
+  function pm_type_new_recursive_ref(context) result(tno)
+    type(pm_context),pointer:: context
+    integer:: tno
+    integer,dimension(2):: arr
+    arr(1)=pm_type_is_user+pm_type_is_recursive
+    arr(2)=-pm_dict_size(context,context%tcache)
+    tno=pm_new_basic_type(context,arr,&
+         val=pm_fast_typeno(context,0))
+  contains
+    include 'ftypeno.inc'
+  end function pm_type_new_recursive_ref
+
+  !==============================================
+  ! Make recursive referenc point to given type
+  !==============================================
+  subroutine pm_type_set_recursive_ref(context,typ,tno)
+    type(pm_context),pointer:: context
+    integer,intent(in):: typ,tno
+    call pm_type_set_val(context,typ,&
+         pm_fast_typeno(context,tno))
+  contains
+    include 'ftypeno.inc'
+  end subroutine pm_type_set_recursive_ref
   
-   ! Get vector of integer representation of type
+  !================================================================
+  ! Create a new type with with all fix values converted
+  ! to base type and mode changed to new_mode
+  !================================================================
+  recursive function pm_type_move_recursive(context,tno,recur) result(typ)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno,recur
+    integer:: typ
+    type(pm_ptr):: tv
+    integer:: tk
+    typ=tno
+    tv=pm_type_vect(context,tno)
+    if(iand(pm_tv_flags(tv),pm_type_is_recursive)==0) return
+    tk=pm_tv_kind(tv)
+    select case(tk)
+    case(pm_type_is_par_kind)
+       typ=pm_type_add_mode(context,&
+            pm_type_move_recursive(context,pm_tv_arg(tv,1),recur),pm_tv_name(tv))
+    case(pm_type_is_user)
+       typ=recur
+    case(pm_type_is_rec,pm_type_is_array,pm_type_is_tuple,pm_type_is_vtuple)
+       call remake(pm_tv_numargs(tv))
+    end select
+  contains
+    recursive subroutine remake(n)
+      integer,intent(in):: n
+      integer,dimension(n+2):: a
+      integer:: i
+      a(1)=tk
+      a(2)=pm_tv_name(tv)
+      do i=1,n
+         a(i+2)=pm_type_move_recursive(context,pm_tv_arg(tv,i),recur)
+      enddo
+      typ=pm_new_type(context,a)
+    end subroutine remake
+  end function pm_type_move_recursive
+
+  !================================================================
+  ! Strip all poly types in a given types down to just the constaint
+  ! with no membership information
+  !================================================================
+  recursive function pm_type_poly_base(context,tno) result(typ)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    integer:: typ
+    type(pm_ptr):: tv
+    integer:: tk,arr(2)
+    typ=tno
+    tv=pm_type_vect(context,tno)
+    if(iand(pm_tv_flags(tv),pm_type_has_poly)==0) return
+    tk=pm_tv_kind(tv)
+    select case(tk)
+    case(pm_type_is_par_kind)
+       typ=pm_type_add_mode(context,&
+            pm_type_poly_base(context,pm_tv_arg(tv,1)),pm_tv_name(tv))
+    case(pm_type_is_user)
+       typ=pm_user_type_body(context,tno)
+    case(pm_type_is_rec,pm_type_is_array,pm_type_is_tuple,pm_type_is_vtuple)
+       call remake(pm_tv_numargs(tv))
+    case(pm_type_is_poly)
+       arr(1)=pm_type_new_poly
+       arr(2)=pm_tv_name(tv)
+       typ=pm_new_type(context,arr)
+    end select
+  contains
+    recursive subroutine remake(n)
+      integer,intent(in):: n
+      integer,dimension(n+2):: a
+      integer:: i
+      a(1)=tk
+      a(2)=pm_tv_name(tv)
+      do i=1,n
+         a(i+2)=pm_type_poly_base(context,pm_tv_arg(tv,i))
+      enddo
+      typ=pm_new_type(context,a)
+    end subroutine remake
+  end function pm_type_poly_base
+
+  !================================================================
+  ! Get vector-of-integer representation of type
+  !================================================================
   function pm_type_vect(context,tno) result(typ)
     type(pm_context),pointer:: context
     integer,intent(in):: tno
@@ -2645,28 +2897,36 @@ contains
     typ=pm_dict_key(context,dict,t)
   end function pm_type_vect
 
+  !================================================================
   ! Type kind from integer type vector
+  !================================================================
   function pm_tv_kind(typ) result(k)
     type(pm_ptr),intent(in):: typ
     integer:: k
     k=iand(typ%data%i(typ%offset),pm_type_kind_mask)
   end function pm_tv_kind
 
-   ! Type kind from integer type vector
+  !================================================================
+  ! Type flags from integer type vector
+  !================================================================
   function pm_tv_flags(typ) result(k)
     type(pm_ptr),intent(in):: typ
     integer:: k
     k=typ%data%i(typ%offset)
   end function pm_tv_flags
 
-  ! Name from integer type vector
+  !================================================================
+  ! Type name field from integer type vector
+  !================================================================
   function pm_tv_name(typ) result(name)
     type(pm_ptr),intent(in):: typ
     integer:: name
     name=typ%data%i(typ%offset+1_pm_p)
   end function pm_tv_name
 
-  ! Argument m from integer type vector
+  !================================================================
+  ! Type argument m from integer type vector
+  !================================================================
   function pm_tv_arg(typ,m) result(arg)
     type(pm_ptr),intent(in):: typ
     integer,intent(in):: m
@@ -2678,8 +2938,10 @@ contains
     endif
     arg=typ%data%i(typ%offset+m+1)
   end function pm_tv_arg
-  
-  ! Number of arguments in integer type vector
+
+  !================================================================
+  ! Number of type arguments from integer type vector
+  !================================================================
   function pm_tv_numargs(typ) result(num)
     type(pm_ptr),intent(in):: typ
     integer:: num
@@ -2688,11 +2950,12 @@ contains
     include 'fesize.inc'
   end function pm_tv_numargs
   
+  !================================================================
   ! Display type as user-readable string
-  function pm_type_as_string(context,tno,distr) result(str)
+  !================================================================
+  function pm_type_as_string(context,tno) result(str)
     type(pm_context),pointer:: context
     integer,intent(in):: tno
-    logical,intent(in),optional:: distr
     character(len=2048):: str
     integer:: n
     str=''
@@ -2700,16 +2963,17 @@ contains
        str='any'
     else
        n=1
-       call pm_type_to_string(context,tno,str,n,tuple=.false.,distr=distr)
+       call pm_type_to_string(context,tno,str,n)
     endif
   end function  pm_type_as_string
 
-  recursive subroutine pm_type_to_string(context,typno,str,n,distr,tuple,noequiv,tuple_start)
+  recursive subroutine pm_type_to_string(context,typno,str,n,infix,noequiv,tuple_start)
     type(pm_context),pointer:: context
     integer,intent(in):: typno
     character(len=1024),intent(inout):: str
     integer,intent(inout):: n
-    logical,intent(in),optional:: distr,tuple,noequiv
+    !logical,intent(in),optional:: distr,tuple,noequiv
+    logical,intent(in),optional:: noequiv,infix
     integer,intent(in),optional:: tuple_start
     type(pm_ptr):: tv,tv2,nv,nv2
     integer:: tk,narg,tno2
@@ -2720,7 +2984,7 @@ contains
     character(len=1),parameter:: close_square = ']'
     integer:: i,j,istart,tno,tk2
     type(pm_ptr):: amps
-    logical:: ok
+    logical:: ok,isfix
     if(n>len(str)-10) return
     tno=typno
     if(tno==0) then
@@ -2743,45 +3007,35 @@ contains
     case(pm_type_is_user,pm_type_is_basic,pm_type_is_category)
        name=pm_tv_name(tv)
        if(name<0) then
-          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
           return
        endif
        name=pm_name_stem(context,name)
        if(name>=sym_dim1.and.name<=sym_dim7.and.narg==name-sym_dim1+1) then
-          if(present(distr)) then
-             if(.not.distr) return
+          isfix=pm_type_includes(context,&
+               pm_user_type_lookup_by_name(context,sym_pm_system,sym_fix_tuple),&
+               tno,pm_type_incl_type)
+          if(isfix) then
+             if(add_char('fix')) return
           endif
-          if(present(tuple)) then
-             tno2=pm_tv_arg(tv,1)
-             ok=.true.
-             do i=2,narg
-                ok=ok.and.pm_tv_arg(tv,i)==tno2
-             enddo
-          else
-             ok=.false.
-          endif
-          if(ok) then
-             call pm_name_string(context,name,str(n:))
-             n=len_trim(str)+1
-             if(narg==1) then
-                if(add_char('(')) return
-             else
-                if(add_char('_of(')) return
-             endif
-             call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
-             if(add_char(')')) return
-          else
-             if(add_char('[')) return
-             do i=1,narg-1
-                call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
-                if(add_char(',')) return
-             enddo
-             call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n)
-             if(add_char(']')) return
-          endif
+          if(add_char('[')) return
+          do i=1,narg-1
+             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,isfix)
+             if(add_char(',')) return
+          enddo
+          call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n,isfix)
+          if(add_char(']')) return
        elseif(name==sym_pm_ref_type) then
-          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        else
+          if(name==sym_range.and.narg==2) then
+             if(pm_tv_arg(tv,1)/=pm_tv_arg(tv,2)) then
+                call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
+                if(add_char('..')) return
+                call pm_type_to_string(context,pm_tv_arg(tv,2),str,n,infix)
+                return
+             endif
+          endif
           call pm_name_string(context,name,str(n:))
           n=len_trim(str)+1
           if(n>len(str)-10) return
@@ -2789,10 +3043,10 @@ contains
           if(narg>0) then
              if(add_char('(')) return
              do i=1,narg-1
-                call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
+                call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
                 if(add_char(',')) return
              enddo
-             call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n)
+             call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n,infix)
              if(add_char(')')) return
           endif
           if(tk==pm_type_is_user.and.(pm_opts%show_members)) then
@@ -2802,7 +3056,7 @@ contains
                 tv=pm_type_vect(context,tno2)
                 if(pm_tv_kind(tv)/=pm_type_is_basic) then
                    if(add_char(' {')) return
-                   call pm_type_to_string(context,tno2,str,n)
+                   call pm_type_to_string(context,tno2,str,n,infix)
                    if(add_char('}')) return
                 endif
              else
@@ -2834,19 +3088,19 @@ contains
                 if(j<pm_fast_esize(amps)) j=j+1
                 if(add_char('&')) return
              endif
-             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
+             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
              if(add_char(',')) return
           enddo
           if(amps%data%i(amps%offset+j)==narg) then
              if(add_char('&')) return
           endif
-          call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n,infix)
        else
           do i=istart,narg-1
-             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
+             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
              if(add_char(',')) return
           enddo
-          call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n,infix)
        endif
        if(tk==pm_type_is_vtuple) then
           if(add_char('...')) return
@@ -2885,7 +3139,7 @@ contains
           n=len_trim(str)+1
           if(n>len(str)-10) return
           if(add_char(':')) return
-          call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
           if(i<narg) then
              if(add_char(',')) return
           endif
@@ -2933,13 +3187,13 @@ contains
              if(add_char('(')) return
           endif
           do i=1,pm_tv_numargs(tv)-1
-             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
+             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
              if(add_char(',')) return
           enddo
-          call pm_type_to_string(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n,infix)
           if(add_char(')')) return
        else
-          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        endif
     case(pm_type_is_array)
        name=pm_tv_name(tv)
@@ -2950,24 +3204,28 @@ contains
        else
           if(add_char('array(')) return
        endif
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(add_char(',')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,2),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,2),str,n,infix)
        if(add_char(')')) return
     case(pm_type_is_poly)
        if(add_char('*')) return
        call bracket(1,pm_type_is_includes,pm_type_is_all,pm_type_is_any,pm_type_is_except)
     case(pm_type_is_fix_value,pm_type_is_literal_value)
+       isfix=.false.
+       if(present(infix)) isfix=infix
        if(tk==pm_type_is_fix_value) then
-          if(add_char('fix(')) return
+          if(.not.isfix) then
+             if(add_char('fix(')) return
+          endif
        else
           if(add_char('literal(')) return
        endif
        if(pm_tv_name(tv)==0) then
-          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        else
           if(pm_opts%show_details) then
-             call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+             call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
              if(add_char('::')) return
           endif
           nv=pm_dict_val(context,context%tcache,int(tno,pm_ln))
@@ -2987,20 +3245,22 @@ contains
              str(n:)=pm_value_as_string(context,nv)
           endif
           n=len_trim(str)+1
-          if(add_char(')')) return
+          if(.not.(tk==pm_type_is_fix_value.and.isfix)) then
+             if(add_char(')')) return
+          endif
        endif
     case(pm_type_is_fix)
        if(add_char('fix(')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(add_char(')')) return
     case(pm_type_is_literal)
        if(add_char('literal(')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(add_char(')')) return
     case(pm_type_is_except)
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(add_char(' except ')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,2),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,2),str,n,infix)
     case(pm_type_is_any)
        call bracket(1,pm_type_is_except,pm_type_is_except,pm_type_is_except,pm_type_is_except)
        do i=2,pm_tv_numargs(tv)
@@ -3019,12 +3279,12 @@ contains
        call bracket(2,pm_type_is_any,pm_type_is_all,pm_type_is_except,pm_type_is_except)
     case(pm_type_is_contains)
        if(add_char('contains(')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(add_char(')')) return
     case(pm_type_is_has)
        if(add_char('.')) return
        call bracket(1,pm_type_is_includes,pm_type_is_all,pm_type_is_any,pm_type_is_except)
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
     case(pm_type_is_proc)
        name=pm_tv_name(tv)
        if(name>0) then
@@ -3042,15 +3302,15 @@ contains
           if(pm_opts%show_variants) then
              if(add_char(' -- {')) return
              do i=1,pm_tv_numargs(tv)-1
-                call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
+                call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
                 if(add_char(',')) return
              enddo
-             call pm_type_to_string(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n)
+             call pm_type_to_string(context,pm_tv_arg(tv,pm_tv_numargs(tv)),str,n,infix)
              if(add_char('}')) return
           endif
        elseif(name==0) then
           if(add_char('proc')) return
-          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        else
           if(add_char('proc ')) return
           nv2=pm_name_val(context,-name)
@@ -3063,7 +3323,7 @@ contains
           endif
           n=len_trim(str)+1
           if(n>len(str)-10) return
-          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        endif
     case(pm_type_is_proc_sig)
        name=pm_tv_name(tv)
@@ -3086,10 +3346,10 @@ contains
        endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,tuple_start=istart)
        if(add_char('->')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,2),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,2),str,n,infix)
        if(iand(pm_tv_flags(tv),pm_type_is_yield)/=0) then
           if(add_char('yield(')) return
-          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
           if(add_char(')')) return
        endif
     case(pm_type_is_undef_result)
@@ -3106,7 +3366,7 @@ contains
        if(pm_opts%show_details) then
           if(add_char('^^(')) return
        endif
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(pm_opts%show_details) then
           if(add_char(')')) return
        endif
@@ -3114,7 +3374,7 @@ contains
        name=pm_tv_name(tv)
        if(add_char(trim(sym_names(name)))) return
        if(add_char(' ')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
     case(pm_type_is_params)
        if(pm_opts%show_details) then
           if(add_char('[[=')) return
@@ -3164,13 +3424,13 @@ contains
        endif
     case(pm_type_is_type)
        if(add_char('<')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(add_char('>')) return
     case(pm_type_is_uninitialised)
        if(pm_opts%show_details) then
           if(add_char('UNINIT:')) return
        endif
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n)
+       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
     case(pm_type_is_bottom)
        if(add_char(' _ ')) return
     case default
@@ -3209,10 +3469,10 @@ contains
       tk=pm_type_kind(context,pm_tv_arg(tv,i))
       if(tk==tk1.or.tk==tk2.or.tk==tk3.or.tk==tk4) then
          if(add_char('(')) return
-         call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
+         call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
          if(add_char(')')) return
       else
-         call pm_type_to_string(context,pm_tv_arg(tv,i),str,n)
+         call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
       endif
     end subroutine bracket
 
@@ -3225,7 +3485,7 @@ contains
       params=-1
 
 !!$      if(add_char('<%')) return
-!!$      call pm_type_to_string(context,templ,str,n)
+!!$      call pm_type_to_string(context,templ,str,n,infix)
 !!$      if(add_char('%>')) return
 !!$
 !!$      ok=.false.
@@ -3239,27 +3499,41 @@ contains
          enddo
          name2=pm_name_stem(context,name)
          tuple=name2>=sym_dim1.and.name2<=sym_dim7
-         if(.not.tuple) then
-            call pm_name_string(context,name,str(n:))
-         endif
-         n=len_trim(str)+1
-         if(n>len(str)-10) return
-         if(m>0) then
-            if(add_char(merge('[','(',tuple))) return
-            if(tuple) m=m-1
-            do i=1,m
-               if(params(i)>0) then
-                  call pm_type_to_string(context,params(i),str,n)
-               endif
-               if(i<m) then
-                  if(add_char(',')) return
-               endif
-            enddo
-            if(add_char(merge(']',')',tuple))) return
+         if(name2==sym_range.and.params(1)/=params(2)) then
+            call pm_type_to_string(context,params(1),str,n,infix)
+            if(add_char('..')) return
+            call pm_type_to_string(context,params(2),str,n,infix)
+         else
+            if(.not.tuple) then
+               call pm_name_string(context,name,str(n:))
+            endif
             n=len_trim(str)+1
-         elseif(tuple) then
-            if(add_char('[]')) return
-            n=len_trim(str)+1
+            if(n>len(str)-10) return
+            if(m>0) then
+               isfix=tuple.and.iand(pm_tv_flags(tv),&
+                    pm_type_has_storage+pm_type_has_fix)==pm_type_has_fix
+               if(isfix) isfix=pm_type_includes(context,&
+                    pm_user_type_lookup_by_name(context,sym_pm_system,sym_fix_tuple),&
+                    tno,pm_type_incl_val)
+               if(isfix) then
+                  if(add_char('fix')) return
+               endif
+               if(add_char(merge('[','(',tuple))) return
+               if(tuple) m=m-1
+               do i=1,m
+                  if(params(i)>0) then
+                     call pm_type_to_string(context,params(i),str,n,isfix)
+                  endif
+                  if(i<m) then
+                     if(add_char(',')) return
+                  endif
+               enddo
+               if(add_char(merge(']',')',tuple))) return
+               n=len_trim(str)+1
+            elseif(tuple) then
+               if(add_char('[]')) return
+               n=len_trim(str)+1
+            endif
          endif
       endif
     end function show_equiv
@@ -3272,6 +3546,7 @@ contains
     end function no_intersect
 
   end subroutine pm_type_to_string
+
 
   subroutine dump_type(context,iunit,tno)
     type(pm_context),pointer:: context

@@ -136,6 +136,9 @@ module pm_codegen
      ! '1 type
      integer:: unit_type
 
+     ! Types with literals (int real bool string)
+     integer:: literal_types
+     
      ! Check default error message
      integer:: check_mess
 
@@ -264,6 +267,15 @@ contains
     coder%true_literal=pm_new_literal_value_type(coder%context,coder%true)
     coder%false_literal=pm_new_literal_value_type(coder%context,coder%false)
 
+    call push_word(coder,pm_type_new_any)
+    call push_word(coder,0)
+    call push_word(coder,int(pm_long))
+    call push_word(coder,int(pm_logical))
+    call push_word(coder,int(pm_string_type))
+    call push_word(coder,int(pm_double))
+    call make_type(coder,6)
+    coder%literal_types=pop_word(coder)
+    
     coder%num_errors=0
     coder%supress_errors=.false.
     coder%fixed=.false.
@@ -3655,6 +3667,11 @@ contains
           call push_word(coder,pm_type_new_fix)
           call push_word(coder,0)
           call trav_type(coder,pnode,name)
+          if(top_word(coder)==0) then
+             call defer_type_check(coder,node,pnode,&
+                  coder%literal_types,top_word(coder),sym_fix,&
+                  cnode_is_arg_constraint)
+          endif
           call make_type(coder,3)
        end select
     case(sym_literal)
@@ -3670,13 +3687,11 @@ contains
           call push_word(coder,pm_type_new_unfixed)
           call push_word(coder,0)
           call trav_type(coder,pnode,name)
-          typno=pm_type_strip_to_basic(coder%context,pop_word(coder))
-          if(typno/=0.and.typno/=pm_long.and.typno/=pm_double.and.&
-               typno/=pm_logical.and.typno/=pm_string_type) then
-             call code_error(coder,node,'Cannot have a literal type for: '//&
-                  trim(pm_type_as_string(coder%context,typno)))
+          if(top_word(coder)/=0) then
+             call defer_type_check(coder,node,pnode,&
+                  coder%literal_types,top_word(coder),sym_literal,&
+                  cnode_is_arg_constraint)
           endif
-          call push_word(coder,typno)
           call make_type(coder,3)
        end select
     case(sym_contains)

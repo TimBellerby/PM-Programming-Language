@@ -243,6 +243,9 @@ contains
     endif
   end subroutine dcl_type
 
+  !======================================================
+  ! Parse expression in string (for REPL)
+  !======================================================
   subroutine parse_expr_from_string(parser,line,use_sysmod)
     type(parse_state),intent(inout):: parser
     character(len=*),intent(in):: line
@@ -4049,7 +4052,31 @@ contains
        call make_node(parser,sym_literal,1)
     case(sym_fix,sym_literal)
        call scan(parser)
-       if(sym==sym_literal.and.parser%sym/=sym_open) then
+       if(sym==sym_fix.and.parser%sym==sym_open_square) then
+          call scan(parser)
+          m=0
+          do
+             if(expect(parser,sym_number)) return
+             call push_num_val(parser,parser%lexval)
+             call make_node(parser,sym_number,1)
+             call make_node(parser,sym_fix,1)
+             if(parser%sym==sym_dotdot) then
+                call scan(parser)
+                if(expect(parser,sym_number)) return
+                call push_num_val(parser,parser%lexval)
+                call make_node(parser,sym_number,1)
+                call make_node(parser,sym_fix,1)
+                call push_sym_val(parser,sym_range)
+                call make_node(parser,sym_type,3)
+             endif
+             m=m+1
+             if(parser%sym/=sym_comma) exit
+             call scan(parser)
+          enddo
+          call push_sym_val(parser,sym_dim1+m-1)
+          call make_node(parser,sym_type,m+1)
+          if(expect(parser,sym_close_square)) return
+       elseif(sym==sym_literal.and.parser%sym/=sym_open) then
           call make_node(parser,sym_any,0)
           call make_node(parser,sym_literal,1)
        else

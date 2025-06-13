@@ -305,7 +305,7 @@ contains
        write(*,*) 'TOTAL TYPES::',pm_dict_size(context,context%tcache)
     endif
 
-    if(pm_opts%out_typelist.and..false.) then
+    if(pm_opts%out_typelist) then
        open(unit=4,file='types.out')
        save_members=pm_opts%show_members
        save_elems=pm_opts%show_elems
@@ -314,11 +314,7 @@ contains
        !pm_opts%show_elems=.true.
        !pm_opts%show_variants=.true.
        do i=1,pm_dict_size(context,context%tcache)
-          write(4,*) 'TYPE',i,pm_type_kind(context,i)
-          write(4,*) i,trim(pm_type_as_string(context,i))
-          call pm_dump_tree(context,4,pm_type_val(context,i),2)
-          call dump_type(context,4,i)
-          write(4,*) 'DONE',i
+           write(4,*) iand(pm_type_flags(context,i),pm_type_has_storage)/=0,iand(pm_type_flags(context,i),pm_type_has_fix)/=0,trim(pm_type_as_string(context,i))
        enddo
        pm_opts%show_members=save_members
        pm_opts%show_elems=save_elems

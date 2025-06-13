@@ -781,13 +781,13 @@ proc dim(t:tuple6d,n:literal(6) or [literal(6)])=t.6
 proc dim(t:tuple7d,n:literal(6) or [literal(6)])=t.6
 proc dim(t:tuple7d,n:literal(7) or [literal(7)])=t.7
 
-proc indices(x:tuple1d)=[literal(1)]
-proc indices(x:tuple2d)=[literal(1),literal(2)]
-proc indices(x:tuple3d)=[literal(1),literal(2),literal(3)]
-proc indices(x:tuple4d)=[literal(1),literal(2),literal(3),literal(4)]
-proc indices(x:tuple5d)=[literal(1),literal(2),literal(3),literal(4),literal(5)]
-proc indices(x:tuple6d)=[literal(1),literal(2),literal(3),literal(4),literal(5),literal(6)]
-proc indices(x:tuple7d)=[literal(1),literal(2),literal(3),literal(4),literal(5),literal(6),literal(7)]
+proc indices(x:tuple1d)=[1]
+proc indices(x:tuple2d)=[1,2]
+proc indices(x:tuple3d)=[1,2,3]
+proc indices(x:tuple4d)=[1,2,3,4]
+proc indices(x:tuple5d)=[1,2,3,4,5]
+proc indices(x:tuple6d)=[1,2,3,4,5,6]
+proc indices(x:tuple7d)=[1,2,3,4,5,6,7]
 
 proc full_rank(x:tuple1d)=1
 proc full_rank(x:tuple2d)=2
@@ -1093,15 +1093,15 @@ proc notin(x,y)=not(x in y)
 proc notinc(x,y)=not(x inc y)
 
 //  Treat null as empty sequence in some cases
-proc in(x,y:null)=literal(false)
-proc in(x:null,y:null)=literal(true)
+proc in(x,y:null)=false
+proc in(x:null,y:null)=true
 
 //  Range base type (might later expand to interface)
 type range_base is real_num
 type step_base is real_num
 
 //  Range types
-type range(t:range_base) is rec {_lo:t,_hi:t,_n:t}
+type range(t:range_base,hi:range_base) is rec {_lo:t,_hi:hi,_n:int}
 proc ..(x:range_base,y:range_base)=rec range {
 _lo=xx,_hi=yy,_n=max(0,int(yy-xx)+1)} where xx,yy=balance(x,y)
 proc low(x:range)=x._lo
@@ -1461,14 +1461,12 @@ PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any)->(=x) : "array"
 PM__intrinsic<<needs_type>> _varray(x:any,y:any,z:any)->(=x) : "var_array"
 
 
-
 PM__intrinsic _array_mshape(x:any^any)->(=x) : "get_dom"
 PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
 PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 proc array(x,d:extent)=_array(x,_mshape(d),size(d))
 proc #'(x:any^any)=_array_mshape(x)._extent
 proc element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
-
 
 /*
 PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
@@ -1772,7 +1770,7 @@ proc PM__assign(&a:any,b:any) {
 }
 
 PM__intrinsic PM__clone(x:any)->(=x) : "clone"
-PM__intrinsic PM__make_var(x:any)->(=x) : "clone"
+PM__intrinsic PM__make_var(x:any)->(=x) : "clone" priv
 PM__intrinsic PM__make_var'(x:priv)->(=x) : "clone_var" priv
 PM__intrinsic PM__make_var'(x:any)->(=x) : "clone" priv
 PM__intrinsic PM__make_const'(x:any)->(=x) : "clone_var"
@@ -1849,8 +1847,8 @@ PM__intrinsic error_type()->(=1) : "error_type"
 
 //  Debugging
 PM__intrinsic<<is_impure>> _dump(any,any): "new_dump"
-proc PM__dump(x)<<no_inline>>:_dump("Value:",x)
-proc PM__dump(y,x)<<no_inline>>:if y:_dump("Value:",x)
+proc PM__dump'(x)<<no_inline>>:_dump("Value:",x)
+proc PM__dump'(y,x)<<no_inline>>:if y:_dump("Value:",x)
 /*
 proc PM__dump%(x)<<no_inline>>{
   print("$"++here)
@@ -1872,7 +1870,9 @@ proc old_dumpit(a) {
  
 PM__intrinsic<<is_impure>> old_dump_id(any): "dump_id"
 
-proc PM__filesys()=1234
+proc PM__filesys()=1234 {
+    let junk=<PM__fix_tuple>
+}
 
 proc PM__check_alias(a,b) {}
 proc PM__lhs_and_val(a)=a
@@ -1893,3 +1893,5 @@ PM__intrinsic<<needs_type>> PM__list_concat(x:PM__list,y:PM__list)->(=x):"list_c
 PM__intrinsic<<needs_type>> PM__list_splice(x:PM__list,y:PM__list,i:literal(int),j:literal(int))->(=x):"list_splice"
 
 proc compile_error(mess:literal(string)): test mess=>false
+
+type PM__fix_tuple is tuple(fix(int) or range(fix(int),fix(int)))
