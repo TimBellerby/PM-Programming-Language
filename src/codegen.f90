@@ -113,7 +113,7 @@ module pm_codegen
      integer:: proc_flags
 
      ! State variables (as position in coder%var)
-     integer:: state_base,mask
+     integer:: param_base,state_base,mask
      
      ! Caches for call signatures and resolved procedures
      type(pm_ptr):: sig_cache,proc_cache,poly_cache
@@ -164,8 +164,11 @@ module pm_codegen
      integer:: block_entry,block_base
 
      ! Flags indicating type inference not complete
-     logical:: types_finished,redo_calls,incomplete,first_pass
+     logical:: types_finished,redo_calls,incomplete,first_pass,types_changed
 
+     ! Type inference - depth of nested loops
+     integer:: loop_depth
+     
      ! Taints
      integer:: taints,proc_taints
 
@@ -1604,7 +1607,7 @@ contains
     endif
     call code_val(coder,coder%var(base+4))
     cblock3=make_cblock(coder,cblock2,stmtlist,sym_do_stmt)
-    coder%lex_scope=coder%lex_scope+1
+    !coder%lex_scope=coder%lex_scope+1
 
     if(present(iters)) then
        call extract_iter_lists(coder,cblock3,iters,iter_amps,iter_stars)
@@ -1614,7 +1617,7 @@ contains
    
     call trav_xexpr(coder,cblock3,node,rtns)
     call make_sp_call(coder,cblock3,node,sym_result,nret,0)
-    coder%lex_scope=coder%lex_scope-1
+    !coder%lex_scope=coder%lex_scope-1
     call close_cblock(coder,cblock3)
     
     call extract_block_vars(coder,cblock2,node,coder%var(base+7),.true.)
@@ -2034,6 +2037,7 @@ contains
     lex_scope=coder%lex_scope
     lex_scope_of_var=cnode_get_num(var,var_lex_scope)
     do while(lex_scope_of_var<lex_scope)
+       write(*,*) '##',lex_scope_of_var,lex_scope
         call add_to_change_list(coder,coder%vstack(lex_scope-merge(1,0,modify)),var)
         lex_scope=coder%vstack(lex_scope-2)%offset
     end do
@@ -3609,10 +3613,8 @@ contains
        enddo
        call make_type(coder,2+n)
     case(sym_pval)
-       call push_word(coder,pm_type_new_poly)
-       call push_word(coder,0)
        call trav_type(coder,pnode,node_arg(node,1))
-       call make_type(coder,3)
+       call push_word(coder,pm_new_poly_type(coder%context,pop_word(coder)))
     case(sym_type_val)
        call push_word(coder,pm_type_new_type)
        call push_word(coder,0)
@@ -4921,7 +4923,7 @@ contains
     integer:: flags,sym,rsig
     integer:: save_index,save_proc_base,save_proc_ncalls,&
          save_lex_scope,save_par_state,&
-         save_state_base,save_mask
+         save_state_base,save_mask,save_param_base
 
     integer:: pr_flags
     type(pm_reg),pointer:: reg
@@ -5013,6 +5015,7 @@ contains
           call code_keys(cblock,tkeys,keycall,.false.,.false.)
           call code_check(cblock)
           call code_body(cblock)
+          call pass_back_amps(cblock)
           call code_result(cblock,flags)
        endif
 
@@ -5077,6 +5080,7 @@ contains
       save_par_state=coder%par_state
       save_state_base=coder%state_base
       save_mask=coder%mask
+      save_param_base=coder%param_base
     end subroutine save_proc_state
 
     subroutine init_proc_state
@@ -5094,6 +5098,7 @@ contains
       coder%par_state=save_par_state
       coder%state_base=save_state_base
       coder%mask=save_mask
+      coder%param_base=save_param_base
     end subroutine restore_proc_state
 
     subroutine code_params(cblock,iscomm,argcall)
@@ -5106,6 +5111,7 @@ contains
          coder%state_base=coder%top
          coder%mask=coder%state_base+num_comm_args
       endif
+      coder%param_base=coder%top
       p=node_get(node,proc_params)
       flags0=merge(var_is_maybe_not_private,0,iscomm)
       if(.not.pm_fast_isnull(p)) then
@@ -5311,6 +5317,7 @@ contains
       coder%par_state=par_state_none
       call code_body(cblock2)
       call import_params(cblock2)
+      call pass_back_amps(cblock2)
       call code_result(cblock2,flags)
       call close_cblock(coder,cblock2)
       call make_sp_call(coder,cblock,node,sym,2,0)
@@ -5350,6 +5357,22 @@ contains
       endif
     end subroutine import_params
 
+    subroutine pass_back_amps(cblock)
+      type(pm_ptr),intent(in):: cblock
+      integer:: i,j
+      type(pm_ptr):: amp,p
+      p=node_get(node,proc_params)
+      amp=node_get(node,proc_amplocs)
+      if(.not.pm_fast_isnull(amp)) then
+         amp=pm_name_val(coder%context,int(amp%offset))
+         do j=0,pm_fast_esize(amp)
+            i=amp%data%i(amp%offset+j)
+            call code_val(coder,coder%var(coder%param_base+i))
+         enddo
+         call make_sp_call(coder,cblock,node,sym_amp,int(pm_fast_esize(amp))+1,0)
+      endif
+    end subroutine pass_back_amps
+
     subroutine code_loop_check_body_and_result(cblock)
       type(pm_ptr),intent(in):: cblock
       type(pm_ptr):: cblock2
@@ -5357,6 +5380,7 @@ contains
       cblock2=make_cblock(coder,cblock,node,sym_pct)
       call code_check(cblock2)
       call code_body(cblock2)
+      call pass_back_amps(cblock2)
       call code_result(cblock2,flags)
       call close_cblock(coder,cblock2)
       call make_sp_call(coder,cblock,node,sym_pct,2,0)
