@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2021
+! Copyright (c) Tim Bellerby, 2025
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -36,10 +36,12 @@ module pm_options
      logical:: check_stmts
      logical:: show_elems
      logical:: show_members
-     logical:: see_all_procs
+     logical:: show_all_procs
+     logical:: show_full_trace
      logical:: out_debug_files
      logical:: old_files
      integer:: proc_list
+     integer:: trace_list
      logical:: show_variants
      logical:: show_details
      logical:: check_alias
@@ -88,8 +90,10 @@ contains
     pm_opts%check_stmts=.not.pm_is_compiling
     pm_opts%show_elems=.false.
     pm_opts%show_members=.false.
-    pm_opts%see_all_procs=.false.
+    pm_opts%show_all_procs=.false.
+    pm_opts%show_full_trace=.false.
     pm_opts%proc_list=11
+    pm_opts%trace_list=11
     pm_opts%show_variants=.false.
     pm_opts%show_details=.false.
     pm_opts%check_alias=.not.pm_is_compiling
@@ -144,14 +148,27 @@ contains
 
   subroutine print_usage
     if(pm_main_process) then
-       write(*,*) 'Usage: pm [-f<opt>] [-D<opt>] [-help] root_module_name_or_filename'
        write(*,*)
-       write(*,*) '  -f<opt>        Language options'
-       write(*,*) '  --help         Longer help message'
-       write(*,*) '  -D<opt>        Output compiler debugging information'
+       if(pm_is_compiling) then
+          write(*,*) 'Usage: pmc [-f<opt>] [-D<opt>] [ --help | root_module_name_or_filename ]'
+       else
+          write(*,*) 'Usage: pm [-f<opt>] [-D<opt>] [ --help | -i | root_module_name_or_filename ]'
+          write(*,*) '  -i            Interactive mode'
+       endif
+       write(*,*) '  -L<path>      Set path to locate PM libraries'
+       write(*,*) '  -f<opt>       Language options'
+       write(*,*) '  -H<opt>       Terminal output options'
+       if(pm_is_compiling) then
+          write(*,*) '  -ftn<opt>     Fortran language output options'
+       endif
+       write(*,*) '  -D<opt>       Options for debugging the compiler itself'
+       write(*,*) '  --help        Longer help message'
     endif
   end subroutine print_usage
 
+
+
+  
   subroutine usage
     call print_usage
     call pm_stop(' ')
@@ -167,33 +184,34 @@ contains
        write(*,*) '  included automatically.'
        write(*,*)
        write(*,*) '  CONFIGURATION OPTIONS'
-       write(*,*) '  -L<library path> Look for library files in <library path> rather than lib'
+       write(*,*) '  -L<library path>  Look for library files in <library path> rather than lib'
        write(*,*) 
        write(*,*) '  LANGUAGE OPTIONS'
-       write(*,*) '  -fno-inline      Do not inline any procedures.'
-       write(*,*) '  -fno-check       Do not run "check" or "test" statements.'
-       write(*,*) '  -fcheck          Run "check" and "test" statements.'
-       write(*,*) '  -fno-alias-check Do not check for argument aliasing'
-       write(*,*) '  -falias_check    Check for argument aliasing'
+       write(*,*) '  -fno-inline       Do not inline any procedures.'
+       write(*,*) '  -fno-check        Do not run "check" or "test" statements.'
+       write(*,*) '  -fcheck           Run "check" and "test" statements.'
+       write(*,*) '  -fno-alias-check  Do not check for argument aliasing'
+       write(*,*) '  -falias_check     Check for argument aliasing'
        if(.not.pm_is_compiling) then
           write(*,*) '  -fprint-immediate'
-          write(*,*) '                   Do not buffer print output by node'
+          write(*,*) '                    Do not buffer print output by node'
        endif
        write(*,*)
-       write(*,*) ' ERROR OR TRACE OUTPUT OPTIONS'
-       write(*,*) '  -fshow-elems     Show structure/record elements in error messages.'
-       write(*,*) '  -fshow-members   Show members of user defined types in error messages'
-       write(*,*) '  -fshow-variants  Show all variants for proc types'
-       write(*,*) '  -fshow-details   Show extra details of types'
-       write(*,*) '  -fshow-hidden    Show hidden procedure parameters'
-       write(*,*) '  -fsee-all-procs  List all alternative procedures in error messages'
-       write(*,*) '  -fproc-list=n    Maximum number of procs to list if see-all-procs not invoked'
+       write(*,*) '  ERROR AND WARNING MESSAGE OUTPUT OPTIONS'
+       write(*,*) '  -fshow-elems      Show structure/record elements in error messages.'
+       write(*,*) '  -fshow-members    Show members of user defined types in error messages'
+       write(*,*) '  -fshow-variants   Show all variants for proc types'
+       write(*,*) '  -fshow-all-procs  List all alternative procedures in error messages'
+       write(*,*) '  -fproc-list=n     Maximum number of procs to list if show-all-procs not invoked'
+       write(*,*) '  -fshow-full-trace List all alternative procedures in error messages'
+       write(*,*) '  -ftrace-list=n    Maximum number of calls to list if show-full-trace not invoked'
+
        write(*,*)
-       write(*,*) '  GENERAL OPTIONS'
-       write(*,*) '  -N              Do not colour-highlight error messages'
-       write(*,*) '  -H              Colour-highlight error messages'
-       write(*,*) '  -HB             Colour-highlight error messages using bright colours'
-       write(*,*) '  -HS             Colour-highlight error messages using standard colours'
+       write(*,*) '  TERMINAL DISPLAY OPTIONS'
+       write(*,*) '  -HN               Do not colour-highlight error messages'
+       write(*,*) '  -H                Colour-highlight error messages'
+       write(*,*) '  -HB               Colour-highlight error messages using bright colours'
+       write(*,*) '  -HS               Colour-highlight error messages using standard colours'
        if(pm_is_compiling) then
           write(*,*)
           write(*,*) '  OPTIMISER OPTIONS'
@@ -234,12 +252,14 @@ contains
           write(*,*) '                 Include various annotation comments (mainly for debugging the compiler)'
        endif
        write(*,*)
-       write(*,*) '  OPTIONS FOR DEBUGGING THE COMPILER'
-       write(*,*) '  -D              Activate all debugging options listed below.'
-       write(*,*) '  -Dfiles         Output files from each compiler stage.'
-       write(*,*) '  -Dtimings       Output time taken by each compilation stage.'
-       write(*,*) '  -Dsys-mod       Output a listing of the system module.'
-       write(*,*) '  -Dtype-list     Output a list of all types used by the system.'
+       write(*,*) '  OPTIONS FOR DEBUGGING THE COMPILER ITSELF'
+       write(*,*) '  -Dshow-details    Show extra details of types'
+       write(*,*) '  -Dshow-hidden     Show hidden procedure parameters'
+       write(*,*) '  -D                Activate all debugging options listed below.'
+       write(*,*) '  -Dfiles           Output files from each compiler stage.'
+       write(*,*) '  -Dtimings         Output time taken by each compilation stage.'
+       write(*,*) '  -Dsys-mod         Output a listing of the system module.'
+       write(*,*) '  -Dtype-list       Output a list of all types used by the system.'
     endif
     call pm_stop('  ')
   end subroutine help
@@ -262,7 +282,7 @@ contains
        elseif(arg(1:2)=='-L') then
           pm_opts%lib_path_set=.true.
           pm_opts%lib_path=arg(3:)
-       elseif(arg=='-N') then
+       elseif(arg=='-HN') then
           pm_opts%error='Error:'
           pm_opts%colour=.false.
        elseif(arg=='-HS') then
@@ -277,7 +297,11 @@ contains
           pm_opts%error=pm_opts%error_start//'Error: '//pm_error_end
           pm_opts%colour=.true.
        elseif(arg(1:2)=='-D') then
-          if(arg=='-D') then
+          if(arg=='-Dshow-details') then
+             pm_opts%show_details=.true.
+          elseif(arg=='-Dshow-hidden') then
+             pm_opts%show_hidden=.true.
+          elseif(arg=='-D') then
              pm_opts%out_debug_files=.true.
              pm_opts%out_sysmod=.true.
              pm_opts%out_typelist=.true.
@@ -313,21 +337,21 @@ contains
              pm_opts%show_members=.true.
 	  elseif(arg=='-fshow-variants') then
              pm_opts%show_variants=.true.
-          elseif(arg=='-fshow-details') then
-             pm_opts%show_details=.true.
-          elseif(arg=='-fsee-all-procs') then
-             pm_opts%see_all_procs=.true.
+          elseif(arg=='-fshow-all-procs') then
+             pm_opts%show_all_procs=.true.
+          elseif(arg=='-fshow-full-trace') then
+             pm_opts%show_full_trace=.true.
           elseif(arg=='-falias-check') then
              pm_opts%check_alias=.true.
           elseif(arg=='-fno-alias-check') then
              pm_opts%check_alias=.false.
           elseif(arg=='-fprint-immediate'.and..not.pm_is_compiling) then
              pm_opts%print_immediate=.true.
-          elseif(arg=='-fshow-hidden') then
-             pm_opts%show_hidden=.true.
           elseif(arg(1:12)=='-fproc-list=') then
              pm_opts%proc_list=get_num_opt(arg,arg(13:))
-          elseif(arg(3:4)=='tn') then
+          elseif(arg(1:12)=='-ftrace-list=') then
+             pm_opts%trace_list=get_num_opt(arg,arg(14:))
+          elseif(arg(3:4)=='tn'.and.pm_is_compiling) then
              if(arg=='-ftn-contig') then
                 pm_opts%ftn_contig=.true.
              elseif(arg=='-ftn-no-contig') then
@@ -383,15 +407,15 @@ contains
                    pm_opts%ftn_name_types=.false.
                    pm_opts%ftn_name_elems=.false.
                 elseif(pm_main_process) then
-                   write(*,*) 'Not a valid fortran name (-ftn-no-name) option:',trim(arg)
+                   write(*,*) 'Not a valid fortran name (-ftn-no-name) option: ',trim(arg)
                    call usage()
                 endif
              elseif(pm_main_process) then
-                write(*,*) 'Not a valid fortran output (-ftn) option:',trim(arg)
+                write(*,*) 'Not a valid fortran output (-ftn) option: ',trim(arg)
                 call usage()
              endif
           elseif(pm_main_process) then
-             write(*,*) 'Not a valid language (-f) option:',trim(arg)
+             write(*,*) 'Not a valid language (-f) option: ',trim(arg)
              call usage()
           endif
        elseif(arg(1:4)=='-opt') then
@@ -400,7 +424,7 @@ contains
           elseif(arg=='-opt-no-sched') then
              pm_opts%schedule=.false.
           elseif(pm_main_process) then
-             write(*,*) 'Not a valid optimiser (-opt) option:',trim(arg)
+             write(*,*) 'Not a valid optimiser (-opt) option: ',trim(arg)
              call usage()
           endif
        elseif(arg=='--help') then

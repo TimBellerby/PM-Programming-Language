@@ -60,13 +60,6 @@ module pm_infer
   integer,parameter:: undefined=-1
   integer,parameter:: error_type=-2
 
-  ! Parallel modes
-  integer,parameter:: par_mode_outer=1
-  integer,parameter:: par_mode_multi_node=2
-  integer,parameter:: par_mode_single_node=3
-  integer,parameter:: par_mode_conc=4
-  integer,parameter:: par_mode_inner=5
-
   private:: get_var_type,get_arg_type
 
 contains
@@ -89,45 +82,41 @@ contains
 
     coder%flag_recursion=.false.
     coder%trace_depth=0
-    coder%poly_cache=pm_dict_new(coder%context,32_pm_ln)
-    coder%first_pass=.true.
+ 
     coder%loop_depth=0
-   
-    do
-       coder%top=1
-       coder%wtop=1
-       coder%types_finished=.true.
-       coder%redo_calls=.false.
-       coder%incomplete=.false.
-       coder%taints=0
-       
-       coder%proc_cache=pm_dict_new(coder%context,32_pm_ln)
-     
-       ! Setup resolution stack block
-       call create_stack_frame(coder,0,coder%index,0)
-       
-       ! Process program code
-       call inf_cblock(coder,top_code(coder))
 
-       ! Uncaught break implies infinite recursion
-       if(coder%incomplete) then
-          if(coder%num_errors==0) then
-             call more_error(coder%context,&
-                  'Error: A procedure in this program has infinite recursion')
-             coder%flag_recursion=.true.
-             call inf_cblock(coder,top_code(coder))
-             call pm_stop('Program contains infinite recursion')
-          endif
+    coder%top=1
+    coder%wtop=1
+    coder%incomplete=.false.
+    coder%taints=0
+
+    coder%poly_cache=pm_dict_new(coder%context,32_pm_ln)
+    coder%proc_cache=pm_dict_new(coder%context,32_pm_ln)
+
+    ! Setup resolution stack block
+    call create_stack_frame(coder,coder%index)
+
+    ! Process program code
+    call inf_cblock(coder,top_code(coder))
+
+    ! Uncaught break implies infinite recursion
+    if(coder%incomplete) then
+       if(coder%num_errors==0) then
+          call more_error(coder%context,&
+               'Error: A procedure in this program has infinite recursion')
+          coder%flag_recursion=.true.
+          call inf_cblock(coder,top_code(coder))
+          call pm_stop('Program contains infinite recursion')
        endif
-       if(debug_inference) write(*,*) 'FULL PASS FINISHED>',coder%types_finished
-       if(coder%types_finished) exit
-       coder%first_pass=.false.
-    enddo
-    
+    endif
+
     ! Create resolved code object
     call code_int_vec(coder,coder%stack,coder%base,coder%top)
     call code_num(coder,coder%stack(2))
     call make_code(coder,pm_null_obj,cnode_is_resolved_proc,3)
+
+    ! Finalise inference of procs with polymorphic arguments
+    call inf_poly_procs(coder)
 
     if(debug_inference) write(*,*) 'END OF PROG> vtop=',coder%vtop
 
@@ -138,7 +127,7 @@ contains
 
   ! ====================================================
   ! Type-infer procedure
-  ! Returns signature index as tiny int in on vstack
+  ! Returns signature index as tiny int on vstack
   ! ====================================================
   function inf_proc(coder,procnode,callnode,atype,ptype,nret,nkeys,&
        keynames,keybase,proc_nkeys,nomatch,only_when,new_atype) result(rtype)
@@ -150,24 +139,21 @@ contains
     logical,intent(out):: nomatch
     integer,intent(out):: new_atype
     type(pm_ptr),intent(in):: keynames
-    type(pm_ptr):: cnode,cac
+   
     integer:: rtype
     integer:: at
-    integer,dimension(4+proc_nkeys):: key
+    integer,dimension(4+proc_nkeys):: key,base_key
     integer,dimension(proc_nkeys):: key_types,junk
-    integer:: i,j,keysize,nk,tno,vbase
-    integer(pm_ln):: k
-    logical:: save_redo_calls,save_incomplete,save_types_changed
-    integer:: taints,save_taints,save_loop_depth
+    integer:: i,j,keysize,nk,tno
+    integer(pm_ln):: k,kk
+    logical:: save_incomplete,save_types_changed
+    integer:: taints,save_taints,save_atype,save_new_atype,save_rtype,save_loop_depth
     integer:: keypartyp,keyargtyp,last_key_index,sp_code
-    type(pm_ptr):: save_procnode, keys,keytypes
-    logical:: iscomm,ok,added,change_added
+    type(pm_ptr):: save_procnode,keys,keytypes
+    type(pm_ptr):: cached,cac,base_cache,rt_cache,at_cache
+    logical:: ok,added,change_added,pushed_stack_frame,incomplete
+    integer,dimension(3):: rtn_cache
 
-    taints=0
-    vbase=coder%vtop
-    save_loop_depth=coder%loop_depth
-    save_types_changed=coder%types_changed
-    coder%loop_depth=0
     new_atype=-1
 
     if(pm_debug_checks) then
@@ -187,27 +173,34 @@ contains
        return
     endif
 
-    iscomm=cnode_flags_set(procnode,pr_flags,proccall_is_comm)
-
-    ! Dictionary entries in coder%proc_cache:
-    ! Key is proc and argument types 
-    ! Value is tiny int with procedure return type (if >0)
-    ! or (-1) sp_in_process in process of resolution
-    ! or (-2) sp_recursive called recursively
-    ! or (-3) sp_break  breaking (or previously broke) out of inference
-
-    ! Is this combination already cached?
-    key(1)=cnode_get_num(procnode,pr_id)
-    key(2)=atype ! pm_type_strip_poly(coder%context,atype)
+    if(coder%top+1+cnode_get_num(procnode,pr_max_index)>max_code_stack) then
+       call inf_error(coder,callnode,&
+            'Very deep (probably recursive) set of nested calls that cannot be processed')
+       call more_error(coder%context,'Check for recursive procedure calls generating a new type each time')
+       call more_error(coder%context,&
+            'and also for (mutually) recursive calls in the default value expressions for keyword arguments')
+       call inf_trace(coder)
+       rtype=error_type
+       return
+    endif
+    
+    call save_proc_state
+    coder%loop_depth=0
+    coder%atype=atype
+    coder%proc=procnode
+    
+    
     keysize=2
+    pushed_stack_frame=.false.
 
     ! Process keyword arguments - they form part of the hash key
     last_key_index=0
     if(proc_nkeys>0) then
        keys=cnode_get(procnode,pr_keys)
        last_key_index=keys%data%i(keys%offset+pm_fast_esize(keys))
+       pushed_stack_frame=.true.
        call new_stack_frame(coder,cnode_get_num(procnode,pr_max_index))
-       call init_stack_frame(coder,coder%base,1,coder%base+last_key_index,atype,0)
+       call init_stack_frame(coder,coder%base,1,coder%base+last_key_index)
        call inf_key_args(coder,callnode,procnode,atype,&
             nkeys,keynames,keybase,key_types,nk,.false.)
        keysize=keysize+nk
@@ -221,16 +214,16 @@ contains
     ! Process when expression
     nomatch=.false.
     if(.not.pm_fast_isnull(cnode_get(procnode,pr_when))) then
-       if(proc_nkeys==0) call new_stack_frame(coder,cnode_get_num(procnode,pr_max_index))
-       call init_stack_frame(coder,coder%base,1,coder%base+last_key_index,atype,0)
+       if(.not.pushed_stack_frame) call new_stack_frame(coder,cnode_get_num(procnode,pr_max_index))
+       call init_stack_frame(coder,coder%base,1,coder%base+last_key_index)
        call inf_arg_types(coder,procnode,atype)
        call inf_cblock(coder,cnode_get(procnode,pr_when))
+       pushed_stack_frame=.true.
        tno=get_arg_type(coder,callnode,cnode_get(procnode,pr_whenvar))
        if(tno==coder%false_fix.or.tno==coder%false_literal) then
           call pop_stack_frame(coder)
           nomatch=.true.
-          coder%loop_depth=save_loop_depth
-          coder%types_changed=save_types_changed
+          call restore_proc_state
           return
        elseif(tno/=coder%true_fix.and.tno/=coder%true_literal) then
           call inf_error(coder,procnode,&
@@ -242,19 +235,18 @@ contains
 
     if(only_when) then
        call pop_stack_frame(coder)
-       coder%loop_depth=save_loop_depth
-       coder%types_changed=save_types_changed
+       call restore_proc_state
        nomatch=.false.
        return
     endif
 
-    ! Strip poly type membership from keyword argument types and place in lookup key
-    do i=3,keysize
-       key(i)=key_types(i-2) ! pm_type_strip_poly(coder%context,key_types(i-2))
-    enddo
-
     ! Lookup combination of proc, arg types and all key types
     ! defined for the procedure (including defaults)
+    key(1)=cnode_get_num(procnode,pr_id)
+    key(2)=atype 
+    do i=3,keysize
+       key(i)=key_types(i-2) 
+    enddo
     k=pm_ivect_lookup(coder%context,coder%proc_cache,key,keysize)
 
     if(debug_inference) then
@@ -267,18 +259,29 @@ contains
 
     ! This combination already cached
     if(k>0) then
-       cnode=pm_dict_val(coder%context,coder%proc_cache,k)
+       cached=pm_dict_val(coder%context,coder%proc_cache,k)
 
        if(debug_inference) then
           write(*,*) 'FOUND',k,'-->',key(1:keysize)
-          write(*,*) 'CACHED>',k,cnode%data%vkind,cnode%offset,&
+          write(*,*) 'CACHED>',k,cached%data%vkind,cached%offset,&
                trim(pm_name_as_string(coder%context,&
                cnode_get_name(procnode,pr_name))),sp_sig_recursive,sp_sig_in_process
        endif
 
-       ! One of the special in-progress codes
-       if(pm_fast_istiny(cnode)) then
-          sp_code=cnode%offset
+       ! Dictionary entries in coder%proc_cache:
+       ! Key is proc and argument types 
+       ! Value is vector of ints with procedure return type, & arg types and taints
+       ! or tiny int
+       !  (-1) sp_sig_in_process in process of resolution
+       !  (-2) sp_sig_recursive called recursively
+       !  (-3) sp_sig_break  breaking (or previously broke) out of inference
+
+       taints=0
+       incomplete=.false.
+       
+       if(pm_fast_istiny(cached)) then
+   
+          sp_code=cached%offset
           if(sp_code==sp_sig_break) then
              at=atype
              goto 10
@@ -290,7 +293,7 @@ contains
                 call inf_trace(coder)
                 coder%flag_recursion=.false.
              endif
-             coder%incomplete=.true.
+             incomplete=.true.
              rtype=error_type
           elseif(sp_code==sp_sig_in_process) then
              call pm_dict_set_val(coder%context,coder%proc_cache,&
@@ -302,70 +305,44 @@ contains
                 call inf_trace(coder)
                 coder%flag_recursion=.false.
              endif
-             coder%incomplete=.true.
+             incomplete=.true.
              rtype=error_type
           elseif(sp_code<0) then
              ! Another special sig
              rtype=atype
              call code_num(coder,int(sp_code))
            endif
-       elseif(pm_fast_vkind(cnode)==pm_int) then
-          ! Return type
-          rtype=cnode%data%i(cnode%offset)
-          new_atype=cnode%data%i(cnode%offset+1)
-          if(debug_inference) write(*,*) 'CACHED RETURN>',rtype
+       elseif(pm_fast_vkind(cached)==pm_int) then
+          ! Cached return types
+          rtype=cached%data%i(cached%offset)
+          new_atype=cached%data%i(cached%offset+1)
+          taints=cached%data%i(cached%offset+2)
+          if(debug_inference) write(*,*) 'CACHED RETURN>',rtype,&
+               trim(pm_type_as_string(coder%context,rtype))
           call code_num(coder,int(k))
        else
 
-!!$          ! Combine any polymorphic types in regular or keyword arguments
-!!$          at=pm_type_combine(coder%context,cnode_get_num(cnode,4),atype,ok,added)
-!!$          if(.not.ok) call pm_panic('Augmenting proc type signature in inf_proc')
-!!$          if(added) new_atype=at
-!!$          if(proc_nkeys>0) then
-!!$             keytypes=cnode_arg(cnode,5)
-!!$             do i=1,proc_nkeys
-!!$                key_types(i)=pm_type_combine(coder%context,&
-!!$                     keytypes%data%i(keytypes%offset+i-1),&
-!!$                     key_types(i),key_added,ok)
-!!$                added=added.or.key_added
-!!$             enddo
-!!$          endif
-!!$
-!!$          ! New polymorphic type elements have been added
-!!$          if(added) then
-!!$             if(proc_nkeys>0) then
-!!$                ! Keyword args and associated expressions may have polymorphic types - re-infer
-!!$                vbase=coder%vtop
-!!$                call init_stack_frame(coder,coder%base,1,coder%base+last_key_index,atype,0)
-!!$                call inf_key_args(coder,callnode,procnode,atype,&
-!!$                     nkeys,keynames,keybase,key_types,nk,.true.)
-!!$             endif
-!!$             goto 10
-!!$          endif
+          ! Not a special code or set of return types - so have a fully inferred procedure
 
-          ! Not a special code and no new poly types - so have a fully inferred procedure
-
-          ! Pass out taints
-          taints=cnode_num_arg(cnode,3)
-          coder%taints=ior(coder%taints,iand(taints,proc_taints))
-
+          ! Cached return types and taints
+          taints=cnode_num_arg(cached,3)
+          rtype=cnode_num_arg(cached,4)
+          new_atype=cnode_num_arg(cached,5)
+          
           ! Push signature
           call code_num(coder,int(k))
 
-          ! Get return type
-          cnode=cnode_arg(cnode,2)
-          rtype=cnode%data%i(cnode%offset)
-          if(nret==0) rtype=0
           if(debug_inference) write(*,*) 'CACHED RTYPE>',rtype
+          
        endif
-       if(proc_nkeys>0) call pop_stack_frame(coder)
-       coder%loop_depth=save_loop_depth
-       coder%types_changed=save_types_changed
+       if(pushed_stack_frame) call pop_stack_frame(coder)
+       call restore_proc_state
+       coder%incomplete=coder%incomplete.or.incomplete
+       coder%taints=ior(coder%taints,iand(taints,proc_taints))
        return
     endif
 
 10  continue
-
 
     ! Proc is not (or not yet fully) inferred
     at=atype
@@ -375,8 +352,7 @@ contains
        call inf_error_with_trace(coder,procnode,&
             'Recursion appears to require infinite types')
        call code_num(coder,0)
-       coder%loop_depth=save_loop_depth
-       coder%types_changed=save_types_changed
+       call restore_proc_state
        return
     endif
 
@@ -388,181 +364,210 @@ contains
     ! Get ready to type infer
     k=pm_idict_add(coder%context,coder%proc_cache,&
          key,keysize,pm_fast_tinyint(coder%context,sp_sig_in_process))
-    save_incomplete=coder%incomplete
-    save_taints=coder%taints
-    if(proc_nkeys==0.and.pm_fast_isnull(cnode_get(procnode,pr_when))) then
+       
+    if(.not.pushed_stack_frame) then
        call new_stack_frame(coder,cnode_get_num(procnode,pr_max_index))
     endif
 
     ! Repeatedly type infer until complete
     do
-       if(debug_inference) write(*,*) 'TRY>',key(1),key(2),rtype
+       if(debug_inference) write(*,*) 'TRY>',key(1),key(2),rtype,trim(pm_name_as_string(coder%context,&
+            cnode_get_name(procnode,pr_name)))
 
-       call init_stack_frame(coder,coder%base,last_key_index+1,coder%top,at,taints)
+       call init_stack_frame(coder,coder%base,last_key_index+1,coder%top)
 
        ! Process code
        coder%incomplete=.false.
        coder%taints=taints
-       save_procnode=coder%proc
-       coder%proc=procnode
+       coder%new_atype=-1
+       coder%rtype=-1
+       
        call inf_cblock(coder,cnode_get(procnode,pr_cblock))
-       coder%proc=save_procnode
 
        ! Check  procedure record for recursion/completion
-       cnode=pm_dict_val(coder%context,coder%proc_cache,k)
+       cached=pm_dict_val(coder%context,coder%proc_cache,k)
    
        if(debug_inference) then
-          write(*,*) 'TRY COMPLETE>',cnode%offset,&
-               coder%stack(coder%base),coder%stack(coder%base-1),nret
+          write(*,*) 'TRY COMPLETE>',cached%offset,nret,trim(pm_name_as_string(coder%context,&
+            cnode_get_name(procnode,pr_name)))
        endif
 
-       if(pm_fast_istiny(cnode)) then
-          sp_code=cnode%offset
+       if(pm_fast_istiny(cached)) then
+          sp_code=cached%offset
           if(sp_code==sp_sig_in_process) then
              ! Not recursively called
-             rtype=coder%stack(coder%base)
-             new_atype=coder%stack(coder%base-3)
-             if(nret==0) rtype=0
+             rtype=coder%rtype
+             new_atype=coder%new_atype
+             taints=coder%taints
              if(debug_inference) write(*,*) 'NOT RECURSIVE>',rtype,coder%incomplete
              exit
           else if(sp_code<=sp_sig_recursive) then
              ! Recursively called
-             if(nret==0) coder%stack(coder%base)=0
-
-             if(coder%stack(coder%base)<0) then
+             if(nret>0.and.coder%rtype<0) then
                 ! No resolved type yet 
                 ! flag cache entry
                 ! and break out
                 call pop_stack_frame(coder)
                 sp_code=sp_sig_break
                 call pm_dict_set_val(coder%context,&
-                     coder%proc_cache,k,cnode)
+                     coder%proc_cache,k,cached)
+                call restore_proc_state
                 coder%incomplete=.true.
-                coder%taints=save_taints
                 rtype=error_type
+                new_atype=-1
                 if(debug_inference) write(*,*) 'NOT RESOLVED>'
-                coder%loop_depth=save_loop_depth
-                coder%types_changed=save_types_changed
                 return
              endif
 
-             ! Flag procedure as recursive
-             coder%taints=ior(coder%taints,proc_is_recursive)
-
-             ! Cache resolved return type
-             cnode=pm_fast_newnc(coder%context,pm_int,2)
-             cnode%data%i(cnode%offset)=coder%stack(coder%base)
-             cnode%data%i(cnode%offset+1)=coder%stack(coder%base-3)
-             call pm_dict_set_val(coder%context,coder%proc_cache,k,cnode)
+             ! Cache resolved return type, new "&" types, taints
+             rtn_cache(1)=coder%rtype
+             rtn_cache(2)=coder%new_atype
+             rtn_cache(3)=ior(coder%taints,proc_is_recursive)
+             call code_int_vec(coder,rtn_cache,1,3)
+             call pm_dict_set_val(coder%context,coder%proc_cache,k,top_code(coder))
+             call drop_code(coder)
           endif
        else
           ! Recursive call for which we 
           ! already have a return type
-          ! check against type just returned
+
           if(debug_inference) write(*,*) 'RT>',rtype,coder%stack(coder%base)
 
-          if(pm_fast_vkind(cnode)/=pm_int) call pm_panic('Bad cached proc kind')
-          
-          rtype=cnode%data%i(cnode%offset)
-          new_atype=cnode%data%i(cnode%offset+1)
+          if(pm_fast_vkind(cached)/=pm_int) call pm_panic('Bad cached proc kind')
+
+          ! Get cached return types, changed "&" arg types and taints
+          rtype=cached%data%i(cached%offset)
+          new_atype=cached%data%i(cached%offset+1)
+          taints=cached%data%i(cached%offset+2)
 
           if(debug_inference) write(*,*) 'RECURSIVE WITH TYPE>',&
                trim(pm_type_as_string(coder%context,rtype)),' FOR ',&
                trim(pm_name_as_string(coder%context,cnode_get_num(procnode,pr_name)))
 
           ! If returning values or updating "&" arguments, need to check if types have changed
-          if(nret>0.or.coder%stack(coder%base-3)/=-1) then
-             added=.false.
-             if(nret>0) then
-                rtype=pm_type_combine(coder%context,coder%stack(coder%base),rtype,ok,added)
-                if(.not.ok) then
-                   call inf_error_with_trace(coder,procnode,&
-                        'Internal Compiler Error: Procedure return types changed')
-                endif
-             endif
-             if(coder%stack(coder%base-3)/=-1) then
-                new_atype=pm_type_combine(coder%context,coder%stack(coder%base-3),new_atype,ok,change_added)
-                if(.not.ok) then
-                   call inf_error_with_trace(coder,procnode,&
-                        'Internal Compiler Error: Procedure returned "&" arg types changed')
-                endif
-                added=added.or.change_added
-             endif
-             if(added) then
-                cnode=pm_fast_newnc(coder%context,pm_int,2)
-                cnode%data%i(cnode%offset)=rtype
-                cnode%data%i(cnode%offset+1)=new_atype
-                call pm_dict_set_val(coder%context,coder%proc_cache,k,cnode)
-                cycle
+          added=.false.
+          if(nret>0) then
+             rtype=pm_type_combine(coder%context,rtype,coder%rtype,ok,added)
+             if(.not.ok) then
+                call inf_error_with_trace(coder,procnode,&
+                     'Internal Compiler Error: Procedure return types changed: '//&
+                     trim(pm_type_as_string(coder%context,rtype))//'<>'//&
+                     trim(pm_type_as_string(coder%context,cached%data%i(cached%offset))))
              endif
           endif
-
+          if(coder%new_atype/=-1) then
+             new_atype=pm_type_combine(coder%context,coder%new_atype,new_atype,ok,change_added)
+             if(.not.ok) then
+                call inf_error_with_trace(coder,procnode,&
+                     'Internal Compiler Error: Procedure returned "&" arg types changed')
+             endif
+             added=added.or.change_added
+          endif
+          if(ior(taints,coder%taints)/=taints) then
+             added=.true.
+             taints=ior(taints,coder%taints)
+          endif
+          if(added) then
+             cached%data%i(cached%offset)=rtype
+             cached%data%i(cached%offset+1)=new_atype
+             cached%data%i(cached%offset+2)=taints
+             cycle
+          endif
+          
           ! Flag procedure as recursive
-          coder%taints=ior(coder%taints,proc_is_recursive)
+          taints=ior(taints,proc_is_recursive)
+
+          ! Inference is completed
           exit
        endif
     enddo
 
     if(debug_inference) then
-       write(*,*) 'COMPLETED>',coder%stack(coder%base),&
-            coder%stack(coder%base-1),coder%base
+       write(*,*) 'COMPLETED>',trim(pm_name_as_string(coder%context,&
+            cnode_get_name(procnode,pr_name))),' ',k,coder%incomplete
     endif
 
     ! Pass a break out
     if(coder%incomplete) then
        call pop_stack_frame(coder)
        ! clear cache entry
-       cnode%offset=sp_sig_break
+       cached%offset=sp_sig_break
        call pm_dict_set_val(coder%context,&
-            coder%proc_cache,k,cnode)
+            coder%proc_cache,k,cached)
        if(rtype>=0) then
           call code_num(coder,int(k))
        endif
-       coder%loop_depth=save_loop_depth
-       coder%types_changed=save_types_changed
+       call restore_proc_state
        return
     endif
-
-    coder%incomplete=save_incomplete
 
     ! Flag recursive calls with taints or keyword args as unfinished
     taints=iand(coder%taints,proc_taints)
 
+    ! Determine a hash key with any polymorphic elements eliminated
+    added=.false.
+    base_key(1)=key(1)
+    do i=2,keysize
+       base_key(i)=pm_type_strip_poly(coder%context,key(i))
+       added=added.or.(base_key(i)/=key(i))
+    end do
+
+    ! If the stripped-down hash key is different then need to create a record
+    ! of this 
+    if(added) then
+       kk=pm_ivect_lookup(coder%context,coder%poly_cache,base_key,keysize)
+       if(kk>0) then
+          base_cache=pm_dict_val(coder%context,coder%poly_cache,kk)
+          base_cache=cnode_arg(base_cache,2)
+          do i=2,keysize
+             base_cache%data%i(base_cache%offset+i-1)=&
+                  pm_type_combine(coder%context,&
+                  base_cache%data%i(base_cache%offset+i-1),key(i),ok,change_added)
+          enddo
+       else
+          call code_val(coder,procnode)
+          call code_int_vec(coder,key,1,keysize)
+          rtn_cache(1)=rtype
+          rtn_cache(2)=new_atype
+          rtn_cache(3)=taints
+          call code_int_vec(coder,rtn_cache,1,3)
+          call make_code(coder,pm_null_obj,cnode_is_resolved_proc,3)
+          kk=pm_idict_add(coder%context,coder%poly_cache,&
+               base_key,keysize,top_code(coder))
+          call drop_code(coder)
+       endif
+    endif
+       
     ! Create record of type-annotated code
     call code_val(coder,procnode)
-    call code_int_vec(coder,coder%stack,coder%base,coder%top)
+    if(added) then
+       call code_num(coder,int(kk))
+    else
+       call code_int_vec(coder,coder%stack,coder%base,coder%top)
+    endif
     call code_num(coder,&
          ior(iand(cnode_get_num(procnode,pr_flags),&
          proccall_is_comm+proccall_is_inline+proccall_is_no_inline),&
          coder%taints))
-    call code_num(coder,atype)
-    if(proc_nkeys>0) then
-       call code_int_vec(coder,key_types,1,nk)
-    else
-       call code_null(coder)
-    endif
+    call code_num(coder,rtype)
+    call code_num(coder,new_atype)
     call make_code(coder,pm_null_obj,cnode_is_resolved_proc,5)
-    cnode=top_code(coder)
-    if(debug_inference) then
-       write(*,*) 'CACHE AS>',key(1:keysize),'>',cnode%offset
-    endif
-    k=pm_idict_add(coder%context,coder%proc_cache,&
-         key,keysize,cnode)
+    call pm_dict_set_val(coder%context,coder%proc_cache,k,top_code(coder))
     call drop_code(coder)
-
+    
     call code_num(coder,int(k))
     call pop_stack_frame(coder)
     call cnode_incr_num(procnode,pr_recurse,-1)
 
+    call restore_proc_state
+    
     ! Pass out taint information
     coder%proc_taints=iand(coder%taints,proc_taints)
     coder%taints=ior(save_taints,coder%proc_taints)
 
-    coder%loop_depth=save_loop_depth
-    coder%types_changed=save_types_changed
-
-    if(pm_debug_level>3) then
-       write(*,*) 'ENDPROCNODE>',key(1),key(2),key(3),key(4),k
+    if(debug_inference) then
+       write(*,*) 'ENDPROCNODE>',trim(pm_name_as_string(coder%context,&
+            cnode_get_name(procnode,pr_name))),k
     endif
 
   contains
@@ -572,8 +577,100 @@ contains
     include 'fvkind.inc'
     include 'fesize.inc'
     include 'fisnull.inc'
+    
+    subroutine save_proc_state
+      save_loop_depth=coder%loop_depth
+      save_types_changed=coder%types_changed
+      save_incomplete=coder%incomplete
+      save_taints=coder%taints
+      save_procnode=coder%proc
+      save_atype=coder%atype
+      save_new_atype=coder%new_atype
+      save_rtype=coder%rtype
+    end subroutine save_proc_state
+    
+    subroutine restore_proc_state
+      coder%incomplete=save_incomplete
+      coder%taints=save_taints
+      coder%proc=save_procnode
+      coder%atype=save_atype
+      coder%new_atype=save_new_atype
+      coder%rtype=save_rtype
+      coder%loop_depth=save_loop_depth
+      coder%types_changed=save_types_changed
+    end subroutine restore_proc_state
+    
   end function inf_proc
 
+  !==================================================
+  ! Resolve all procs with poly arguments listed in
+  ! poly_cache
+  !=================================================
+  subroutine inf_poly_procs(coder)
+    type(code_state),intent(inout):: coder
+    integer(pm_ln):: i,k,kk
+    integer:: j,n,atype,key_type,taints
+    type(pm_ptr):: cached,procnode,keys,rtns,keyargs,junk
+    logical:: ok
+    do i=pm_dict_size(coder%context,coder%poly_cache),1,-1
+       ! Details of this proc
+       cached=pm_dict_val(coder%context,coder%poly_cache,i)
+       procnode=cnode_arg(cached,1)
+       keys=cnode_arg(cached,2)
+       rtns=cnode_arg(cached,3)
+       atype=keys%data%i(keys%offset+1)
+       n=pm_fast_esize(keys)-1
+       taints=rtns%data%i(rtns%offset+2)
+
+       ! For a recursive proc, make sure that there is an resolved entry in proc_cache
+       ! to handle any nested recursive calls
+       if(iand(taints,proc_is_recursive)/=0) then
+          junk=pm_dict_lookup(coder%context,coder%proc_cache,keys,kk)
+          if(kk==0) then
+             call code_val(coder,procnode)
+             call code_num(coder,int(i))
+             call code_num(coder,taints)
+             call code_num(coder,rtns%data%i(rtns%offset))
+             call code_num(coder,rtns%data%i(rtns%offset+1))
+             call make_code(coder,pm_null_obj,cnode_is_resolved_proc,5)
+             call pm_dict_set(coder%context,coder%proc_cache,keys,top_code(coder),.true.,.true.,ok)
+             call drop_code(coder)
+          endif
+       endif
+
+       call create_stack_frame(coder,cnode_get_num(procnode,pr_max_index))
+
+       ! Handle keyword arguments
+       if(n>0) then
+          call inf_arg_types(coder,procnode,atype)
+          keyargs=cnode_get(procnode,pr_keycall)
+          do j=1,n
+             call inf_cblock(coder,cnode_arg(keyargs,j*2-1+n+n))
+             key_type=keys%data%i(keys%offset+j+1)
+             call set_var_type(coder,cnode_arg(keyargs,j),key_type)
+             call set_var_type(coder,cnode_arg(keyargs,j+n),key_type)
+          enddo
+       end if
+
+       ! Infer main body
+       coder%atype=atype
+       coder%incomplete=.false.
+       call inf_cblock(coder,cnode_get(procnode,pr_cblock))
+
+       ! Set this entry in poly_cache to inference vector
+       call code_int_vec(coder,coder%stack,coder%base,coder%top)
+       call pm_dict_set_val(coder%context,coder%poly_cache,i,top_code(coder))
+       call drop_code(coder)
+    enddo
+  contains
+    include 'fesize.inc'
+  end subroutine inf_poly_procs
+  
+  !=================================================
+  ! Infer conventional (non-keyword) argument types
+  ! (this routine mainly used as part of inferring
+  ! keyword argument types)
+  !=================================================
   subroutine inf_arg_types(coder,procnode,atype)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: procnode
@@ -1401,7 +1498,7 @@ contains
                   trim(pm_type_as_string(coder%context,arg_type(1))))
           elseif(tno/=coder%true_fix.and.tno/=coder%true_literal) then
              call check_logical(3,.false.)
-             coder%stack(coder%base-2)=ior(coder%stack(coder%base-2),proc_is_impure)
+             coder%taints=ior(coder%taints,proc_is_impure)
           endif
        case(sym_fix,sym_literal)
           tno=arg_type(2)
@@ -1421,7 +1518,7 @@ contains
                pm_new_vect_type(coder%context,arg_type(2)),sym_shared)
        case(sym_open)
           if(nargs>0) then
-             t=pm_type_vect(coder%context,coder%stack(coder%base))
+             t=pm_type_vect(coder%context,coder%atype)
              n=pm_tv_numargs(t)
              do i=1,nargs
                 slot=get_slot(i)
@@ -1443,7 +1540,6 @@ contains
                 coder%stack(slot)=pop_word(coder)
              endif
           endif
-          coder%stack(coder%base)=undefined  
        case(sym_key)
           ! This is inferred in trav_proc
           continue
@@ -1452,11 +1548,11 @@ contains
        case(sym_result)
           call get_arg_types_and_modes
           call make_type_if_possible(coder,nargs+2)
-          coder%stack(coder%base)=pop_word(coder)
+          coder%rtype=pop_word(coder)
        case(sym_amp)
           call get_arg_types_and_modes
           call make_type_if_possible(coder,nargs+2)
-          coder%stack(coder%base-3)=pop_word(coder)
+          coder%new_atype=pop_word(coder)
        case(sym_start_loop)
           coder%stack(get_slot(2))=pm_logical
        case(sym_underscore,sym_colon,sym_end_loop)
@@ -1472,13 +1568,11 @@ contains
              call inf_trace(coder)
           endif
        case(sym_pm_dump)
-          if(coder%first_pass) then
-             if(arg_type_with_mode(1)>0) then
-                call cnode_error(coder,callnode,'Type inference gives: '//&
-                     trim(pm_type_as_string(coder%context,arg_type_with_mode(1))),warn=.true.)
-             else
-                call cnode_error(coder,callnode,'Type inference fails',warn=.true.)
-             endif
+          if(arg_type_with_mode(1)>0) then
+             call cnode_error(coder,callnode,'Type inference gives: '//&
+                  trim(pm_type_as_string(coder%context,arg_type_with_mode(1))),warn=.true.)
+          else
+             call cnode_error(coder,callnode,'Type inference fails',warn=.true.)
           endif
        case default
           if(sig>=0.and.sig<=num_sym) then
@@ -2412,7 +2506,7 @@ contains
                      coder%supress_errors=.false.
                   endif
 
-                  if(rt<0) then
+                  if(nret>0.and.rt<0) then
                      if(debug_inference) then
                         write(*,*) 'INCOMPLETE PROC>',coder%vtop,start,coder%incomplete
                      endif
@@ -2523,9 +2617,9 @@ contains
                   endif
                   pars=cnode_get_num(proc,pr_ptype)
                   call print_proc_details(coder,proc)
-                  if(m>pm_opts%proc_list.and..not.pm_opts%see_all_procs) then
+                  if(m>pm_opts%proc_list.and..not.pm_opts%show_all_procs) then
                      call more_error(coder%context,&
-                          '... (to see all procedures use -fsee-all-procs)')
+                          '... (to see all procedures use -fshow-all-procs)')
                      exit
                   endif
                enddo
@@ -3042,18 +3136,6 @@ contains
     endif
   end function is_visible
 
-  
-  ! ================================================================================
-  ! Set up type inference frame
-  ! Five control slots:
-  !  coder%base-4   == previous/outer values of coder%base
-  !  coder%base-3   == returns final types of any "&" arguments
-  !  coder%base-2   == taints for current procedure
-  !  coder%base-1   == break value -- flags changing types, resolution not complete if /= 0
-  !  coder%base     == argument (on entry) return (on exit) types
-  ! Remaining slots:
-  !  coder%base+index == resolution information according to var or call index
-  ! =================================================================================
 
   !===============================================================
   ! Create but do not intialise current stack frame
@@ -3062,7 +3144,7 @@ contains
     type(code_state),intent(inout):: coder
     integer,intent(in):: max_index
     coder%stack(coder%top+1)=coder%base
-    coder%base=coder%top+5
+    coder%base=coder%top+1
     coder%top=coder%base+max_index
     if(coder%top>max_code_stack) &
          call pm_panic('Program too complex (nested calls)')
@@ -3071,25 +3153,21 @@ contains
   !===============================================================
   ! Create and initialise a stack frame
   !===============================================================
-  subroutine create_stack_frame(coder,argtype,max_index,init_taints) 
+  subroutine create_stack_frame(coder,max_index) 
     type(code_state),intent(inout):: coder
-    integer,intent(in):: argtype,max_index,init_taints
+    integer,intent(in):: max_index
     call new_stack_frame(coder,max_index)
-    call init_stack_frame(coder,coder%base,1,coder%top,argtype,init_taints)
+    call init_stack_frame(coder,coder%base,1,coder%top)
   end subroutine create_stack_frame
 
   !===============================================================
   ! (Re)initialise current stack frame
   ! Only slots first..last are initialised (as are control slots)
   !===============================================================
-  subroutine init_stack_frame(coder,base,first,last,argtype,init_taints) 
+  subroutine init_stack_frame(coder,base,first,last) 
     type(code_state),intent(inout):: coder
-    integer,intent(in):: base,first,last,argtype,init_taints
+    integer,intent(in):: base,first,last
     integer:: i
-    coder%stack(base-3)=-1
-    coder%stack(base-2)=init_taints
-    coder%stack(base-1)=0
-    coder%stack(base)=argtype
     do i=base+first,last
        coder%stack(i)=undefined
     enddo
@@ -3100,8 +3178,8 @@ contains
   !===============================================================
   subroutine pop_stack_frame(coder)
     type(code_state),intent(inout):: coder
-    coder%top=coder%base-5
-    coder%base=coder%stack(coder%base-4)
+    coder%top=coder%base-1
+    coder%base=coder%stack(coder%base)
     if(coder%base==0) call pm_panic('xxx')
   end subroutine pop_stack_frame
 
@@ -3317,6 +3395,8 @@ contains
     logical:: ok,added
     typ0=get_var_type(coder,cnode,var,init=.true.)
     typ2=typ0
+    write(*,*) 'Combining...',trim(pm_type_as_string(coder%context,typ0)),'<>',&
+         trim(pm_type_as_string(coder%context,typ))
     if(typ/=typ0) then
        if(typ0<=0) then
           typ2=typ
@@ -3346,12 +3426,15 @@ contains
                       call cnode_error(coder,cnode,'Type inconsistency occurs here')
                    endif
                    typ2=error_type
+                elseif(added) then
+                   coder%types_changed=.true.
                 endif
              endif
           endif
   
        endif
     endif
+    write(*,*) '....to',trim(pm_type_as_string(coder%context,typ2))
     call set_var_type(coder,var,typ2)
   end subroutine combine_var_type
   
@@ -3751,7 +3834,7 @@ contains
   subroutine inf_trace(coder)
     type(code_state):: coder
     type(pm_ptr):: node,modname,tv
-    integer:: k,top
+    integer:: k,top,chunk
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
     if(coder%trace_depth<1) return
@@ -3774,23 +3857,47 @@ contains
     endif
     
     write(*,*)
-    write(*,*) '-------------CALL TRACE---------------------------'
-    do k=top,1,-1
-       if(k>max_trace_depth) then
-          write(*,*) 'Procedure call: (call not recorded)'
-          cycle
-       endif
-       node=coder%trace(k)
-       if((.not.hide(node)).or.&
-            (.not.pm_opts%hide_sysmod)) then
-          call print_call_details(coder,node,&
-               coder%trace_keys(k))
-          if(k>1) write(*,*)
-       endif
-    enddo
-    write(*,*) '--------------------------------------------------'
+    write(*,'(a)')    '=====================CALL TRACE==========================='
+    write(*,*)
+    if(top>max_trace_depth) then
+       write(*,*) '------------------------------------------------------'
+       write(*,*) ' ... UNRECORDED PROCEDURES (TOO MANY NESTED CALLS) ...'
+       write(*,*) '------------------------------------------------------'
+       write(*,*)
+       top=max_trace_depth
+    endif
+    if(top<=pm_opts%trace_list.or.pm_opts%show_full_trace) then
+       do k=top,1,-1
+          call trace_entry
+       enddo
+    else
+       chunk=max(2,pm_opts%trace_list/2-1)
+       do k=top,top-chunk+1,-1
+          call trace_entry
+       enddo
+       write(*,*) '---------------------------'
+       write(*,*) ' ...  (CALLS SKIPPED) ...'
+       write(*,*) '---------------------------'
+       write(*,*)
+       do k=chunk,1,-1
+          call trace_entry
+       enddo
+       write(*,*)
+       write(*,*) ' (Use -fshow-full-trace to show the complete call trace)'
+    endif
+    write(*,'(a)')    '=========================================================='
     write(*,*)
   contains
+
+    subroutine trace_entry
+      node=coder%trace(k)
+      if((.not.hide(node)).or.&
+           (.not.pm_opts%hide_sysmod)) then
+         call print_call_details(coder,node,&
+              coder%trace_keys(k))
+         if(k>1) write(*,*)
+      endif
+    end subroutine trace_entry
 
     function hide(node) result(hideit)
       type(pm_ptr),intent(in):: node

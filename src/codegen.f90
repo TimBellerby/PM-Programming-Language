@@ -164,14 +164,17 @@ module pm_codegen
      integer:: block_entry,block_base
 
      ! Flags indicating type inference not complete
-     logical:: types_finished,redo_calls,incomplete,first_pass,types_changed
+     logical:: incomplete,types_changed
 
      ! Type inference - depth of nested loops
      integer:: loop_depth
      
-     ! Taints
+     ! Type Inference - Taints
      integer:: taints,proc_taints
 
+     ! Type inference - arg & return types
+     integer:: atype,new_atype,rtype
+     
      ! Type inference base of current proc record
      integer:: base
 
@@ -484,7 +487,7 @@ contains
           call get_lex_scope(coder,node)
           if(sym/=sym_until) call code_val(coder,coder%var(coder%mask))
           call make_sp_call(coder,cblock,node,&
-               sym,merge(4,5,sym==sym_until),0)
+               sym,merge(3,4,sym==sym_until),0)
           call pop_lex_scope(coder)
           coder%par_state=save_par_state
        case(sym_do_stmt)
@@ -2037,7 +2040,6 @@ contains
     lex_scope=coder%lex_scope
     lex_scope_of_var=cnode_get_num(var,var_lex_scope)
     do while(lex_scope_of_var<lex_scope)
-       write(*,*) '##',lex_scope_of_var,lex_scope
         call add_to_change_list(coder,coder%vstack(lex_scope-merge(1,0,modify)),var)
         lex_scope=coder%vstack(lex_scope-2)%offset
     end do
@@ -6706,10 +6708,15 @@ contains
     type(pm_ptr):: arglist
     
     if(.not.present(notouch)) then
+!!$       do i=coder%vtop-nargs+1,coder%vtop
+!!$          write(*,*)' ==== ',i,' ===== ',i-(coder%vtop-nargs+1)
+!!$          call qdump_code_tree(coder,pm_null_obj,6,coder%vstack(i),2)
+!!$       enddo
        do i=coder%vtop-nargs+1,coder%vtop
           call update_arg(coder%vstack(i))
        enddo
     endif
+    
     arg0=coder%vtop-nargs
     if(nret<0) then
        base=arg0
@@ -7197,6 +7204,9 @@ contains
           call pm_dump_tree(coder%context,iunit,node,2)
           return
        endif
+    elseif(node%data%ptr(node%offset)%offset/=cnode_magic_no) then
+       write(iunit,*) spaces(1:depth*2),'Not cnode'
+       return
     elseif(cnode_get_kind(node)<1.or.cnode_get_kind(node)>cnode_num_kinds) then 
        write(iunit,*) spaces(1:depth*2),'Bad kind'
        return

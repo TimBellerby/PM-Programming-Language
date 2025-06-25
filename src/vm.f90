@@ -321,19 +321,23 @@ contains
     endif
     
     select case(opcode)
-    case(op_call,op_comm_call)
+    case(op_call)
        ! op_call #proc ve args...
+       if(.not.ve_is_empty(ve)) then
+          newfunc=context%funcs%data%ptr(&
+               context%funcs%offset+opcode2)
+          if(run_call(newfunc)) goto 999
+       endif
+    case(op_comm_call)
        ! op_comm_call #proc ve args...
-       newfunc=context%funcs%data%ptr(&
-            context%funcs%offset+opcode2)
-       if(run_call(newfunc)) goto 999
-!!$    case(op_comm_call)
-!!$       ve=arg(1)%data%ptr(arg(1)%offset+1)
-!!$       esize=ve%data%ln(ve%offset)
-!!$       ve=arg(1)%data%ptr(arg(1)%offset)
-!!$       newfunc=context%funcs%data%ptr(&
-!!$            context%funcs%offset+opcode2)
-!!$       if(run_call(newfunc)) goto 999
+       if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
+       ok=.not.ve_is_empty(ve)
+       ok=sync_loop_end(ok)
+       if(ok) then
+          newfunc=context%funcs%data%ptr(&
+               context%funcs%offset+opcode2)
+          if(run_call(newfunc)) goto 999
+       endif
     case(op_skip_empty)
        ! op_skip_empty #0_or_2 ve &newve
        ! op_skip_empty #1 ve &newve oldve

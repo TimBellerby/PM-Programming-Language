@@ -251,6 +251,7 @@ contains
        call init_wcode_proc(wcd,proc)
        pr=cnode_arg(proc,1)
        rv=cnode_arg(proc,2)
+       if(pm_fast_istiny(rv)) rv=pm_dict_val(wcd%context,wcd%poly_cache,int(rv%offset,pm_ln))
        taints=cnode_arg(proc,3)
        !keys=cnode_arg(proc,4)
        if(pm_is_compiling) then
@@ -318,6 +319,7 @@ contains
     include 'fesize.inc'
     include 'fisnull.inc'
     include 'fnewnc.inc'
+    include 'fistiny.inc'
   end subroutine  wcode_procs
 
   !====================================================

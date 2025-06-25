@@ -501,10 +501,11 @@ contains
     args(2)=etyp
     recur=-1
     args(3)=pm_type_identify_recursive(context,vtyp,etyp,recur)
-    if(recur>=0) then
-       call pm_type_set_recursive_ref(context,recur,args(3))
-    endif
     tno=pm_new_basic_type(context,args)
+    if(recur>=0) then
+       call pm_type_set_recursive_ref(context,recur,tno)
+    endif
+    write(*,*) 'Poly type is:',tno
   end function pm_new_poly_val_type
 
   
@@ -1447,6 +1448,11 @@ contains
        endif
     case(pm_type_is_user)
        if(tk/=pm_type_is_user) then
+          if(iand(mode,pm_type_incl_extract)/=0) then
+             if(iand(pm_tv_flags(u),pm_type_is_recursive)/=0) then
+                goto 10
+             endif
+          endif
           do i=2,ubase,2
              if(user(i)==p.and.user(i+1)==q) then
                 ok=.true.
@@ -1543,6 +1549,8 @@ contains
        return
     end select
 
+10  continue
+    
     ! Now do tests that look at 1st type first
     select case(tk)
     case(pm_type_is_basic)
@@ -1611,6 +1619,16 @@ contains
        else
           ok=pm_test_type_includes(context,pm_tv_name(t),pm_tv_name(u),&
                ior(mode,pm_type_incl_nomatch),params,base,user,ubase)
+          if(pm_tv_numargs(t)>0.and.pm_tv_numargs(u)>0) then
+             do i=1,pm_tv_numargs(u)
+                do j=1,pm_tv_numargs(t)
+                   ok=pm_test_type_includes(context,pm_tv_arg(t,j),pm_tv_arg(u,i),&
+                        mode,params,base,user,ubase)
+                   if(ok) exit
+                enddo
+                if(.not.ok) exit
+             end do
+          endif
        endif
     case(pm_type_is_type)
        if(uk/=tk) then
@@ -2707,18 +2725,15 @@ contains
     endif
     typ=tno
     if(tno2<=0.or.tno==tno2) return
+    if(pm_type_includes(context,tno,tno2,pm_type_incl_val)) return
     tv=pm_type_vect(context,tno)
     tv2=pm_type_vect(context,tno2)
-        write(*,*) 'xxx',iand(pm_tv_flags(tv),pm_type_has_poly)==0,&
-         iand(pm_tv_flags(tv2),pm_type_has_poly)==0
 
     if(iand(pm_tv_flags(tv),pm_type_has_poly)==0.or.&
          iand(pm_tv_flags(tv2),pm_type_has_poly)==0) then
        ok=.false.
        return
     endif
-
-    write(*,*) 'Here'
     
     tk=pm_tv_kind(tv)
     tk2=pm_tv_kind(tv2)
@@ -2734,8 +2749,6 @@ contains
        typ=pm_type_combine(context,tno,pm_user_type_body(context,tno2),ok,added)
        return
     end select
-
-    write(*,*) 'there'
     
     select case(tk)
     case(pm_type_is_par_kind)
@@ -2751,9 +2764,7 @@ contains
        endif
        call remake(pm_tv_numargs(tv))
     case(pm_type_is_poly)
-       write(*,*) 'ere'
        if(tk/=tk2.or.pm_tv_name(tv)/=pm_tv_name(tv2)) then
-          write(*,*) 'Bad poly'
           ok=.false.
           typ=-1
           return
@@ -2789,6 +2800,8 @@ contains
       integer:: i,j,m,recur,typ2
       logical:: elem_added,elem_ok
 
+      write(*,*) 'combine_poly',trim(pm_type_as_string(context,tno)),'<>',trim(pm_type_as_string(context,tno2))
+  
       a(1)=pm_type_new_poly
       a(2)=pm_tv_name(tv)
       do j=1,n
@@ -2801,6 +2814,7 @@ contains
       outer:do i=1,n2
          do j=1,n
             if(.not.mask(j)) then
+               write(*,*) 'Combining #',i,j
                typ2=pm_type_combine(context,a(2+j),pm_tv_arg(tv2,i),elem_ok,elem_added)
                if(elem_ok) then
                   added=added.or.elem_added
@@ -2862,6 +2876,7 @@ contains
   subroutine pm_type_set_recursive_ref(context,typ,tno)
     type(pm_context),pointer:: context
     integer,intent(in):: typ,tno
+    write(*,*) 'Set recursive',typ,tno
     call pm_type_set_val(context,typ,&
          pm_fast_typeno(context,tno))
   contains
@@ -2879,6 +2894,7 @@ contains
     type(pm_ptr):: tv
     integer:: tk
     typ=tno
+    if(tno<=0) return
     tv=pm_type_vect(context,tno)
     if(iand(pm_tv_flags(tv),pm_type_is_recursive)==0) return
     tk=pm_tv_kind(tv)
@@ -2918,6 +2934,7 @@ contains
     type(pm_ptr):: tv
     integer:: tk
     typ=tno
+    if(tno<=0) return
     tv=pm_type_vect(context,tno)
     if(iand(pm_tv_flags(tv),pm_type_has_poly)==0) return
     tk=pm_tv_kind(tv)
@@ -2933,6 +2950,7 @@ contains
              recur=pm_type_new_recursive_ref(context)
           endif
           typ=recur
+          write(*,*) 'Made recur',typ
        endif
     end select
   contains
@@ -2946,6 +2964,7 @@ contains
          a(i+2)=pm_type_identify_recursive(context,pm_tv_arg(tv,i),etyp,recur)
       enddo
       typ=pm_new_type(context,a)
+      write(*,*) 'remade to',typ,a
     end subroutine remake
   end function pm_type_identify_recursive
   
@@ -2960,6 +2979,7 @@ contains
     type(pm_ptr):: tv
     integer:: tk,arr(2)
     typ=tno
+    if(tno<=0) return
     tv=pm_type_vect(context,tno)
     if(iand(pm_tv_flags(tv),pm_type_has_poly)==0) return
     tk=pm_tv_kind(tv)
@@ -3099,6 +3119,7 @@ contains
     logical:: ok,isfix
     if(n>len(str)-10) return
     tno=typno
+!!$    if(add_char('{'//trim(pm_int_as_string(tno))//'}')) return
     if(tno==0) then
        if(add_char('any')) return
        return
@@ -3120,7 +3141,7 @@ contains
        name=pm_tv_name(tv)
        if(name<0) then
           if(iand(pm_tv_flags(tv),pm_type_is_recursive)/=0) then
-             if(add_char('{RECUR}')) return
+             if(add_char('{RECURSE}')) return
              return
           endif
           call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)

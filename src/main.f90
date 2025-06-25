@@ -253,11 +253,7 @@ contains
     call run_type_inference(coder)
     proc_code=coder%vstack(1)
     proc_cache=coder%proc_cache
-    if(pm_is_compiling) then
-       poly_cache=coder%poly_cache
-    else
-       poly_cache=pm_null_obj
-    endif
+    poly_cache=coder%poly_cache
     call term_coder(coder)
     call pm_gc(context,.false.)
   end subroutine run_coder_and_inference

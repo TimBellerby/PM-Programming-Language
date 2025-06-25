@@ -447,7 +447,7 @@ contains
     integer,intent(in):: iunit,n
     type(pm_ptr),intent(in):: sig_cache,proc_cache
     integer:: kind,i
-    type(pm_ptr):: cnode,key
+    type(pm_ptr):: cnode,key,rvec
     key=pm_dict_key(context,proc_cache,int(n,pm_ln))
     cnode=pm_dict_val(context,proc_cache,int(n,pm_ln))
     if(pm_fast_vkind(cnode)==pm_pointer) then
@@ -476,8 +476,14 @@ contains
                write(iunit,'(a)') '  [dcomm]'
           if(cnode_flags_set(cnode,cnode_args+2,proc_is_file)) &
                write(iunit,'(a)') '  [file]'
-          call print_proc_cnode(context,iunit,cnode_arg(cnode,2),&
-               sig_cache,cnode_arg(cnode,1))
+          rvec=cnode_arg(cnode,2)
+          
+          if(pm_fast_istiny(rvec)) then
+             write(iunit,*) '---->',cnode%offset
+          else
+             call print_proc_cnode(context,iunit,cnode_arg(cnode,2),&
+                  sig_cache,cnode_arg(cnode,1))
+          endif
           write(iunit,'(a)') '}'
        case(cnode_is_callsig)
           write(iunit,'(a)') 'sig{'
@@ -525,6 +531,7 @@ contains
   contains
     include 'fesize.inc'
     include 'fvkind.inc'
+    include 'fistiny.inc'
   end subroutine print_sig
 
   subroutine print_proc_cnode(context,iunit,rvec,sig_cache,cnode)
