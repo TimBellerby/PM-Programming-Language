@@ -2978,7 +2978,7 @@ contains
            endif
         enddo
      enddo
-     call pm_dump_tree(context,6,vec,2)
+     !call pm_dump_tree(context,6,vec,2)
     ptr=vec
   contains
     include 'fesize.inc'

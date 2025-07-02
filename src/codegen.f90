@@ -411,7 +411,7 @@ contains
        sym=node_sym(node)
        if(debug_codegen) then
           write(*,*) 'TRAVERSE>',sym_names(sym),coder%vtop,vbase
-          !call dump_parse_tree(coder%context,6,node,2)
+          call dump_parse_tree(coder%context,6,node,2)
        endif
        select case(sym)
        case(sym_if,sym_if_invar)
@@ -867,11 +867,9 @@ contains
        call make_sys_call_rtn(coder,cblock2,node,sym_as,2,1)
        call hide_vars(coder,vb,vb)
        if(pm_fast_isnull(node_arg(node,2))) then
-          call trav_assign(coder,cblock2,node,node_arg(node,1),pm_null_obj,&
-               sym_pm_assign,sym_pm_assign_op,sym_pm_assign_ref)
+          call trav_assign(coder,cblock2,node,node_arg(node,1),pm_null_obj)
        else
-          call trav_assign(coder,cblock2,node,node_arg(node,2),pm_null_obj,&
-               sym_pm_assign,sym_pm_assign_op,sym_pm_assign_ref)
+          call trav_assign(coder,cblock2,node,node_arg(node,2),pm_null_obj)
        endif
        call reveal_vars(coder,vb,vb)
     endif
@@ -1010,7 +1008,7 @@ contains
     call make_iter_lists(coder,cblock2,iter,node_numargs(iter),.true.,.false.)
 
     call trav_expr(coder,cblock2,node,node_arg(iter,2))
-    call make_sys_call_rtn(coder,cblock2,node,sym_hash,1,1)
+    call make_comm_sys_call_rtn(coder,cblock2,node,sym_hash,1,1)
     
     if(base>=0) call hide_where_vars(coder,base+1,xtop)
 
@@ -1073,7 +1071,7 @@ contains
     call make_iter_lists(coder,cblock,iter,node_numargs(iter),.true.,.true.)
 
     call trav_expr(coder,cblock,node,node_arg(iter,2))
-    call make_sys_call_rtn(coder,cblock,node,sym_hash,1,1)
+    call make_comm_sys_call_rtn(coder,cblock,node,sym_hash,1,1)
     
     if(.not.pm_fast_isnull(keys)) then
        call trav_exprlist(coder,cblock,node,keys)
@@ -1218,9 +1216,6 @@ contains
   end subroutine trav_all_stmt
 
 
-  
-
-
   !========================================================
   ! Traverse over statement
   !========================================================
@@ -1323,7 +1318,7 @@ contains
           k=node_sym(arg)
           if(k==sym_name.or.k==sym_reference) then
              call trav_reference(coder,cblock,node,arg,&
-                  node_sym(node_arg(node,i))/=sym_amp,.true.,.false.)
+                  node_sym(node_arg(node,i))==sym_amp,.true.,.false.)
           else
              call trav_expr(coder,cblock,node,node_arg(node,i+1))
           endif
@@ -1484,7 +1479,7 @@ contains
     type(pm_ptr):: cblock2,cblock3,proc
     integer:: nargs,base,i,partype,restype,flags,vbase
     logical:: varargs
-    integer:: save_index,save_ncalls,save_state_base,save_mask
+    integer:: save_index,save_ncalls,save_state_base,save_mask,save_par_state
     integer:: name,signo,flags0,args(1)
     character(len=15):: namestr
     
@@ -1610,17 +1605,23 @@ contains
     endif
     call code_val(coder,coder%var(base+4))
     cblock3=make_cblock(coder,cblock2,stmtlist,sym_do_stmt)
-    !coder%lex_scope=coder%lex_scope+1
+    coder%lex_scope=push_lex_scope(coder)
 
     if(present(iters)) then
        call extract_iter_lists(coder,cblock3,iters,iter_amps,iter_stars)
     endif
- 
+
+    save_par_state=coder%par_state
+    coder%par_state=par_state_comm_proc
+    
     call trav_open_stmt_list(coder,cblock3,node,stmtlist)
    
     call trav_xexpr(coder,cblock3,node,rtns)
     call make_sp_call(coder,cblock3,node,sym_result,nret,0)
-    !coder%lex_scope=coder%lex_scope-1
+
+    coder%par_state=save_par_state
+    
+    call pop_lex_scope(coder)
     call close_cblock(coder,cblock3)
     
     call extract_block_vars(coder,cblock2,node,coder%var(base+7),.true.)
@@ -1687,8 +1688,9 @@ contains
     call code_val(coder,var)
     call code_val(coder,avar)
     call make_long_const(coder,cblock,node,int(index,pm_ln))
-    call make_comm_sys_call(coder,cblock,node,sym_elem_at_index,2,1,&
-         aflags=proccall_is_ref+proccall_is_general,assign=.true.)
+    call make_basic_sp_call(coder,cblock,node,sym_dot,2,1)
+!!$    call make_comm_sys_call(coder,cblock,node,sym_elem_at_index,2,1,&
+!!$         aflags=proccall_is_ref+proccall_is_general,assign=.true.)
   end subroutine extract_var
 
   !========================================================
@@ -1719,15 +1721,16 @@ contains
     integer,intent(in):: index,block_entry
     type(pm_ptr),intent(inout):: var
     integer:: var_scope,block_scope,block_links
-    if(debug_more_codegen) then
-       write(*,*) 'import_to_block_scope',block_entry,&
-            trim(pm_name_as_string(coder%context,cnode_get_num(var,var_name)))
-    endif
+ 
     if(block_entry==0) return
     var_scope=cnode_get_num(var,var_lex_scope)
     block_scope=coder%wstack(block_entry+2)
     block_links=coder%wstack(block_entry+3)
     if(var_scope>=block_scope) return
+    if(debug_more_codegen) then
+       write(*,*) 'import_to_block_scope',block_entry,var_scope,block_scope,&
+            trim(pm_name_as_string(coder%context,cnode_get_num(var,var_name)))
+    endif
     call make_var(coder,&
          coder%vstack(block_links+1),&
          pm_null_obj,&
@@ -2015,6 +2018,7 @@ contains
             trim(pm_name_as_string(coder%context,cnode_get_num(var,var_name))),&
             cnode_get_num(var,var_index)
     endif
+
     if(modify) then
        call cnode_set_flags(var,var_flags,var_is_changed)
     else
@@ -2391,8 +2395,7 @@ contains
     if(sym==sym_open) then
        call trav_call(coder,cblock,node,body,0,.true.)
     elseif(sym==sym_assign) then
-       call trav_assign(coder,cblock,node,node_arg(body,1),node_arg(body,2),&
-            sym_sync_assign,sym_sync_assign_op,sym_sync_assign_ref)
+       call trav_assign(coder,cblock,node,node_arg(body,1),node_arg(body,2),is_sync=.true.)
     else
        call trav_stmt_list(coder,cblock,node,body,sym_sync,open_scope=.true.)
     endif
@@ -2424,8 +2427,7 @@ contains
     sym=node_sym(lhs)
     n=lhs_size(lhs)
     if(n==1.and.sym==sym_assign) then
-       call trav_assign(coder,cblock,node,node_arg(lhs,1),rhs,&
-            sym_pm_assign,sym_pm_assign_op,sym_pm_assign_ref)
+       call trav_assign(coder,cblock,node,node_arg(lhs,1),rhs)
     else
        call trav_rhs(coder,cblock,node,rhs,n)
        call trav_lhs(coder,cblock,node,lhs)
@@ -2438,12 +2440,13 @@ contains
   !   $call_sym(var,expr,subs...)
   !   $call_sym_op(var,op,expr,subs...)  - for op=
   !   $call_sym_ref(ref,ref)             - for non-aliased refs
+  !
+  !   If rhs is null then rhs value must by on top of vstack
   !==============================================================
-  subroutine trav_assign(coder,cblock,node,alhs,rhs,call_sym,&
-       call_sym_op,call_sym_ref)
+  subroutine trav_assign(coder,cblock,node,alhs,rhs,is_sync)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock,node,alhs,rhs
-    integer,intent(in):: call_sym,call_sym_op,call_sym_ref
+    logical,intent(in),optional:: is_sync
     integer:: base,n,is_op,sym
     logical:: hard_alias
     type(pm_ptr):: temp,lhs
@@ -2469,10 +2472,10 @@ contains
              call trav_reference(coder,cblock,node,lhs,.true.,.false.,.false.)
              call trav_reference(coder,cblock,node,rhs,.false.,.false.,.false.)
              if(coder%par_state==par_state_none) then
-                call make_sys_call(coder,cblock,node,call_sym_ref,2,0,&
+                call make_sys_call(coder,cblock,node,sym_pm_assign_ref,2,0,&
                      assign=.true.)
              else
-                call make_comm_sys_call(coder,cblock,node,call_sym_ref,2,0,&
+                call make_comm_sys_call(coder,cblock,node,sym_pm_assign_ref,2,0,&
                      assign=.true.)
              endif
              return
@@ -2491,12 +2494,12 @@ contains
     temp=coder%vstack(base)
     coder%vstack(base)=coder%vstack(base+is_op+1)
     coder%vstack(base+is_op+1)=temp
-    if(coder%par_state==par_state_none) then
-       call make_sys_call(coder,cblock,node,&
-            merge(call_sym_op,call_sym,is_op/=0),n+2+is_op,0,assign=.true.)
-    else
+    if(present(is_sync)) then
        call make_comm_sys_call(coder,cblock,node,&
-            merge(call_sym_op,call_sym,is_op/=0),n+2+is_op,0,assign=.true.)
+            merge(sym_pm_assign_op,sym_pm_assign,is_op/=0),n+2+is_op,0,assign=.true.)
+    else
+       call make_sys_call(coder,cblock,node,&
+            merge(sym_pm_assign_op,sym_pm_assign,is_op/=0),n+2+is_op,0,assign=.true.)
     endif
   contains
     include 'fisnull.inc'
@@ -2554,8 +2557,7 @@ contains
        enddo
     case(sym_assign)
        do i=n,1,-1
-          call trav_assign(coder,cblock,lhs,node_arg(lhs,i),pm_null_obj,&
-               sym_pm_assign,sym_pm_assign_op,sym_pm_assign_ref)
+          call trav_assign(coder,cblock,lhs,node_arg(lhs,i),pm_null_obj)
        enddo
     case(sym_assign_list)
        do i=n,1,-1
@@ -2623,6 +2625,7 @@ contains
     sym=node_sym(node) 
     if(sym==sym_name) then
        call trav_ref_to_var(coder,cblock,node,node_num_arg(node,1),islhs)
+       if(present(call_n)) call_n=0
        return
     endif
 
@@ -2716,6 +2719,8 @@ contains
                   merge(sym_rhs,sym_lhs,islhs),n-i+1,1)
           endif
        endif
+    else
+       if(present(call_n)) call_n=0
     end if
     
     if(isalias) then
@@ -3226,7 +3231,8 @@ contains
     case(sym_pm_each_index)
        call trav_pm_each_index(coder,cblock,pnode,node,.true.)
     case(sym_reference)
-       call trav_reference(coder,cblock,pnode,node,.false.,.true.,.false.)
+       call trav_reference(coder,cblock,pnode,node,.false.,.true.,.false.,call_n=n)
+       if(n>0) call make_comm_sys_call_rtn(coder,cblock,node,sym_get_ref,n+1,1)
     case(sym_open)
        call make_temp_var(coder,cblock,node)
        call dup_code(coder)
@@ -3691,11 +3697,6 @@ contains
           call push_word(coder,pm_type_new_unfixed)
           call push_word(coder,0)
           call trav_type(coder,pnode,name)
-          if(top_word(coder)/=0) then
-             call defer_type_check(coder,node,pnode,&
-                  coder%literal_types,top_word(coder),sym_literal,&
-                  cnode_is_arg_constraint)
-          endif
           call make_type(coder,3)
        end select
     case(sym_contains)
@@ -3775,8 +3776,7 @@ contains
     case(sym_pm_list)
        call push_word(coder,pm_type_new_vtuple+pm_type_is_list)
        call push_word(coder,0)
-       call push_word(coder,0)
-       call make_type(coder,3)
+       call make_type(coder,2)
     case(sym_assign,sym_var)
        call trav_type(coder,pnode,node_arg(node,1))
     case(sym_pm_dref)

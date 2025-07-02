@@ -1257,6 +1257,7 @@ contains
        call wc_call(wcd,callnode,op_chan,0,2,0,ve)
        call wc(wcd,-new_ve)
     case(sym_task)
+       !!! Needs restart etc.
        do i=3,nargs,3
           break2=wcode_cblock(wcd,cnode_arg(args,i),rv,ve)
        enddo

@@ -735,9 +735,11 @@ module pm_vmdefs
   integer,parameter:: op_concat_fold = -28
   integer,parameter:: op_num_elems_fold = -29
   integer,parameter:: op_type_include_fold = -30
-  integer,parameter:: first_fold=-30
-  integer,parameter:: op_clone_var = -31
-  integer,parameter:: op_error_type = -32
+  integer,parameter:: op_same_type_fold = -31
+  integer,parameter:: op_same_rec_fold = -32
+  integer,parameter:: first_fold=-32
+  integer,parameter:: op_clone_var = -33
+  integer,parameter:: op_error_type = -34
   integer,parameter:: min_op=op_error_type
  
   integer,dimension(0:num_op):: op_flags
@@ -2128,6 +2130,8 @@ contains
     op_names(op_concat_fold)='concat_fold'
     op_names(op_num_elems_fold)='num_elems_fold'
     op_names(op_type_include_fold)='type_include_fold'
+    op_names(op_same_type_fold)='same_type_fold'
+    op_names(op_same_rec_fold)='same_rec_fold'
     op_names(op_clone_var)='clone_var'
     op_names(op_error_type)='error_type'
      

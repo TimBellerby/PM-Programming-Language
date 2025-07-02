@@ -244,7 +244,10 @@ contains
     logical:: ok
     n=len_trim(inbuffer)
     if(n>len(pm_file_suffix)) then
-       if(inbuffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) return
+       if(inbuffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) then
+          buffer=inbuffer
+          return
+       endif
     endif
     if(inbuffer(1:4)=='lib.'.and.lib_path_set) then
        i=1
@@ -259,7 +262,11 @@ contains
           if(m>=i) then
              pathlen=m-i+1
              tot=pathlen+n-3
-             if(tot+len(pm_file_suffix)>len(buffer)) return
+             if(tot+len_trim(pm_file_suffix)>len(buffer)) then
+                if(m+2>len(lib_path)) exit
+                i=m+2
+                cycle
+             endif
              buffer(1:pathlen)=lib_path(i:m)
              do i=4,n
                 if(inbuffer(i:i)=='.') then

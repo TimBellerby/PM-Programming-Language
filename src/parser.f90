@@ -1437,14 +1437,14 @@ contains
   end function call_attr
 
   
-  !============================================================
+  !====================================================================
   ! Qualifiers
   ! .name .digit .{}  [] .name() .{}() .() .'() .%()
-  ! Will immediately return true in dot_call if this is present
-  ! and just encountered a .() or .'() or .%() call
+  ! Will immediately return true in dot_call if dot_call is present
+  ! and parser just encountered a .() or .'() or .%() call
   ! Will return true in last_is_method if this present
   ! and qualifier finishes on a .name() or .{}() method call
-  !============================================================
+  !====================================================================
   recursive function qual(parser,dot_call,last_is_method) result(iserr)
     type(parse_state),intent(inout):: parser
     logical,intent(inout),optional:: dot_call,last_is_method
@@ -1889,21 +1889,26 @@ contains
     case(sym_pm_list)
        call scan(parser)
        if(expect(parser,sym_open)) return
-       if(exprlist(parser,m,nolist=.true.)) return
-       if(expect(parser,sym_close)) return
+       if(parser%sym==sym_close) then
+          call scan(parser)
+          m=0
+       else
+          if(exprlist(parser,m,nolist=.true.)) return
+          if(expect(parser,sym_close)) return
+       endif
        call make_node(parser,sym_pm_list,m)
-    case(sym_fix)
+    case(sym_fix,sym_literal)
        call scan(parser)
        if(parser%sym==sym_open_square) then
           call push_sym_val(parser,sym_tuple)
           if(subscript(parser)) return
           call simple_call(parser)
-          call make_node(parser,sym_fix,1)
+          call make_node(parser,sym,1)
        else
           if(expect(parser,sym_open)) return
           if(expr(parser)) return
           if(expect(parser,sym_close)) return
-          call make_node(parser,sym_fix,1)
+          call make_node(parser,sym,1)
        endif
     case(sym_null)
        if(parser%sym==sym_open) then

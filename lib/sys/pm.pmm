@@ -588,7 +588,6 @@ type cpx_num is real_num,any_cpx
 type num is cpx_num
 
 //  Numeric type conversion
-proc convert(x,y)=x
 proc convert(x:int_num,y:sint)=sint(x)
 proc convert(x:int_num,y:int)=int(x)
 proc convert(x:int_num,y:lint)=lint(x)
@@ -600,6 +599,7 @@ proc convert(x:int_num,y:sreal)=sreal(x)
 proc convert(x:int_num,y:real)=real(x)
 proc convert(x:real_num,y:cpx)=cpx(x)
 proc convert(x:real_num,y:scpx)=scpx(x)
+
 proc as(x:int_num,y:<sint>)=sint(x)
 proc as(x:int_num,y:<int>)=int(x)
 proc as(x:int_num,y:<lint>)=lint(x)
@@ -612,14 +612,6 @@ proc as(x:real_num,y:<real>)=real(x)
 proc as(x:real_num,y:<scpx>)=scpx(x)
 proc as(x:real_num,y:<cpx>)=cpx(x)
 
-//  Auto-conversion on assignment
-proc PM__assign(&x:num,y:num) {
-  _assign_element(&x,convert(y,x))
-}
-
-proc PM__assign_var(&x:num,y:num) {
-  PM__assign(&x,convert(y,x))
-}
 
 //  Mixed arithmatic
 type _to_sint is int
@@ -1103,7 +1095,8 @@ type step_base is real_num
 //  Range types
 type range(t:range_base,hi:range_base) is rec {_lo:t,_hi:hi,_n:int}
 proc ..(x:range_base,y:range_base)=rec range {
-_lo=xx,_hi=yy,_n=max(0,int(yy-xx)+1)} where xx,yy=balance(x,y)
+    _lo=xx,_hi=yy,_n=max(0,int(yy-xx)+1)} where xx,yy=balance(x,y)
+proc ..(x:literal(int),y:literal(int))=literal(rec range{_lo=xx,_hi=yy,_n=max(0,yy-xx)+1}) where xx=fix(x),yy=fix(y)
 proc low(x:range)=x._lo
 proc high(x:range)=x._hi
 proc step(x:range)=convert(1,x._lo)
@@ -1137,6 +1130,7 @@ proc real(x:range)=rec range {
 }
 proc inc(x:range,y:seq())= low(y)>=x._lo and high(y)<=x._hi 
 proc element(x:range(any_int),y:int)=x._lo+convert(y,x._lo)
+proc element(x:range(any_int),y:[int])=x._lo+convert(y.1,x._lo)
 proc element(x:range(any_int),y:range(int))=element(x,y._lo)..element(x,y._hi)
 proc element(x:range(any_int),y:seq(int))=element(x,y._lo)..element(x,y._hi) by y._st
 proc element(x:range(any_int),y:null)=x
@@ -1603,20 +1597,51 @@ proc PM__do_dim(a:any,d:mshape)=_array(a,d,size(d),fix(false))
 // ***************************************************
 
 proc PM__for_stmt'(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<inline>> {
-    PM__for shape {
-      here_in_tile=PM__generate(shape,shape) 
+    PM__for size(shape) {
+      let here_in_tile=PM__generate(shape,size(shape)) 
       PM__context PM__topology,PM__outer,PM__region,PM__schedule,here_in_tile,PM__mask {
         var inouts=PM__import(PM__inouts)
-        var inout_a=PM__get_elem(PM__inout_a,here_in_tile)  
+        var inout_a_i=PM__import(PM__inout_a)
+        var inout_a=PM__get_elem(inout_a_i,here_in_tile)
         PM__block_proc.'(&inouts,
            PM__import(PM__ins),
            &inout_a,
-           PM__get_elem(PM__in_a,here_in_tile),
-           PM__get_elem(PM__star_a,here_in_tile) <<inline>>)
+           PM__get_elem(PM__import(PM__in_a),here_in_tile),
+           PM__get_elem(PM__import(PM__star_a),here_in_tile) <<inline>>)
         PM__export(&PM__inouts,inouts)
-        PM__set_elem(&PM__inout_a,inout_a,here_in_tile)
+        PM__set_elem(&inout_a_i,inout_a,here_in_tile)
       }
    }
+}
+
+proc PM__foreach_stmt'(&PM__inout_a,PM__in_a,shape:extent(1)) yield(&any,any) <<inline>> {
+    var index=low(shape.1)
+    while index<=high(shape.1) {
+        var inout_a=PM__get_elem(PM__inout_a,[index])  
+        PM__block_proc.'(&PM__inouts,
+           PM__ins,
+           &inout_a,
+           PM__get_elem(PM__in_a,[index]) <<inline>>)
+        PM__set_elem(&PM__inout_a,inout_a,[index])
+        index=index+1
+    }
+}
+
+proc PM__foreach_stmt'(&PM__inout_a,PM__in_a,shape:extent(2)) yield(&any,any) <<inline>> {
+    var index2=low(shape.2)
+    while index2<=high(shape.2) {
+      var index1=low(shape.1)
+      while index1<=high(shape.1) {
+        var inout_a=PM__get_elem(PM__inout_a,[index1,index2])  
+        PM__block_proc.'(&PM__inouts,
+           PM__ins,
+           &inout_a,
+           PM__get_elem(PM__in_a,[index1,index2]) <<inline>>)
+        PM__set_elem(&PM__inout_a,inout_a,[index1,index2])
+        index1=index1+1
+      }
+      index2=index2+1
+    }
 }
 
 proc PM__par_stmt'(num) yield() <<inline>> {  yield() }
@@ -1625,8 +1650,6 @@ proc PM__check_task'(num)=true
 proc PM__chan_stmt'() yield() { yield() }
 proc PM__over_stmt'(x) yield() { yield() }
 
-proc #'(x)=x
-
 proc PM__check_iter(x){}
 proc PM__check_iter_amp(x){}
 proc PM__check_iter_star(x){}
@@ -1634,19 +1657,21 @@ proc PM__check_iter(x,y){}
 proc PM__check_iter_amp(x,y){}
 proc PM__check_iter_star(x,y){}
 
-proc PM__get_elem(x:PM__list,h)=PM__each_index(i in num_elements(x):h)
-proc PM__get_elem(x,h)=h
+proc PM__get_elem(x:PM__list,h)=PM__each_index(i in num_elements(x):PM__get_elem(x.{i},h))
+proc PM__get_elem(x,h)=element(x,h)
 proc PM__set_elem(&x,y,h) {}
-proc PM__export(&x,y) {}
 
-proc PM__import(x:PM__list)=PM__each_index(i in num_elements(x):PM__import(element_at_index(x,i)))
+proc PM__import(x:PM__list)=PM__each_index(i in num_elements(x):PM__import(x.{i}))
 PM__intrinsic PM__import(x:any)->(=x) : "import_val"
+proc PM__export(&x:PM__list,y:PM__list) {PM__each_index i in num_elements(x){PM__export(&x.{i},y.{i})}}
+PM__intrinsic PM__export(&x:any,y:any): "export"
 
-proc PM__generate(x,n)=old_dumpit(_elts(x,1,n))
+proc PM__generate(x,n)=_elts(x,1,n)
 PM__intrinsic<<is_generator>> _iota(siz:int,start:int,finish:int,incr:int,totsiz:int)->(int) : "iota"
 PM__intrinsic<<is_generator>> _iota(siz:int,start:int,finish:int,incr:int,first:int,trunc:int,totsiz:int)->(int) : "iota"
 proc _n(x:int)=x
-proc _elts(x:int,siz,tot)=old_dumpit(_iota(siz,0,x,1,tot))
+proc _elts(x:int,siz,tot)=_iota(siz,0,x,1,tot)
+proc _elts(x:range(int),siz,tot)=_iota(siz,0,size(x),1,tot)
 proc _elts(x:tuple1d,siz,tot)=tuple(_elts(x.1,siz,tot))
 proc _elts(x:tuple2d,siz,tot)=tuple(_elts(x.1,siz,tot),_elts(x.2,siz*_n(x.1),tot) )
 proc _elts(x:tuple3d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts( x.3, s1*_n(x.2), tot)) where s1=siz*_n(x.1)
@@ -1670,15 +1695,10 @@ proc match_switch_case(x:literal,y:literal)=x==y
 proc match_switch_case(x:fix(any),y:fix(any))=x==y
 proc match_switch_case(x,y)=x==y
 proc match_switch_case(x:real_num,y:range(real_num))=x>=y._lo and x<=y._hi
-proc match_switch_case(x:real_num,y:_crange)=x>=y._lo and x<=y._hi
-proc match_switch_case(x:literal(int),y:_crange)=(x>=y._lo and x<=y._hi) as <literal(bool)>
+proc match_switch_case(x:literal(int),y:range(literal(int),literal(int)))=(x>=y._lo and x<=y._hi)
+proc match_switch_case(x:literal(int),y:range(fix(int),fix(int)))=(x>=y._lo and x<=y._hi)
 proc match_switch_case(x:fix(int),y:_crange)=x>=y._lo and x<=y._hi
 proc match_switch_case(x:<any>,y:<any>)=y inc x
-type _crange is rec{_lo,_hi}
-proc PM__caserange(x,y)=x..y
-proc PM__caserange(x:fix(int),y:fix(int))=rec _crange{
-  _lo=x,_hi=y
-}
 
 //  Conditional operators
 proc PM__if(x,y,z) check "Incompatible types in different ""if"" branches"=> same_type(y,z) {
@@ -1706,67 +1726,27 @@ proc PM__switch(w:fix(string),x:fix(string),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w:fix(bool),x:fix(bool),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w,x,y,...)=PM__switch(w,x,y,PM__switch(w,...))
 
-/*
-//  Assignment
-proc PM__assign_or_init(a,b)<<inline>>=a {
-  PM__assign_var(&^(a),b)
-}
-*/
-
-
-/*
-type assignment_operator is $_just_assign,$+,$*,$&,$|,$~,$and,$or,$++,...
-
-proc PM__assign(&a:any,b:any,c:assignment_operator) {
-  PM__assign(&a,c.(a,b)) 
-}
-*/
  
 proc PM__assign(&a:any,b:any,c:proc) {
     compile_error("Not a recognised assignment operator") 
 }
- 
-proc check_assign_types(x,y){
-    test "Type mismatch in assignment"=>same_type(x,y)
-}
-proc _assign(&a,b) {
-  _assign_element(&a,b)
-}
 
-/*
-proc _assign(&a:contains(farray),b) {
-  _assign_structure(&a,b)
-}
-*/
-/*
-proc _assign_structure(&a,b)<<foreach^(a,b)>>{
-  _assign_element(&a,b)
-}
-proc _assign_structure(&a:farray,b){
-  _array_assign(&a,b,fix(true))
-}
-*/
 PM__intrinsic _assign_element(&any,any): "assign"
 
-
-//  Other variable operations
-
-proc PM__assign_or_init(&a:PM__assign_or_init,b)=PM__dup(b as a)
-
-proc PM__assign_or_init(&a,b)=a:PM__assign(&a,b)
-
-proc PM__init_const(&a:PM__assign_or_init,b)=PM__dup(b as a)
-
-proc PM__init_const(&a,b)=a: compile_error( "Cannot initialise a constant twice")
-
-proc PM__assign_var(&a,b) {
-  PM__assign(&a,b)
+proc PM__assign(&a:any,b:any) {
+   PM__assign_var(&a,c) where c=convert(b,a)
 }
 
-proc PM__dup(x)=x
+proc PM__assign_var(&a:any,b:any) {
+    test "Cannot assign values"=>same_type(a,b)
+    _assign_element(&a,b)
+}
 
-proc PM__assign(&a:any,b:any) {
-  _assign(&a,c) where c=b as a
+proc PM__assign_var(&a:a_rec,b:a_rec) {
+  test "Cannot assign different records"=>same_rec(a,b)
+  PM__each_index i in num_elements(a) {
+      PM__assign_var(&a.{i},b.{i})
+  }
 }
 
 PM__intrinsic PM__clone(x:any)->(=x) : "clone"
@@ -1782,36 +1762,28 @@ proc PM__init_const'(x:any,y:any)=PM__make_const'(x,y)
 proc PM__make_var(x,y)=PM__make_var(x as y)
 proc PM__make_const(x,y)=PM__make_const(x as y)
 PM__intrinsic PM__dechan'(x:any)->(=x): "clone_var" 
-/*
-PM__intrinsic PM__dup(x:fix(int))->(int) : "clone"
-PM__intrinsic PM__dup(x:fix(real))->(real) : "clone"
-PM__intrinsic PM__dup(x:fix(string))->(string) : "clone"
-PM__intrinsic PM__dup(x:fix(bool))->(bool) : "clone"
-PM__intrinsic PM__dup(x:literal(int))->(int) : "clone"
-PM__intrinsic PM__dup(x:literal(real))->(real) : "clone"
-PM__intrinsic PM__dup(x:literal(string))->(string) : "clone"
-PM__intrinsic PM__dup(x:literal(bool))->(bool) : "clone"
-*/
 PM__intrinsic PM__getref(x:any)->(=x) : "get_rf"
-PM__intrinsic<<needs_type>> same_type(x:any,y:any)->(==x,y) : "logical_return"
+PM__intrinsic same_type(x:any,y:any)->(==x,y) : "same_type_fold"
+PM__intrinsic same_rec(x:any,y:any)->(==x,y) : "same_rec_fold"
 
-/*
-proc ==(x:any,y:any) {
-  test "Cannot apply ""=="" to different types"=> same_type(x,y)
+proc ==(x:a_rec,y:a_rec) {
+  test "Cannot apply ""=="" to different records"=> same_rec(x,y)
   var ok=true
   _eq(x,y,&ok)
   return ok
 }
 proc /=(x:any,y:any) {
-  test "Cannot apply ""/="" to different types"=> same_type(x,y)
+  test "Cannot apply ""/="" to different records"=> same_rec(x,y)
   var ok=true
   _eq(x,y,&ok)
   return not ok
 }
-proc _eq(x:any,y:any,&ok) <<foreach^(x,y)>> {
-  ok=ok and x==y 
+proc _eq(x,y,&ok) <<inline>> {
+    PM__each_index i in num_elements(x) {
+        ok=ok and x.{i}==y.{i}
+    }
 }
-*/
+
 
 proc PM__valref(x)=x
 proc PM__check_alias(...){}
@@ -1824,23 +1796,15 @@ proc next_enum(x:int,y:int)=x+convert(y,x)
 PM__intrinsic<<needs_type>> .element_at_index(&x:any,y:fix(int))->(|x):"elem"
 PM__intrinsic<<needs_type>> element_at_index(x:any,y:fix(int))->(|x):"elem"
 
-proc elements(x)=_elements(x,1)
-proc _elements(x,i:literal(int)) {
-    let e...
-    if fix(i==num_elements(x)) {
-        let ...e=_cons(PM__element_at(x,i),_list_end)
-    } else {
-        let ...e=_cons(PM__element_at(x,i),_elements(x,i+1))
-    }
-    return e
-}
 
 //  Type values
 PM__intrinsic<<needs_type>> typeof(x:any)->(type x) : "make_type_val"
 proc is(x,t)=t inc typeof(x)
-proc isnt(x,t)=not(x is t)
+proc isnot(x,t)=not(x is t)
 proc as(x,t:<any>)...=PM__cast(x,t)
-proc as(x,t)=PM__cast(x,typeof(t))
+proc as(x,t)=convert(x,t)
+proc convert(x,t:a_poly or proc)=PM__cast(x,typeof(t))
+proc convert(x,t)=x
 PM__intrinsic<<needs_type>> inc(x:<any>,y:<any>)->( inc x,y) : "type_include_fold"
 proc ==(x:<any>,y:<any>)=x inc y and y inc x
 PM__intrinsic error_type()->(=1) : "error_type"
@@ -1849,19 +1813,7 @@ PM__intrinsic error_type()->(=1) : "error_type"
 PM__intrinsic<<is_impure>> _dump(any,any): "new_dump"
 proc PM__dump'(x)<<no_inline>>:_dump("Value:",x)
 proc PM__dump'(y,x)<<no_inline>>:if y:_dump("Value:",x)
-/*
-proc PM__dump%(x)<<no_inline>>{
-  print("$"++here)
-  _dump(string(here),x)
-}
-proc PM__dump%(y:bool,x)<<no_inline>>{
-  if y:_dump(string(here),x)
-}
-proc PM__dump%(y,x){
-  test "Selection expression in ""$$dump"" not ""bool""" => fix(false)
-  $$infer_type(y)
-}
-*/
+
 PM__intrinsic<<is_impure>> old_dump(any): "dump"
 proc old_dumpit(a) {
   old_dump(a)

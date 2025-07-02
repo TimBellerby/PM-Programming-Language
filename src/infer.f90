@@ -1329,13 +1329,10 @@ contains
           if(tno==error_type.or.name==error_type) then
              call set_arg_to_error_type(1)
           else
-             tno=pm_type_strip_mode(coder%context,&
-                  tno,mode)
              if(tno>0) then
                 call set_call_sig(resolve_elem(cnode_arg(args,2),tno,name,&
                      sig==sym_dot_ref,.false.,tno2))
-                call combine_types(cnode_arg(args,1),&
-                     pm_type_add_mode(coder%context,tno2,mode))
+                call combine_types(cnode_arg(args,1),tno2)
              else
                 call set_arg_to_error_type(1)
              endif
@@ -1348,7 +1345,7 @@ contains
           if(tno>0) then
              if(pm_type_kind(coder%context,tno)/=pm_type_is_single_name) then
                 tv=pm_type_vect(coder%context,arg_type(2))
-                if(pm_tv_kind(tv)==pm_type_is_literal_value) then
+                if(pm_tv_kind(tv)==pm_type_is_literal_value.or.pm_tv_kind(tv)==pm_type_is_fix_value) then
                    tno2=pm_tv_arg(tv,1)
                    if(tno2==pm_string_type) then
                       tno=pm_name_type_from_literal_string(coder%context,tno,&
@@ -1361,11 +1358,15 @@ contains
                    elseif(tno2/=pm_long) then
                       call inf_error(coder,callnode,&
                            'Expression in ".{}" must be a literal string or integer')
+                      call more_error(coder%context,'Got: '//trim(pm_type_as_string(coder%context,tno2)))
+                      call inf_trace(coder)
                       tno=error_type
                    endif
                 else
                    call inf_error(coder,callnode,&
                         'Expression in ".{}" must be a literal string or integer')
+                   call more_error(coder%context,'Got: '//trim(pm_type_as_string(coder%context,arg_type(2))))
+                   call inf_trace(coder)
                    tno=error_type
                 endif
              endif
@@ -1509,8 +1510,12 @@ contains
                   trim(pm_type_as_string(coder%context,tno)))
           endif
           if(pm_tv_kind(t)==pm_type_is_literal_value) then
-             tno=pm_new_fix_value_type(coder%context,pm_type_val(coder%context,tno),&
-                  pm_tv_name(t))
+             if(sig==sym_fix) then
+                tno=pm_new_fix_value_type(coder%context,pm_type_val(coder%context,tno),&
+                     pm_tv_name(t))
+             endif
+          else
+             tno=pm_new_literal_value_type(coder%context,pm_null_obj,0,tno)
           endif
           coder%stack(get_slot(1))=tno
        case(sym_dcaret)
@@ -1751,10 +1756,10 @@ contains
                  'Internal error: PM__each_index: not a literal or fix int parameter')
          endif
       else
-         n=1
+         n=0
       endif
       if(nret>1) then
-         call push_word(coder,pm_type_new_tuple)
+         call push_word(coder,pm_type_new_tuple+pm_type_is_list)
          call push_word(coder,0)
       endif
       do i=1,n
@@ -1766,7 +1771,7 @@ contains
          call inf_cblock(coder,cnode_arg(args,nret+2))
          call code_int_vec(coder,coder%stack,coder%base+start,coder%base+finish)
          if(nret>1) then
-            call push_word(coder,arg_type(nret+4))
+            call push_word(coder,arg_type_with_mode(nret+4))
          endif
       enddo
       if(nret>1) then
@@ -2122,7 +2127,7 @@ contains
     logical:: is_comm,is_cond,is_unlabelled,ignore_rules
     integer:: name,mode,mode2,i,j,tno,tno2,slot,flags
     integer:: nargs,nkey,keybase,ressig,amps
-    logical:: undef_arg
+    logical:: undef_arg,bad_amp
     type(pm_ptr):: arg,keys,keynames,amplocs,proclist,t,tv
     
     nargs=num_args
@@ -2147,6 +2152,7 @@ contains
     endif
 
     undef_arg=.false.
+    bad_amp=.false.
     
     keys=cnode_get(callnode,call_keys)
     keynames=cnode_get(callnode,call_key_names)
@@ -2207,9 +2213,9 @@ contains
        endif
        
        ! Suspend 'no shared import' rule in system module code
-       ignore_rules=ignore_rules.or.&
-            cnode_get_name(callnode,cnode_modl_name)==sym_pm_system
-       
+!!$       ignore_rules=ignore_rules.or.&
+!!$            cnode_get_name(callnode,cnode_modl_name)==sym_pm_system
+!!$       
        ! Implement mode combination rule for standard procedures
        mode=pm_type_combine_modes(coder%context,&
             coder%wstack(coder%wtop+1:coder%wtop+nargs),is_cond,&
@@ -2250,6 +2256,7 @@ contains
                    call call_error('Cannot change "'//trim(sym_names(mode2))//&
                         '" "&" variable outside of a "sync" statement')
                 endif
+                bad_amp=.true.
              endif
           enddo
        endif
@@ -2548,8 +2555,8 @@ contains
                      enddo
                   endif
                endif
-               if(new_apars>0.and.amps/=0) then
-                  write(*,*) 'Changing to',trim(pm_type_as_string(coder%context,new_apars))
+               if(new_apars>0.and.amps/=0.and..not.bad_amp) then
+!!$                  write(*,*) 'Changing to',trim(pm_type_as_string(coder%context,new_apars))
                   amplocs=pm_name_val(coder%context,amps)
                   rtvect=pm_type_vect(coder%context,new_apars)
                   if(pm_tv_kind(rtvect)==pm_type_is_tuple.and.&
@@ -3395,8 +3402,8 @@ contains
     logical:: ok,added
     typ0=get_var_type(coder,cnode,var,init=.true.)
     typ2=typ0
-    write(*,*) 'Combining...',trim(pm_type_as_string(coder%context,typ0)),'<>',&
-         trim(pm_type_as_string(coder%context,typ))
+!!$    write(*,*) 'Combining...',trim(pm_type_as_string(coder%context,typ0)),'<>',&
+!!$         trim(pm_type_as_string(coder%context,typ))
     if(typ/=typ0) then
        if(typ0<=0) then
           typ2=typ
@@ -3426,6 +3433,7 @@ contains
                       call cnode_error(coder,cnode,'Type inconsistency occurs here')
                    endif
                    typ2=error_type
+                   call inf_trace(coder)
                 elseif(added) then
                    coder%types_changed=.true.
                 endif
@@ -3434,7 +3442,7 @@ contains
   
        endif
     endif
-    write(*,*) '....to',trim(pm_type_as_string(coder%context,typ2))
+!!$    write(*,*) '....to',trim(pm_type_as_string(coder%context,typ2))
     call set_var_type(coder,var,typ2)
   end subroutine combine_var_type
   
@@ -3472,7 +3480,7 @@ contains
     if(.not.ok) then
        call inf_error(coder,node,&
             'Value of type "'//trim(pm_type_as_string(coder%context,tno2))//&
-            '" cannot be converted to type "'//trim(pm_type_as_string(coder%context,tno1))//"'")
+            '" cannot be converted to type "'//trim(pm_type_as_string(coder%context,tno1))//'"')
        call inf_trace(coder)
     endif
     if(debug_inference) write(*,*) 'Cast Converts to:',trim(pm_type_as_string(coder%context,tno2))
@@ -3524,6 +3532,22 @@ contains
             pm_type_arg(coder%context,&
             pm_type_arg(coder%context,atype,3),1),&
             pm_type_incl_type)
+       if(ok) then
+          rtype=coder%true_literal
+       else
+          rtype=coder%false_literal
+       endif
+       return
+    elseif(opcode==op_same_type_fold) then
+       ok=pm_type_equal(coder%context,pm_type_arg(coder%context,atype,2),pm_type_arg(coder%context,atype,3))
+       if(ok) then
+          rtype=coder%true_literal
+       else
+          rtype=coder%false_literal
+       endif
+       return
+    elseif(opcode==op_same_rec_fold) then
+       ok=pm_type_same_rec(coder%context,pm_type_arg(coder%context,atype,2),pm_type_arg(coder%context,atype,3))
        if(ok) then
           rtype=coder%true_literal
        else
@@ -3797,6 +3821,7 @@ contains
           str=trim(pm_opts%error)//' '//message
        endif
        write(*,'(A)') trim(str)
+       write(*,*)
     endif
     if(cnode_get_name(node,cnode_modl_name)==sym_pm_system.and.&
          pm_opts%hide_sysmod) then
