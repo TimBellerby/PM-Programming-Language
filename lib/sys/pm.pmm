@@ -1460,7 +1460,8 @@ PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
 PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 proc array(x,d:extent)=_array(x,_mshape(d),size(d))
 proc #'(x:any^any)=_array_mshape(x)._extent
-proc element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
+proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
+proc _set_array_element(a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
 
 /*
 PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
@@ -1556,41 +1557,8 @@ proc *(x:num,y:num^any)={
 proc /(x:num^any,y:num)={
   xx/y:xx in x
 }
-
-
-//  *****************************************
-//  ARRAY TEMPLATES
-//  *****************************************
-//  Array templates
-type array_template(a,d:mshape or dshape,v:fix(bool)) is rec {_a:a,_d:d,_s:int,_v:v}
-proc array(a:any,s:dshape)=rec array_template {
-  _a=a,_d=s,_s=s._size,_v=fix(false)
-}
-proc array(a:any,s:mshape(tuple(range(int))))=rec array_template {
-  _a=a,_d=s,_s=size(s),_v=fix(false)
-}
-proc array(a:any,s:tuple(range(any_int)))=array(a,shape(s))
-proc varray(a:any,s:mshape or dshape)=rec array_template {
-  _a=a,_d=s,_s=size(s),_v=fix(true)
-}
-proc varray(a:any,s:tuple(range(any_int)))=varray(a,shape(s))
-proc _zero(x)=0
-proc varray(a:any,s:tuple(null))=varray(a,shape(map($_zero,s)))
-//  Treat a template as if it were an array
-proc _arb(a:array_template)=a._a
-proc #(a:array_template(,mshape,))=a._d
-proc dims(a:array_template(,mshape,))=dims(a._d)
-proc size(a:array_template)=a._s
-proc redim(a:array_template,d:mshape)= rec array_template {
-_a=a,_d=d,_s=size(d),_v=a._v} check "New dshape does not have same size in redim"=> size(d)==a._s 
-proc element(a:array_template,...:subs)=a._a
-//  Array creation from template
-
-proc PM__dup(a:array_template(,shape,))=_array(PM__dup(a._a),a._d,int(a._s),a._v)
-proc PM__dup(a:array_template(,shape,fix(true)))=_array(PM__dup(a._a),PM__dup(a._d),PM__dup(int(a._s)),a._v)
-proc PM__do_dim(a:any,d:mshape)=_array(a,d,size(d),fix(false))
-
 */
+
 
 // ***************************************************
 // LOOPS AND PARALLEL STATEMENTS
@@ -1727,7 +1695,7 @@ proc PM__switch(w:fix(bool),x:fix(bool),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w,x,y,...)=PM__switch(w,x,y,PM__switch(w,...))
 
  
-proc PM__assign(&a:any,b:any,c:proc) {
+proc PM__assign_op(&a:any,b:any,c:proc) {
     compile_error("Not a recognised assignment operator") 
 }
 
@@ -1735,6 +1703,10 @@ PM__intrinsic _assign_element(&any,any): "assign"
 
 proc PM__assign(&a:any,b:any) {
    PM__assign_var(&a,c) where c=convert(b,a)
+}
+
+proc PM__assign(&a:any,b:any,j:tuple(int)) {
+   _set_array_element(&a,j,b)
 }
 
 proc PM__assign_var(&a:any,b:any) {

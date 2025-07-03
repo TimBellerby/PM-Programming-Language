@@ -1194,7 +1194,7 @@ contains
     call get_sym_pos(parser,line,pos)
     n=0
     base=parser%top
-    
+
     if(parser%sym==sym_pct) then
        flags=proccall_is_comm
        call scan(parser)
@@ -1255,7 +1255,7 @@ contains
     endif
 
     if(expect(parser,sym_open)) return
-    
+
     ! Call attributes but no arguments
     if(parser%sym==sym_open_attr) then
        if(call_attr(parser,.true.,flags)) return
@@ -1301,32 +1301,25 @@ contains
           call scan(parser)
           exit
        else
-          if(parser%sym==sym_move.or.parser%sym==sym_move_all) then
-             msym=parser%sym
-             call scan(parser)
-             if(expr(parser)) return
-             call make_node(parser,msym,1)
-          else
-             if(check_name(parser,sym)) then
-                if(parser%sym==sym_assign) then
-                   call make_node(parser,sym_list,m)
-                   if(parser%top>base) then
-                      call name_vector(parser,base)
-                   else
-                      call push_null_val(parser)
-                   endif
-                   base=parser%top
-                   call push_sym(parser,sym)
-                   call scan(parser)
-                   if(expr(parser)) return
-                   n=1
-                   exit
+          if(check_name(parser,sym)) then
+             if(parser%sym==sym_assign) then
+                call make_node(parser,sym_list,m)
+                if(parser%top>base) then
+                   call name_vector(parser,base)
                 else
-                   call push_back(parser,sym)
+                   call push_null_val(parser)
                 endif
+                base=parser%top
+                call push_sym(parser,sym)
+                call scan(parser)
+                if(expr(parser)) return
+                n=1
+                exit
+             else
+                call push_back(parser,sym)
              endif
-             if(expr(parser)) return
           endif
+          if(expr(parser)) return
           m=m+1
        endif
        if(parser%sym/=sym_comma) then
@@ -1369,15 +1362,15 @@ contains
     else
        call push_null_val(parser)
     endif
-    
+
     ! Call attributes if present
     if(parser%sym==sym_open_attr) then
        if(call_attr(parser,.true.,flags)) return
     endif
-    
+
     call push_num_val(parser,flags)
     call make_node_at(parser,sym_open,6,line,pos)
-    
+
     if(m+n>pm_max_args) then
        call parse_error(parser,&
             'Too many arguments to proc call - maximum is:'//trim(pm_int_as_string(pm_max_args)))
@@ -1449,7 +1442,7 @@ contains
     type(parse_state),intent(inout):: parser
     logical,intent(inout),optional:: dot_call,last_is_method
     logical:: iserr
-    integer:: sym,line,pos,n
+    integer:: sym,line,pos,n,m
     logical:: finish_on_method
     iserr=.true.
     n=1
@@ -1494,6 +1487,12 @@ contains
                 finish_on_method=.false.
              endif
              n=n+1
+          case(sym_caret)
+             call scan(parser)
+             if(expect_name(parser)) return
+             if(expect(parser,sym_open)) return
+             if(exprlist(parser,m,nolist=.true.)) return
+             call make_node_at(parser,sym_caret,m+1,line,pos)
           case default
              if(expect_name(parser)) return
              sym=parser%sym
@@ -2525,9 +2524,7 @@ contains
   recursive function valref(parser) result(iserr)
     type(parse_state),intent(inout):: parser
     logical:: iserr
-    integer:: n
     iserr=.true.
-    n=0
     if(expect_name(parser)) return
     if(parser%sym==sym_dcolon) then
        call scan(parser)
@@ -2536,7 +2533,6 @@ contains
     else
        call make_node(parser,sym_name,1)
     end if
-    n=n+1
     if(qual(parser)) return
     iserr=.false.
   end function valref

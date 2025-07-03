@@ -2618,8 +2618,8 @@ contains
     type(pm_ptr),intent(in):: cblock,pnode,node
     logical,intent(in):: islhs,skipdot,isalias
     integer,intent(out),optional:: call_n
-    type(pm_ptr):: arg
-    integer:: i,j,n,sym,start,base,vbase,abase,atop
+    type(pm_ptr):: arg,list,base_var
+    integer:: i,j,n,sym,start,base,vbase,abase,atop,last_caret
     logical:: iscomm,isvar
     
     sym=node_sym(node) 
@@ -2637,7 +2637,9 @@ contains
        call trav_expr(coder,cblock,node,arg)
        isvar=.false.
     endif
-   
+
+    base_var=top_code(coder)
+    
     start=2
     arg=node_arg(node,start)
     sym=node_sym(arg)
@@ -2667,6 +2669,7 @@ contains
     base=coder%vtop-start+1
     
     n=node_numargs(node)
+    last_caret=0
     do i=start,n
        arg=node_arg(node,i)
        sym=node_sym(arg)
@@ -2682,11 +2685,15 @@ contains
           call trav_expr(coder,cblock,arg,node_arg(arg,1))
           call trav_expr(coder,cblock,arg,node_arg(arg,2))
           call make_sp_call_rtn(coder,cblock,node,sym_list,2,1)
+       case(sym_caret)
+          last_caret=i
        end select
     enddo
 
     atop=coder%vtop
 
+    call make_var(coder,cblock,node,0,var_is_reference,extra_info=base_var)
+    call dup_code(coder)
     call code_val(coder,coder%vstack(vbase))
     
     i=start
@@ -2694,9 +2701,17 @@ contains
     if(skipdot) then
        arg=node_arg(node,i)
        sym=node_sym(arg)
-       do while(sym==sym_dot.or.sym==sym_open_brace)
-          call code_val(coder,coder%vstack(base+i))
-          call make_sp_call_rtn(coder,cblock,arg,merge(sym_dot_ref,sym_dot,islhs),2,1)
+       do while(sym==sym_dot.or.sym==sym_open_brace.or.sym==sym_caret)
+          if(sym==sym_caret) then
+             list=node_arg(arg,2)
+             call trav_exprlist(coder,cblock,arg,list)
+             call make_sys_call(coder,cblock,arg,node_num_arg(arg,1),&
+                  node_numargs(list),merge(1,-1,i==n))
+          else
+             call code_val(coder,coder%vstack(base+i))
+             call make_sp_call(coder,cblock,arg,merge(sym_dot_ref,sym_dot,islhs),2,&
+                  merge(1,-1,i==n))
+          endif
           i=i+1
           if(i>n) exit
           arg=node_arg(node,i)
@@ -2704,19 +2719,19 @@ contains
        enddo
     endif
     
-    if(i<n) then
-       do j=i+1,n
+    if(i<=n) then
+       do j=i,n
           call code_val(coder,coder%vstack(base+j))
        enddo
        if(present(call_n)) then
-          call_n=n-i
+          call_n=n-i+1
        else
           if(.not.iscomm) then
-             call make_sys_call_rtn(coder,cblock,node,&
-                  merge(sym_rhs,sym_lhs,islhs),n-i+1,1)
+             call make_sys_call(coder,cblock,node,&
+                  merge(sym_rhs,sym_lhs,islhs),n-i+2,1)
           else
-             call make_comm_sys_call_rtn(coder,cblock,node,&
-                  merge(sym_rhs,sym_lhs,islhs),n-i+1,1)
+             call make_comm_sys_call(coder,cblock,node,&
+                  merge(sym_rhs,sym_lhs,islhs),n-i+2,1)
           endif
        endif
     else
@@ -3291,7 +3306,7 @@ contains
        endif
     case default
        call dump_parse_tree(coder%context,6,pnode,2)
-       write(*,*) sym_names(sym)
+       write(*,*) 'sym=',trim(sym_names(sym))
        call dump_parse_tree(coder%context,6,node,2)
        call pm_panic('Code generator - unexpected node in expr')
     end select
@@ -6770,12 +6785,6 @@ contains
       
       if(pm_fast_vkind(p)==pm_pointer) then
          if(cnode_get_kind(p)==cnode_is_var) then
-            if(cnode_flags_set(p,var_flags,var_is_split)) then
-               call code_error(coder,p,&
-                    'Variable is used by an enclosing "distinct" clause and may not be used directly: ',&
-                    cnode_get_num(p,var_name))
-               call code_error(coder,p,'This is the "distinct" clause that splits this variable')
-            endif
             call update_change_lists(coder,p,.false.)
 !!$            if(.not.iscomm) then
 !!$               if(cnode_flags_set(p,var_flags,var_is_maybe_not_private)) then

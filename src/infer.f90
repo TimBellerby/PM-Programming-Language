@@ -3351,7 +3351,6 @@ contains
             cnode_get(var,var_name))
        call cnode_error(coder,var,&
             'Definition statement relating to above error')
-       call pm_panic('FAN')
        coder%stack(cnode_get_num(var,var_index)+coder%base)=error_type
        tno=error_type
     elseif(tk==pm_type_is_error) then
@@ -3444,7 +3443,26 @@ contains
     endif
 !!$    write(*,*) '....to',trim(pm_type_as_string(coder%context,typ2))
     call set_var_type(coder,var,typ2)
+    if(cnode_flags_set(var,var_flags,var_is_reference)) then
+       call combine_subvar_type(coder,cnode_get(var,var_extra_info),typ0,typ2)
+    endif
   end subroutine combine_var_type
+
+  !===========================================================
+  ! For a given variable, change any subelement of oldtype
+  ! to newtype
+  !===========================================================
+  subroutine combine_subvar_type(coder,var,oldtype,newtype)
+    type(code_state):: coder
+    type(pm_ptr),intent(in):: var
+    integer,intent(in):: oldtype,newtype
+    integer:: vartype
+    if(oldtype==newtype) return
+    vartype=get_var_type(coder,var,var,init=.true.)
+    if(vartype<=0.or.oldtype<=0.or.newtype<=0) return
+    vartype=pm_type_replace(coder%context,vartype,oldtype,newtype)
+    call set_var_type(coder,var,vartype)
+  end subroutine combine_subvar_type
   
 
   !===========================================================

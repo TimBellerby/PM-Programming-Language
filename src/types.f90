@@ -2747,6 +2747,59 @@ contains
     end subroutine remake
   end function pm_type_as_concrete
 
+
+  recursive function pm_type_replace(context,tno,oldtype,newtype) result(tno2)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno,oldtype,newtype 
+    integer:: tno2
+    type(pm_ptr):: tv
+    integer:: tk,oldtyp,newtyp
+    if(pm_type_kind(context,oldtype)==pm_type_is_dref) then
+       oldtyp=pm_type_arg(context,oldtype,1)
+       newtyp=pm_type_arg(context,newtype,1)
+    else
+       oldtyp=oldtype
+       newtyp=newtype
+    endif
+    if(tno==oldtyp) then
+       tno2=newtyp
+       return
+    endif
+    tv=pm_type_vect(context,tno)
+    tk=pm_tv_kind(tv)
+    select case(tk)
+    case(pm_type_is_array)
+       tno2=pm_new_arr_type(context,pm_tv_name(tv),&
+            pm_type_replace(context,pm_tv_arg(tv,1),oldtyp,newtyp),&
+            pm_tv_arg(tv,2),pm_tv_arg(tv,3))
+       !!! Dref should be only be overall type (arg(1)?)
+    case(pm_type_is_rec,pm_type_is_tuple,pm_type_is_dref)
+       call remake(pm_tv_numargs(tv))
+    case default
+       tno2=tno
+    end select
+  contains
+    recursive subroutine remake(n)
+      integer,intent(in):: n
+      integer,dimension(n+2):: a
+      integer:: i,etyp
+      logical:: changed
+      a(1)=pm_tv_flags(tv)
+      a(2)=pm_tv_name(tv)
+      changed=.false.
+      do i=1,n
+         etyp=pm_tv_arg(tv,i)
+         a(i+2)=pm_type_replace(context,etyp,oldtyp,newtyp)
+         changed=changed.or.a(i+2)/=etyp
+      enddo
+      if(changed) then
+         tno2=pm_new_type(context,a)
+      else
+         tno2=tno
+      endif
+    end subroutine remake
+  end function pm_type_replace
+
   !================================================================
   ! Create a new type with with all fix values converted
   ! to base type and mode changed to new_mode
