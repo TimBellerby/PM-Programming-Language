@@ -1491,8 +1491,10 @@ contains
              call scan(parser)
              if(expect_name(parser)) return
              if(expect(parser,sym_open)) return
-             if(exprlist(parser,m,nolist=.true.)) return
-             call make_node_at(parser,sym_caret,m+1,line,pos)
+             if(exprlist(parser)) return
+             call make_node_at(parser,sym_caret,2,line,pos)
+             if(expect(parser,sym_close)) return
+             n=n+1
           case default
              if(expect_name(parser)) return
              sym=parser%sym

@@ -1891,8 +1891,8 @@ contains
                 op2=1
              endif
           elseif(op==op_elem) then
-             if(nargs==9) then
-                tno=check_arg_type(wcd,args,rv,9)
+             if(nargs==4) then
+                tno=check_arg_type(wcd,args,rv,4)
                 p=pm_type_val(wcd%context,tno)
                 op2=p%data%ln(p%offset)+1
              endif

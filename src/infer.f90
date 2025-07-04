@@ -811,7 +811,7 @@ contains
     integer,dimension(1):: key
     integer:: k,t1,n,opcode
     type(pm_ptr):: tv,v
-    logical:: isstatic,iscomm
+    logical:: isstatic,iscomm,ok,added
 
     new_atype=-1
     
@@ -888,10 +888,10 @@ contains
           endif
        else
           tv=pm_type_vect(coder%context,atype)
-          t1=pm_type_strip_mode(coder%context,pm_tv_arg(tv,8),mode)
+          t1=pm_type_strip_mode(coder%context,pm_tv_arg(tv,3),mode)
           v=pm_type_val(coder%context,t1)
           n=v%data%ln(v%offset)
-          t1=pm_type_strip_mode(coder%context,pm_tv_arg(tv,7),mode)
+          t1=pm_type_strip_mode(coder%context,pm_tv_arg(tv,2),mode)
           tv=pm_type_vect(coder%context,t1)
           k=pm_tv_kind(tv)
           if(k/=pm_type_is_rec.and.k/=pm_type_is_tuple) then
@@ -915,7 +915,7 @@ contains
        rtype=pm_new_arr_type(coder%context,sym_const,&
             pm_type_for_var(coder%context,atype1,sym_private),&
             pm_type_arg(coder%context,atype,3),int(pm_long))
-       write(*,*) 'make array',pm_type_as_string(coder%context,atype)
+       !write(*,*) 'make array',pm_type_as_string(coder%context,atype)
     case(op_var_array)
        rtype=pm_new_arr_type(coder%context,sym_var,&
             pm_type_for_var(coder%context,atype1,sym_private),&
@@ -958,7 +958,15 @@ contains
     case(op_list_splice)
        call infer_list_splice
     case(op_assign)
-       new_atype=pm_type_arg(coder%context,atype,3)
+       new_atype=pm_type_combine(coder%context,&
+            pm_type_arg(coder%context,atype,2),pm_type_arg(coder%context,atype,3),ok,added)
+    case(op_array_set_elem)
+       new_atype=pm_new_arr_type(coder%context,pm_type_name(coder%context,atype1),&
+            pm_type_combine(coder%context,&
+            pm_type_arg(coder%context,atype1,1),&
+            pm_type_arg(coder%context,atype,4),ok,added),&
+            pm_type_arg(coder%context,atype1,2),&
+            pm_type_arg(coder%context,atype1,3))
     end select
 
     ! Create cache entry

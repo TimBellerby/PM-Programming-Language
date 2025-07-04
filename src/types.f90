@@ -3476,8 +3476,10 @@ contains
           if(add_char('varray(')) return
        elseif(name==sym_const) then
           if(add_char('farray(')) return
-       else
+       elseif(name==0) then
           if(add_char('array(')) return
+       else
+          if(add_char('array'//trim(pm_int_as_string(name))//'(')) return
        endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(add_char(',')) return

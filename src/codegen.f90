@@ -2706,7 +2706,7 @@ contains
              list=node_arg(arg,2)
              call trav_exprlist(coder,cblock,arg,list)
              call make_sys_call(coder,cblock,arg,node_num_arg(arg,1),&
-                  node_numargs(list),merge(1,-1,i==n))
+                  node_numargs(list)+1,merge(1,-1,i==n))
           else
              call code_val(coder,coder%vstack(base+i))
              call make_sp_call(coder,cblock,arg,merge(sym_dot_ref,sym_dot,islhs),2,&
@@ -2718,20 +2718,33 @@ contains
           sym=node_sym(arg)
        enddo
     endif
+
+    if(last_caret>=i) then
+       call code_error(coder,node,'Internal Error: ".^" not immediately resolved')
+    endif
     
     if(i<=n) then
-       do j=i,n
-          call code_val(coder,coder%vstack(base+j))
-       enddo
+
        if(present(call_n)) then
+          if(vbase+1/=base+i) then
+             do j=i,n
+                coder%vstack(vbase+j-i+1)=coder%vstack(base+j)
+             enddo
+          endif
+          coder%vtop=vbase+n-i+1
           call_n=n-i+1
+          if(isalias) call pm_panic('Alias reference (call_n)')
+          return
        else
+          do j=i,n
+             call code_val(coder,coder%vstack(base+j))
+          enddo
           if(.not.iscomm) then
              call make_sys_call(coder,cblock,node,&
-                  merge(sym_rhs,sym_lhs,islhs),n-i+2,1)
+                  merge(sym_lhs,sym_get_ref,islhs),n-i+2,1)
           else
              call make_comm_sys_call(coder,cblock,node,&
-                  merge(sym_rhs,sym_lhs,islhs),n-i+2,1)
+                  merge(sym_lhs,sym_get_ref,islhs),n-i+2,1)
           endif
        endif
     else
@@ -3396,6 +3409,9 @@ contains
        endif
     else
        call trav_ref_to_var(coder,cblock,node,name,.false.)
+       if(cnode_flags_set(top_code(coder),var_flags,var_is_ref)) then
+          call make_sys_call_rtn(coder,cblock,node,sym_get_ref,1,1)
+       endif
     endif
 
   contains
@@ -3692,7 +3708,7 @@ contains
           call push_word(coder,pm_type_new_fix)
           call push_word(coder,0)
           call trav_type(coder,pnode,name)
-          if(top_word(coder)==0) then
+          if(top_word(coder)/=0) then
              call defer_type_check(coder,node,pnode,&
                   coder%literal_types,top_word(coder),sym_fix,&
                   cnode_is_arg_constraint)

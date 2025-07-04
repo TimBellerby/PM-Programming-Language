@@ -839,7 +839,7 @@ module pm_symbol
   data sym_names(sym_this_node)        /'this_node'/
   data sym_names(sym_grid)             /'grid'/
   data sym_names(sym_indices)          /'indices'/
-  data sym_names(sym_get_ref)          /'PM__getref'/
+  data sym_names(sym_get_ref)          /'PM__get_ref'/
   data sym_names(sym_set_ref)          /'PM__set_ref'/
   data sym_names(sym_make_subref)      /'PM__subref'/
   data sym_names(sym_make_sublhs)      /'PM__sublhs'/

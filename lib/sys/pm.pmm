@@ -1461,7 +1461,7 @@ PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 proc array(x,d:extent)=_array(x,_mshape(d),size(d))
 proc #'(x:any^any)=_array_mshape(x)._extent
 proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
-proc _set_array_element(a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
+proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
 
 /*
 PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
@@ -1478,12 +1478,14 @@ proc _set_elem(&a:any^mshape,v,t:index){
   PM__setaelem(&a,index(#(a),t),v) 
 }
  
-proc _make_subref(a:any^mshape,t:index)=_make_subref(a,index(#(a),t))
-PM__intrinsic _make_subref(a:any^mshape,i:int)->(=a) : "make_rf"
+
 PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
 PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 
 */
+
+proc _make_subref(a:any^any,t:tuple(int))=_make_subref(a,_point2index(_array_mshape(a),t))
+PM__intrinsic _make_subref(a:any^any,i:int)->(=a) : "make_rf"
 
 type _mshape(ndim:dimension_number,contig:literal(bool)) is rec {_extent:extent(ndim),_m:tuple(int,ndim),_n:int,_o:int,_c:contig}
 proc _mshape(g:extent(1))=rec _mshape{_extent=g,_m=[1],_n=size(g.1),_o=o,_c=true} where o=-_point2index(dims(g),low(g))
@@ -1705,8 +1707,20 @@ proc PM__assign(&a:any,b:any) {
    PM__assign_var(&a,c) where c=convert(b,a)
 }
 
-proc PM__assign(&a:any,b:any,j:tuple(int)) {
+proc PM__assign(&a:any^any,b:any,j:tuple(int)) {
    _set_array_element(&a,j,b)
+}
+
+proc PM__assign(&a:a_rec,b:any,j:literal(string or int)) {
+   PM__assign(*a.{j},b)
+}
+
+proc PM__assign(&a:any^any,b:any,j:tuple(int),...) {
+    PM__assign(&a.^_make_subref(j),b,...)
+}
+
+proc PM__assign(&a:a_rec,b:any,j:literal(string or int),...) {
+    PM__assign(&a.{j},b,...)
 }
 
 proc PM__assign_var(&a:any,b:any) {
@@ -1715,11 +1729,28 @@ proc PM__assign_var(&a:any,b:any) {
 }
 
 proc PM__assign_var(&a:a_rec,b:a_rec) {
-  test "Cannot assign different records"=>same_rec(a,b)
+    test "Cannot assign different records"=>same_rec(a,b)
   PM__each_index i in num_elements(a) {
-      PM__assign_var(&a.{i},b.{i})
+      PM__assign(&a.^_element_at_index(i),b.{i})
   }
 }
+
+proc PM__assign(&a:literal,b:literal) {
+    test "Cannot assign values"=>same_type(a,b)
+}
+
+proc PM__assign(&a:fix,b:fix) {
+    test "Cannot assign values"=>same_type(a,b)
+}
+
+PM__intrinsic PM__get_ref(x:any)->(=x) : "get_rf"
+proc PM__get_ref'(x)=PM__get_ref(x)
+proc PM__get_ref'(x,...)=PM__get_ref(x,...)
+proc PM__get_ref(x:a_rec,j:literal(int or string))=x.{j}
+proc PM__get_ref(x:any^any,j:tuple(int))=_get_array_element(x,j)
+proc PM__get_ref(x:a_rec,j:literal(int or string),...)=PM__get_ref(x.{j},...)
+proc PM__get_ref(x:any^any,j:tuple(int),...)=PM__get_ref(_get_array_element(x,j),...)
+
 
 PM__intrinsic PM__clone(x:any)->(=x) : "clone"
 PM__intrinsic PM__make_var(x:any)->(=x) : "clone" priv
@@ -1734,7 +1765,6 @@ proc PM__init_const'(x:any,y:any)=PM__make_const'(x,y)
 proc PM__make_var(x,y)=PM__make_var(x as y)
 proc PM__make_const(x,y)=PM__make_const(x as y)
 PM__intrinsic PM__dechan'(x:any)->(=x): "clone_var" 
-PM__intrinsic PM__getref(x:any)->(=x) : "get_rf"
 PM__intrinsic same_type(x:any,y:any)->(==x,y) : "same_type_fold"
 PM__intrinsic same_rec(x:any,y:any)->(==x,y) : "same_rec_fold"
 
@@ -1766,7 +1796,7 @@ proc next_enum(x:int)=x+convert(1,x)
 proc next_enum(x:int,y:int)=x+convert(y,x)
 
 PM__intrinsic<<needs_type>> .element_at_index(&x:any,y:fix(int))->(|x):"elem"
-PM__intrinsic<<needs_type>> element_at_index(x:any,y:fix(int))->(|x):"elem"
+PM__intrinsic<<needs_type>> _element_at_index(x:any,y:fix(int))->(|x):"elem"
 
 
 //  Type values
