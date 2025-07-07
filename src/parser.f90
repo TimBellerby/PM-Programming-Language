@@ -1491,9 +1491,14 @@ contains
              call scan(parser)
              if(expect_name(parser)) return
              if(expect(parser,sym_open)) return
-             if(exprlist(parser)) return
-             call make_node_at(parser,sym_caret,2,line,pos)
-             if(expect(parser,sym_close)) return
+             if(parser%sym==sym_close) then
+                call scan(parser)
+                call make_node_at(parser,sym_caret,1,line,pos)
+             else
+                if(exprlist(parser)) return
+                call make_node_at(parser,sym_caret,2,line,pos)
+                if(expect(parser,sym_close)) return
+             endif
              n=n+1
           case default
              if(expect_name(parser)) return
@@ -1529,7 +1534,7 @@ contains
           n=n+1
        case(sym_open_square)
           call get_sym_pos(parser,line,pos)
-          call push_sym_val(parser,sym_tuple)
+          call push_sym_val(parser,sym_pm_subs)
           if(subscript(parser)) return
           call simple_call(parser)
           call make_node_at(parser,sym_sub,1,line,pos)
@@ -3468,6 +3473,12 @@ contains
           if(expr(parser)) goto 999
           if(expect(parser,sym_close)) goto 999
           call make_node(parser,sym_pm_set_dotdotdot,1)
+       case(sym_pm_ref)
+          call scan(parser)
+          if(expect_name(parser)) return
+          if(expect(parser,sym_assign)) return
+          if(expr(parser)) return
+          call make_node(parser,sym_pm_ref,2)
 
           ! Pragma's -- start with $$
        case(sym_ddollar)

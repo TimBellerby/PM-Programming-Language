@@ -137,8 +137,9 @@ module pm_vmdefs
   integer,parameter:: op_redim = op_misc2 + 21
   integer,parameter:: op_wshare = op_misc2 + 22
   integer,parameter:: op_block_cyclic = op_misc2 + 23
+  integer,parameter:: op_array_set_multi_elem = op_misc2 + 24
 
-  integer,parameter:: op_misc3 = op_block_cyclic
+  integer,parameter:: op_misc3 = op_array_set_multi_elem
 
   integer,parameter:: op_get_esize = op_misc3 + 1
   integer,parameter:: op_pack = op_misc3 + 2
@@ -860,6 +861,7 @@ module pm_vmdefs
   data op_flags(op_redim)           /0/
   data op_flags(op_wshare)          /0/
   data op_flags(op_block_cyclic)    /0/
+  data op_flags(op_array_set_multi_elem)  /0/
   data op_flags(op_pack)            /0/
   data op_flags(op_dref)            /0/
   data op_flags(op_dref_elem)       /0/
@@ -1564,6 +1566,7 @@ contains
     op_names(op_redim)='redim'
     op_names(op_wshare)='wshare'
     op_names(op_block_cyclic)='block_cyclic'
+    op_names(op_array_set_multi_elem)='array_set_multi_elem'
     op_names(op_pack)='pack'
     op_names(op_dref)='dref'
     op_names(op_dref_elem)='dref_elem'

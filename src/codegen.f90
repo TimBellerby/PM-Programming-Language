@@ -58,7 +58,7 @@ module pm_codegen
 
   logical,parameter:: debug_codegen=.false.
   logical,parameter:: debug_more_codegen=.false.
-  
+
   ! Limits
   integer,parameter:: max_code_stack=4096
   integer,parameter:: code_local_hash=1024
@@ -712,6 +712,13 @@ contains
           call get_lex_scope(coder,node)
           call make_sp_call(coder,cblock,node,sym_pm_foreach,3,0)
           call pop_lex_scope(coder)
+       case(sym_pm_ref)
+          call trav_expr(coder,cblock,node,node_arg(node,2))
+          if(cnode_get_kind(top_code(coder))/=cnode_is_var) then
+             call code_error(coder,node,'Internal error: PM__ref expression does not yield var')
+          endif
+          call cnode_set_flags(top_code(coder),var_flags,var_is_var)
+          call push_var(coder,node_num_arg(node,1),pop_code(coder))
        case(sym_repl_line)
           call trav_xexpr(coder,cblock,node,node_arg(node,1))
           call make_sys_call(coder,cblock,node,sym_print,1,0)
@@ -2703,10 +2710,15 @@ contains
        sym=node_sym(arg)
        do while(sym==sym_dot.or.sym==sym_open_brace.or.sym==sym_caret)
           if(sym==sym_caret) then
-             list=node_arg(arg,2)
-             call trav_exprlist(coder,cblock,arg,list)
-             call make_sys_call(coder,cblock,arg,node_num_arg(arg,1),&
-                  node_numargs(list)+1,merge(1,-1,i==n))
+             if(node_numargs(arg)>1) then
+                list=node_arg(arg,2)
+                call trav_exprlist(coder,cblock,arg,list)
+                call make_sys_call(coder,cblock,arg,node_num_arg(arg,1),&
+                     node_numargs(list)+1,merge(1,-1,i==n))
+             else
+                call make_sys_call(coder,cblock,arg,node_num_arg(arg,1),&
+                     1,merge(1,-1,i==n))
+             endif
           else
              call code_val(coder,coder%vstack(base+i))
              call make_sp_call(coder,cblock,arg,merge(sym_dot_ref,sym_dot,islhs),2,&
@@ -2804,7 +2816,7 @@ contains
     if(islhs) then
        if(cnode_get_kind(var)==cnode_is_var) then
           flags=cnode_get_num(var,var_flags)
-          if(iand(flags,var_is_var)==0.and..false.) then
+          if(iand(flags,var_is_var)==0) then
              call code_error(coder,pnode,&
                   'Cannot assign to constant: ',name)
           else
@@ -3409,8 +3421,10 @@ contains
        endif
     else
        call trav_ref_to_var(coder,cblock,node,name,.false.)
-       if(cnode_flags_set(top_code(coder),var_flags,var_is_ref)) then
-          call make_sys_call_rtn(coder,cblock,node,sym_get_ref,1,1)
+       if(cnode_get_kind(top_code(coder))==cnode_is_var) then
+          if(cnode_flags_set(top_code(coder),var_flags,var_is_ref)) then
+             call make_sys_call_rtn(coder,cblock,node,sym_get_ref,1,1)
+          endif
        endif
     endif
 

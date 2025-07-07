@@ -1411,6 +1411,11 @@ contains
        errno=0
        call array_set_index(context,arg(2),arg(3),arg(4),ve,errno)
        if(errno/=0) goto 997
+    case(op_array_set_multi_elem)
+       errno=0
+       call array_set_index(context,import_vector(context,&
+            arg(2),arg(1)%data%ptr(arg(1)%offset+1)),arg(3),arg(4),ve,errno)
+       if(errno/=0) goto 997
     case(op_get_dom)
        call set_arg(2,array_dom(context,arg(3),esize))
     case(op_get_size)

@@ -1458,10 +1458,15 @@ PM__intrinsic<<needs_type>> _varray(x:any,y:any,z:any)->(=x) : "var_array"
 PM__intrinsic _array_mshape(x:any^any)->(=x) : "get_dom"
 PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
 PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
+PM__intrinsic PM__setmaelem(&x:any^any,y:int,z:any): "array_set_multi_elem"
 proc array(x,d:extent)=_array(x,_mshape(d),size(d))
 proc #'(x:any^any)=_array_mshape(x)._extent
 proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
 proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
+proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(_array_mshape(PM__import(a)),t),v)
+proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(#(a),t))
+proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(#(a),t),v)
+proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(PM__import(#a),t),v)
 
 /*
 PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
@@ -1516,7 +1521,7 @@ proc _point2index(g:_mshape(7,literal(false)),p:tuple(int,7))=g._o+p.1+g._m.2*p.
 proc _point2index(g:_mshape,p:tuple(int))=0: compile_error("Rank mismatch in index")
 
 //  Linear index of tuple of ranges or ints (zero base)
-proc _indx(g:range(int),s)=int(s)-low(g)
+proc _indx(g:range(int),s)=int(s)
 proc _indx(g:any_int,s)=int(s)
 proc _sz(x:int)=x
 proc _sz(x:range(int))=x._n
@@ -1570,16 +1575,15 @@ proc PM__for_stmt'(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <
     PM__for size(shape) {
       let here_in_tile=PM__generate(shape,size(shape)) 
       PM__context PM__topology,PM__outer,PM__region,PM__schedule,here_in_tile,PM__mask {
-        var inouts=PM__import(PM__inouts)
-        var inout_a_i=PM__import(PM__inout_a)
-        var inout_a=PM__get_elem(inout_a_i,here_in_tile)
+        PM__ref inouts=PM__import(PM__inouts)
+        var inout_a=PM__get_elem(PM__import(PM__inout_a),here_in_tile)
         PM__block_proc.'(&inouts,
            PM__import(PM__ins),
            &inout_a,
            PM__get_elem(PM__import(PM__in_a),here_in_tile),
            PM__get_elem(PM__import(PM__star_a),here_in_tile) <<inline>>)
         PM__export(&PM__inouts,inouts)
-        PM__set_elem(&inout_a_i,inout_a,here_in_tile)
+        PM__set_multi_elem(&PM__inout_a,inout_a,here_in_tile <<PM__ignore>>)
       }
    }
 }
@@ -1628,8 +1632,12 @@ proc PM__check_iter_amp(x,y){}
 proc PM__check_iter_star(x,y){}
 
 proc PM__get_elem(x:PM__list,h)=PM__each_index(i in num_elements(x):PM__get_elem(x.{i},h))
+proc PM__get_elem(x:any^any,h)=_get_array_elementz(x,h)
 proc PM__get_elem(x,h)=element(x,h)
-proc PM__set_elem(&x,y,h) {}
+proc PM__set_elem(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_elem(&x.{i},y.{i},h <<PM__ignore>>)}
+proc PM__set_elem(&x:any^any,y,h) {_set_array_elementz(&x,h,y)}
+proc PM__set_multi_elem(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_multi_elem(&x.{i},y.{i},h <<PM__ignore>>)}
+proc PM__set_multi_elem(&x:any^any,y,h) {_set_array_multi_elementz(&x,h,y)}
 
 proc PM__import(x:PM__list)=PM__each_index(i in num_elements(x):PM__import(x.{i}))
 PM__intrinsic PM__import(x:any)->(=x) : "import_val"
@@ -1738,7 +1746,6 @@ proc PM__assign_var(&a:a_rec,b:a_rec) {
 proc PM__assign(&a:literal,b:literal) {
     test "Cannot assign values"=>same_type(a,b)
 }
-
 proc PM__assign(&a:fix,b:fix) {
     test "Cannot assign values"=>same_type(a,b)
 }
@@ -1746,11 +1753,13 @@ proc PM__assign(&a:fix,b:fix) {
 PM__intrinsic PM__get_ref(x:any)->(=x) : "get_rf"
 proc PM__get_ref'(x)=PM__get_ref(x)
 proc PM__get_ref'(x,...)=PM__get_ref(x,...)
-proc PM__get_ref(x:a_rec,j:literal(int or string))=x.{j}
+proc PM__get_ref(x:a_rec,j:literal(int or string) or a_unique)=x.{j}
 proc PM__get_ref(x:any^any,j:tuple(int))=_get_array_element(x,j)
-proc PM__get_ref(x:a_rec,j:literal(int or string),...)=PM__get_ref(x.{j},...)
+proc PM__get_ref(x:a_rec,j:literal(int or string) or a_unique,...)=PM__get_ref(x.{j},...)
 proc PM__get_ref(x:any^any,j:tuple(int),...)=PM__get_ref(_get_array_element(x,j),...)
 
+proc PM__subs(x,...)=tuple(x,...)
+proc PM__subs(x:tuple)=x
 
 PM__intrinsic PM__clone(x:any)->(=x) : "clone"
 PM__intrinsic PM__make_var(x:any)->(=x) : "clone" priv

@@ -301,7 +301,7 @@ module pm_symbol
   integer,parameter:: sym_result = node0 + 10
   integer,parameter:: sym_sub =  node0 + 11
   integer,parameter:: sym_method_call = node0 + 12
-  integer,parameter:: sym_dot_sub = node0 + 13
+  integer,parameter:: sym_pm_subs = node0 + 13
   integer,parameter:: sym_unused_node = node0 +14
   integer,parameter:: sym_array_former = node0 + 15
   integer,parameter:: sym_matrix_former = node0 + 16
@@ -778,7 +778,7 @@ module pm_symbol
   data sym_names(sym_result)           /'<result>'/
   data sym_names(sym_sub)              /'[]'/
   data sym_names(sym_method_call)      /'<method-call>'/
-  data sym_names(sym_dot_sub)          /'<dot-sub>'/
+  data sym_names(sym_pm_subs)          /'PM__subs'/
   data sym_names(sym_unused_node)      /'<unused_node>'/
   data sym_names(sym_array_former)     /'<array-former>'/
   data sym_names(sym_matrix_former)    /'PM__matrix'/
