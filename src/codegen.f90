@@ -3263,11 +3263,12 @@ contains
        call trav_expr(coder,cblock,node,node_arg(node,2))
        call trav_expr(coder,cblock,node,node_arg(node,1))
        call make_sys_call_rtn(coder,cblock,node,sym_ge,2,1)
-    case(sym_pm_dref:sym_pm_ref)
-       do i=1,node_numargs(node)
+    case(sym_pm_ref)
+       call code_val(coder,node_arg(node,1))
+       do i=2,node_numargs(node)
           call trav_expr(coder,cblock,node,node_arg(node,i))
        enddo
-       call make_sp_call_rtn(coder,cblock,node,sym,node_numargs(node),1)
+       call make_sp_call_rtn(coder,cblock,node,sym_pm_ref,node_numargs(node),1)
     case(sym_pm_each_index)
        call trav_pm_each_index(coder,cblock,pnode,node,.true.)
     case(sym_reference)
@@ -5045,8 +5046,8 @@ contains
        pr_flags=flags
        if(iand(flags,proc_run_shared+proc_run_local+proc_run_complete)/=0) then
           call code_params(cblock,.true.,argcall)
-          call export_params(cblock)
           call code_keys(cblock,tkeys,keycall,.true.,.true.)
+          call export_params(cblock)
           call code_special_check_body_and_result(cblock)
        elseif(iand(flags,proccall_is_comm)/=0) then
           coder%par_state=merge(par_state_comm_proc,par_state_none,&
@@ -5057,8 +5058,6 @@ contains
        else
           coder%par_state=par_state_none
           call code_params(cblock,.false.,argcall)
-          call make_state_vars(coder,cblock,node,&
-               topo=coder%var(coder%proc_base+1))
           call code_keys(cblock,tkeys,keycall,.false.,.false.)
           call code_check(cblock)
           call code_body(cblock)
@@ -5211,6 +5210,10 @@ contains
       if(pm_fast_isnull(p)) then
          tkeys=pm_null_obj
          key_call=pm_null_obj
+         if(.not.(iscomm.or.isshrd)) then
+            call make_state_vars(coder,cblock,node,&
+                 topo=coder%var(coder%proc_base+1))
+         endif
          return
       endif
       n=node_numargs(p)/3
@@ -5262,12 +5265,17 @@ contains
       enddo
       
       call hide_vars(coder,base+1,coder%top)
-
+      
+      if(.not.(iscomm.or.isshrd)) then
+         call make_state_vars(coder,cblock,node,&
+              topo=coder%var(coder%proc_base+1))
+      endif
+      
       ! Create blocks to compute default values
       do i=1,node_numargs(p),3
          cblock2=make_cblock(coder,cblock,node,sym_key)
          call trav_expr(coder,cblock2,p,node_arg(p,i+2))
-         tno=tkeys%data%i(tkeys%offset+n+i-1)
+         tno=tkeys%data%i(tkeys%offset+n+i/3)
          ! For stated type constraints, convert default value to
          ! that type
          if(tno>=0) then

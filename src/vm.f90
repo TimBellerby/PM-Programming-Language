@@ -63,6 +63,8 @@ contains
     integer:: err
     type(pm_ptr),dimension(1):: arg
     type(pm_ptr),target:: ve
+
+    write(*,*) 'ext_mult=',pm_ext_mult,pm_jump_offset
     
     context%funcs=funcs
     
@@ -1383,13 +1385,7 @@ contains
        v=pm_fast_newusr(context,&
             merge(pm_dref_type,pm_dref_shared_type,opcode2==0),&
             int(6,pm_p))
-       if(nargs==5) then
-          v%data%ptr(v%offset+1:v%offset+3)=arg(3:5)
-          v%data%ptr(v%offset+4:v%offset+5)=&
-               arg(4)%data%ptr(arg(4)%offset+4:arg(4)%offset+5)
-       else
-          v%data%ptr(v%offset+1:v%offset+nargs-2)=arg(3:nargs)
-       endif
+       v%data%ptr(v%offset+1:v%offset+nargs-2)=arg(3:nargs)
        call set_arg(2,v)
     case(op_import_dref)
        call set_arg(2,&
@@ -2502,6 +2498,9 @@ contains
     case(op_add_ln)
        esize=pm_fast_esize(arg(3))
        if(esize/=pm_fast_esize(arg(4))) then
+          call pm_dump_tree(context,6,arg(3),2)
+          call pm_dump_tree(context,6,arg(4),2)
+          
           write(*,*) 'Internal error: import mismatch in op_add_ln'
           goto 999
        endif

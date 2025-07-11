@@ -35,7 +35,7 @@ module pm_vmdefs
   
   integer,parameter:: pm_max_stack=2**14-1
 
-  integer,parameter:: pm_ext_mult=2**15/(pm_max_stack+1)
+  integer,parameter:: pm_ext_mult=2**15/(pm_max_args+1)
   integer,parameter:: pm_jump_offset=pm_ext_mult*2**14
 
   integer,parameter:: op_call=0

@@ -804,6 +804,8 @@ contains
 
     break=.false.
 
+    if(rvv(cnode_get_num(callnode,call_index))==sp_sig_deactivated) return
+
     args=cnode_get(callnode,call_args)
     nargs=cnode_numargs(args)
     nret=cnode_get_num(callnode,call_nret)
@@ -1217,26 +1219,26 @@ contains
           call wc(wcd,-new_ve)
           break2=wcode_cblock(wcd,cnode_arg(args,1),rv,new_ve)
        endif
-    case(sym_pm_dref:sym_pm_ref)
+    case(sym_pm_ref)
        if(pm_is_compiling) then
-          i=var_slot(wcd,cnode_arg(args,1))
-          do ii=2,nargs
-             if(ii==4) then
-                slot=arg_slot(wcd,cnode_arg(args,ii))
-                call cvar_set_ptr(wcd,i,ii-1,slot)
-             else
-                call comp_alias_slots(wcd,cvar_ptr(wcd,i,ii-1),&
-                     arg_slot(wcd,cnode_arg(args,ii)))
-             endif
-          enddo
-          j=var_slot(wcd,cnode_arg(args,3))
-          do ii=nargs,5
-             call comp_alias_slots(wcd,cvar_ptr(wcd,i,ii),cvar_ptr(wcd,j,ii))
-          enddo
-          call wc_call(wcd,callnode,op_dref,0,nargs,0,ve)
-          do ii=2,nargs
-             call wc_arg(wcd,cnode_arg(args,ii),.false.,rv,ve)
-          enddo
+!!$          i=var_slot(wcd,cnode_arg(args,1))
+!!$          do ii=2,nargs
+!!$             if(ii==4) then
+!!$                slot=arg_slot(wcd,cnode_arg(args,ii))
+!!$                call cvar_set_ptr(wcd,i,ii-1,slot)
+!!$             else
+!!$                call comp_alias_slots(wcd,cvar_ptr(wcd,i,ii-1),&
+!!$                     arg_slot(wcd,cnode_arg(args,ii)))
+!!$             endif
+!!$          enddo
+!!$          j=var_slot(wcd,cnode_arg(args,3))
+!!$          do ii=nargs,5
+!!$             call comp_alias_slots(wcd,cvar_ptr(wcd,i,ii),cvar_ptr(wcd,j,ii))
+!!$          enddo
+!!$          call wc_call(wcd,callnode,op_dref,0,nargs,0,ve)
+!!$          do ii=2,nargs
+!!$             call wc_arg(wcd,cnode_arg(args,ii),.false.,rv,ve)
+!!$          enddo
        else
           call wc_call_args(wcd,callnode,args,op_dref,&
                merge(0,1,sig==sym_pm_dref.or.sig==sym_pm_dref_slice),nargs,1,rv,ve)
@@ -3729,6 +3731,10 @@ contains
     integer,intent(in):: typ
     integer:: i
     integer::k
+    if(typ==sp_sig_deactivated) then
+       k=-999
+       return
+    endif
     if(pm_is_compiling) then
        k=cvar_alloc(wcd,typ,0)
        return

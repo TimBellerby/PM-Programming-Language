@@ -1579,6 +1579,26 @@ contains
           ok=.true.
        endif
        return
+    case(pm_type_is_dref)
+       if(tk==pm_type_is_dref) then
+          nt=pm_tv_name(t)
+          nu=pm_tv_name(u)
+          if(nt/=0.and.nt/=nu) then
+             ok=.false.
+             return
+          endif
+          do i=1,pm_tv_numargs(t)
+             if(.not.pm_test_type_includes(context,pm_tv_arg(t,i),&
+                  pm_tv_arg(u,i),mode,params,base,user,ubase)) then
+                ok=.false.
+                return
+             endif
+          enddo
+          ok=.true.
+       else
+          ok=pm_test_type_includes(context,p,pm_tv_arg(u,1),&
+               mode,params,base,user,ubase)
+       endif
     case(pm_type_is_bottom)
        ok=.true.
        return
@@ -1591,33 +1611,7 @@ contains
     case(pm_type_is_basic)
        ok=.false.
     case(pm_type_is_dref)
-       if(tk/=uk) then
-          ok=.false.
-          return
-       endif
-       nt=pm_tv_name(t)
-       nu=pm_tv_name(u)
-       if(nt==pm_dref_is_any) then
-          if(nu/=pm_dref_is_any.and.iand(mode,pm_type_incl_type)/=0) then
-             ok=.true.
-             return
-          endif
-       elseif(.not.(nt==nu.or.&
-            (nt==pm_dref_is_dot.and.nu>0).or.&
-            (nt==pm_dref_is_any_slice.and.(nu==pm_dref_is_slice.or.&
-            nu==pm_dref_is_shared_slice)).or.&
-            nt==pm_dref_is_shared.and.nu==pm_dref_is_ref)) then
-          ok=.false.
-          return
-       endif
-       do i=1,pm_tv_numargs(t)
-          if(.not.pm_test_type_includes(context,pm_tv_arg(t,i),&
-               pm_tv_arg(u,i),mode,params,base,user,ubase)) then
-             ok=.false.
-             return
-          endif
-       enddo
-       ok=.true.
+       ok=.false.
     case(pm_type_is_rec)
        if(tk/=uk) then
           ok=.false.
@@ -2610,7 +2604,7 @@ contains
              if(names%data%i(names%offset+offset)>0) offset=0
           endif
           if(offset/=0) etype=pm_type_arg(context,tno,offset)
-       elseif(tk==pm_type_is_tuple) then
+       elseif(tk==pm_type_is_tuple.or.tk==pm_type_is_dref) then
           if(offset<=0.or.offset>pm_type_numargs(context,tno)) then
              offset=0
           else

@@ -142,6 +142,9 @@ module pm_ast
        + proc_is_dcomm + proc_is_file   &
        + proc_prints_out
 
+  integer,parameter:: proc_must_run= proc_is_dcomm  &
+       + proc_is_file + proc_prints_out
+
   ! Flags for proc calls
   integer,parameter:: call_ignore_rules=      512
   integer,parameter:: call_is_fixed =         2**10

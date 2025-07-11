@@ -1119,7 +1119,7 @@ contains
           coder%loop_depth=coder%loop_depth+1
           counter=0
           do
-             coder%types_changed=.false.
+             if(coder%loop_depth==1) coder%types_changed=.false.
              call inf_cblock(coder,list)
              call check_logical(2,sig==sym_while_invar)
              if(arg_type(2)==coder%false_fix) return
@@ -1140,7 +1140,7 @@ contains
           coder%loop_depth=coder%loop_depth+1
           counter=0
           do 
-             coder%types_changed=.false.
+             if(coder%loop_depth==1) coder%types_changed=.false.
              call inf_cblock(coder,list)
              if(.not.coder%types_changed.or.coder%loop_depth>1) exit
              counter=counter+1
@@ -1212,36 +1212,14 @@ contains
           call inf_cblock(coder,cnode_arg(args,nargs))
        case(sym_pm_head_node)
           call inf_cblock(coder,cnode_arg(args,1))
-       case(sym_pm_dref:sym_pm_ref)
+       case(sym_pm_ref)
           call push_word(coder,pm_type_new_dref)
-          slot=coder%wtop
-          call push_word(coder,sym_pm_dref-sig-1)
-          if(nargs==3) then
-             t=pm_type_vect(coder%context,arg_type(3))
-             call push_word(coder,arg_type_with_mode(2))
-             call push_word(coder,arg_type_with_mode(3))
-             call push_word(coder,arg_type_with_mode(4))
-             call push_word(coder,pm_tv_arg(t,4))
-             call push_word(coder,pm_tv_arg(t,5))
-             tno=0
-             tno2=pm_tv_flags(t)
-             coder%wstack(slot)=ior(coder%wstack(slot),tno)
-             call make_type_if_possible(coder,7)
-          else
-             do i=1,nargs
-                call push_word(coder,arg_type_with_mode(i+1))
-             enddo
-             if(debug_inference) then
-                do i=4,0,-1
-                   write(*,*) 'DREF[',i,']',&
-                        trim(pm_type_as_string(coder%context,coder%wstack(coder%wtop-i)))
-                enddo
-             endif
-             call make_type_if_possible(coder,nargs+2)
-          endif
-          if(debug_inference) write(*,*) 'DREF=',&
-               trim(pm_type_as_string(coder%context,top_word(coder)))
-          coder%stack(get_slot(1))=pop_word(coder)
+          call push_word(coder,cnode_num_arg(args,2))
+          do i=2,nargs
+             call push_word(coder,arg_type_with_mode(i+1))
+          enddo
+          call make_type(coder,nargs+1)
+          call combine_types(cnode_arg(args,1),pop_word(coder))
        case(sym_pm_each_index)
           call inf_each_index
        case(sym_pm_set_dotdotdot)
@@ -3763,6 +3741,309 @@ contains
     call make_type(coder,n)
   end subroutine make_type_if_possible
 
+
+  subroutine bprop(coder,cblock,nargs,rvec,frame_size)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: cblock,rvec
+    integer,intent(in):: nargs,frame_size
+    integer(access_kind),allocatable,dimension(:):: access_info
+    integer:: save_loop_depth,i
+    allocate(access_info(frame_size))
+    access_info=0
+    save_loop_depth=coder%loop_depth
+    call bprop_cblock(coder,cblock,access_info,rvec)
+    coder%loop_depth=save_loop_depth
+    do i=1,frame_size
+       if(access_info(i)==access_deactivated_call.or.&
+            access_info(i)==access_is_var) then
+          rvec%data%i(rvec%offset)=sp_sig_deactivated
+       endif
+    end do
+    deallocate(access_info)
+  end subroutine bprop
+
+  
+  !==========================================
+  ! Back propogate information for code block
+  !==========================================
+  subroutine bprop_cblock(coder,cblock,access_info,rvec)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: cblock,rvec
+    integer(access_kind),dimension(*),intent(inout):: access_info
+    integer:: nvars,i,newbase
+    type(pm_ptr):: p
+    if(pm_fast_isnull(cblock)) return
+    p=cnode_get(cblock,cblock_last_call)
+    do while(.not.pm_fast_isnull(p))
+       call inf_call(coder,cblock,p)      
+       p=cnode_get(p,call_back_link)
+    enddo
+  contains
+    include 'fisnull.inc'
+  end subroutine bprop_cblock
+  
+  subroutine bprop_call(coder,cblock,callnode,access_info,rvec)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: callnode,cblock,rvec
+    integer(access_kind),dimension(*),intent(inout):: access_info
+    type(pm_ptr):: args,arg,procnode
+    integer:: nret,sig,nargs,opcode,i
+    nret=cnode_get_num(callnode,call_nret)
+    sig=-cnode_get_num(callnode,call_sig)
+    args=cnode_get(callnode,call_args)
+    nargs=cnode_numargs(args)-nret
+    call enable
+    if(sig>0) then
+       select case(sig)
+       case(sym_while,sym_while_invar)
+          coder%loop_depth=coder%loop_depth+1
+          call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+          call access(cnode_arg(args,2))
+          call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
+          if(coder%loop_depth==1) then
+             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+             call access(cnode_arg(args,2))
+             call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
+          endif
+       case(sym_until,sym_until_invar)
+          call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+          call access(cnode_arg(args,2))
+          if(coder%loop_depth==1) then
+             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+             call access(cnode_arg(args,2))
+          endif
+       case(sym_if,sym_if_invar)
+          call bprop_if(count_updates(cnode_arg(args,4),1))
+       case(sym_task)
+          
+       case(sym_pm_ref)
+          call std_access(.true.,2)
+       case(sym_open)
+          call code_val(coder,pm_new(coder%context,access_pm_type,int(max(nargs,1),pm_ln)))
+          arg=top_code(coder)
+          do i=1,nargs
+             arg%data%i8(arg%offset+i-1)=get_access_info(cnode_arg(args,i))
+          enddo
+       case(sym_key)
+          do i=2,nargs,2
+             if(accessed(cnode_arg(args,i/2+nret/2))) then
+                call access(cnode_arg(args,nret+i))
+             endif
+             call bprop_cblock(coder,cnode_arg(args,nret+i-1),access_info,rvec)
+          enddo
+          call code_val(coder,pm_new(coder%context,access_pm_type,int(max(nret/2,1),pm_ln)))
+          arg=top_code(coder)
+          do i=nret/2+1,nret
+             arg%data%i8(arg%offset+i-1)=get_access_info(cnode_arg(args,i))
+          enddo
+       case(sym_amp,sym_result)
+          do i=1,nargs
+             call set_access_info(cnode_arg(args,i),access_everything)
+          enddo
+       case default
+          call std_access(.true.,1)
+       end select
+    else
+       procnode=pm_dict_val(coder%context,coder%proc_cache,&
+            int(rvec%data%i(rvec%offset+cnode_get_num(callnode,call_index)),pm_ln))
+       if(cnode_get_kind(procnode)==cnode_is_autoconv_sig) then
+          procnode=pm_dict_val(coder%context,coder%proc_cache,&
+               int(cnode_num_arg(procnode,cnode_numargs(procnode)),pm_ln))
+       endif
+       if(cnode_get_kind(procnode)==cnode_is_resolved_proc) then
+          call bprop_proc_call
+       else
+          opcode=cnode_get_num(procnode,bi_opcode)
+          select case(opcode)
+          case(op_assign)
+             if(accessed(cnode_arg(args,2))) then
+                call access(cnode_arg(args,3))
+                call modify(cnode_arg(args,2))
+             else
+                call disable
+             endif
+          case default
+             call std_access(.true.,1)
+          end select
+       endif
+    endif
+  contains
+
+    include 'fesize.inc'
+    include 'fisnull.inc'
+
+    subroutine bprop_if(nupdates)
+      integer:: nupdates
+      type(pm_ptr):: readlist,p,var
+      integer(access_kind),dimension(nupdates):: save_access
+      integer:: i
+      integer(access_kind):: acc
+      readlist=cnode_arg(cnode_arg(args,4),1)
+      i=1
+      p=readlist
+      do
+         var=p%data%ptr(p%offset)
+         save_access(i)=get_access_info(var)
+         p=p%data%ptr(p%offset+1)
+         i=i+1
+      enddo
+      call bprop_cblock(coder,cnode_arg(args,2),access_info,rvec)
+      i=1
+      p=readlist
+      do
+         var=p%data%ptr(p%offset)
+         acc=access_info(cnode_get_num(var,var_index))
+         call set_access_info(var,save_access(i))
+         save_access(i)=acc
+         p=p%data%ptr(p%offset+1)
+         i=i+1
+      enddo
+      call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
+      i=1
+      p=readlist
+      do
+         var=p%data%ptr(p%offset)
+         call combine_access_info(var,save_access(i))
+         p=p%data%ptr(p%offset+1)
+         i=i+1
+      enddo
+    end subroutine bprop_if
+
+    subroutine bprop_proc_call
+      type(pm_ptr):: arg_access,key_access,key_names,proc_keys,arg,amps
+      integer:: i,j,nkeys,nproc_keys,taints
+      logical:: is_accessed, needs_to_run
+
+      amps=cnode_get(callnode,call_amp)
+      taints=cnode_get_num(procnode,3)
+      
+      is_accessed=.false.
+      do i=1,nret
+         arg=cnode_arg(args,i)
+         is_accessed=is_accessed.or.accessed(arg)
+         call modify(arg)
+      enddo
+      if(.not.pm_fast_isnull(amps)) then
+         amps=pm_name_val(coder%context,int(amps%offset))
+         do i=0,pm_fast_esize(amps)
+            arg=cnode_arg(args,amps%data%i(amps%offset+i))
+            is_accessed=is_accessed.or.accessed(arg)
+            call modify(arg)
+         enddo
+      endif
+         
+      if(.not.is_accessed.and.iand(taints,proc_must_run)==0) then
+         call disable
+         return
+      endif
+      
+      arg_access=cnode_arg(procnode,6)
+      key_access=cnode_arg(procnode,7)
+      do i=1,nargs
+         call combine_access_info(cnode_arg(args,i),arg_access%data%i8(arg_access%offset+i-1))
+      enddo
+      if(.not.pm_fast_isnull(cnode_get(callnode,call_keys))) then
+         nkeys=cnode_numargs(cnode_get(callnode,call_keys))
+         key_names=pm_name_val(coder%context,cnode_get_num(callnode,call_key_names))
+         proc_keys=cnode_get(cnode_arg(procnode,1),pr_keys)
+         nproc_keys=pm_fast_esize(proc_keys)/2
+         outer: do j=1,nproc_keys
+            do i=1,nkeys
+               if(proc_keys%data%i(proc_keys%offset+j-1)==key_names%data%i(key_names%offset+i-1)) then
+                  call combine_access_info(cnode_arg(args,i),key_access%data%i8(key_access%offset+j-1))
+                  cycle outer
+               endif
+            enddo
+         enddo outer
+      endif
+
+    end subroutine bprop_proc_call
+
+    subroutine std_access(always,start)
+      logical,intent(in):: always
+      integer,intent(in):: start
+      type(pm_ptr):: arg
+      integer:: i
+      logical:: is_accessed
+      is_accessed=.false.
+      do i=1,nret
+         arg=cnode_arg(args,i)
+         is_accessed=is_accessed.or.accessed(arg)
+         call modify(arg)
+      enddo
+      if(is_accessed.or.always) then 
+         do i=1,nargs
+            call access(cnode_arg(args,i+nret))
+         enddo
+      else
+         call disable
+      endif
+      do i=1,nargs
+         arg=cnode_arg(args,i+nret)
+         if(cnode_get_kind(arg)==cnode_is_cblock) then
+            call bprop_cblock(coder,arg,access_info,rvec)
+         endif
+      enddo
+    end subroutine std_access
+
+    subroutine access(var)
+      type(pm_ptr):: var
+      integer:: idx
+      call combine_access_info(var,access_used_ever+access_used_now+access_is_var)
+    end subroutine access
+    
+    function accessed(var) result(ok)
+      type(pm_ptr):: var
+      logical:: ok
+      ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
+    end function accessed
+    
+    subroutine modify(var)
+      type(pm_ptr):: var
+      integer:: idx
+      idx=cnode_get_num(var,var_index)
+      access_info(idx)=ior(access_is_var,&
+           iand(not(access_used_now),access_info(idx)))
+    end subroutine modify
+
+    subroutine enable
+      access_info(cnode_get_num(callnode,call_index))=0
+    end subroutine enable
+    
+    subroutine disable
+      access_info(cnode_get_num(callnode,call_index))=access_deactivated_call
+    end subroutine disable
+
+    subroutine set_access_info(var,acc)
+      type(pm_ptr),intent(in):: var
+      integer(access_kind),intent(in):: acc
+      if(cnode_get_kind(var)==cnode_is_var) then
+         access_info(cnode_get_num(var,var_index))=acc
+      endif
+    end subroutine set_access_info
+
+    subroutine combine_access_info(var,acc)
+      type(pm_ptr),intent(in):: var
+      integer(access_kind),intent(in):: acc
+      integer:: idx
+      if(cnode_get_kind(var)==cnode_is_var) then
+         idx=cnode_get_num(var,var_index)
+         access_info(idx)=ior(int(acc,access_kind),access_info(idx))
+      endif
+    end subroutine combine_access_info
+
+    function get_access_info(var) result(acc)
+      type(pm_ptr),intent(in):: var
+      integer(access_kind):: acc
+      if(cnode_get_kind(var)==cnode_is_var) then
+         acc=access_info(cnode_get_num(var,var_index))
+      else
+         acc=0
+      endif
+    end function get_access_info
+
+  end subroutine bprop_call
+    
   !===================================================
   ! Dump resolved proc signatures (debugging)
   !===================================================

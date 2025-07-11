@@ -1999,16 +1999,17 @@ contains
        if(expr(parser)) return
        if(expect(parser,sym_close)) return
        call make_node(parser,sym_dcaret,1)
-    case(sym_pm_dref:sym_pm_ref)
+    case(sym_pm_ref)
        call scan(parser)
-       if(expect(parser,sym_open)) return
+       if(parser%sym==sym_open) then
+          call push_sym_val(parser,0)
+       else
+          if(expect_name(parser)) return
+          if(expect(parser,sym_open)) return
+       endif
        if(exprlist(parser,m,nolist=.true.)) return
        if(expect(parser,sym_close)) return
-       if(m/=3) then
-          call parse_error(parser,'Wrong number of args to: '//sym_names(sym))
-          return
-       endif
-       call make_node(parser,sym,m)
+       call make_node(parser,sym,m+1)
     case(sym_pm_each_index)
        call scan(parser)
        if(expect(parser,sym_open)) return

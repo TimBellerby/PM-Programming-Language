@@ -182,6 +182,21 @@ module pm_cnodes
   integer,parameter:: sp_sig_dup=-5_pm_p
   integer,parameter:: sp_sig_noop=-6_pm_p
   integer,parameter:: sp_sig_setval=-7_pm_p
+
+  integer,parameter:: sp_sig_deactivated=-huge(1)
+
+  ! Access codes
+  ! Note - if change access_kind then need to
+  ! check for and change any %data%i8 accesses
+  ! in bprop routines
+  integer,parameter:: access_kind=pm_i8
+  integer(pm_p),parameter:: access_pm_type=pm_int8
+  integer(access_kind),parameter:: access_deactivated_call=-1
+  integer(access_kind),parameter:: access_is_var=1
+  integer(access_kind),parameter:: access_used_ever=2
+  integer(access_kind),parameter:: access_used_now=4
+  integer(access_kind),parameter:: access_everything=&
+       access_is_var+access_used_ever+access_used_now
   
 contains
 
