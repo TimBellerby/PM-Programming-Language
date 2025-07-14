@@ -283,12 +283,13 @@ module pm_symbol
   integer,parameter:: sym_proc_is_file = num_sym + 23
   integer,parameter:: sym_proc_is_not_inlinable = num_sym + 24
   integer,parameter:: sym_proc_needs_type = num_sym + 25
+  integer,parameter:: sym_proc_prints_out = num_sym + 26
 
   ! Specialised types
-  integer,parameter:: sym_literal = num_sym + 26
+  integer,parameter:: sym_literal = num_sym + 27
   
   ! Symbols used as node types (actual name not really used)
-  integer,parameter:: node0 = num_sym + 26
+  integer,parameter:: node0 = num_sym + 27
   integer,parameter:: sym_iter = node0 + 1
   integer,parameter:: sym_list = node0 + 2
   integer,parameter:: sym_builtin = node0 + 3
@@ -762,6 +763,7 @@ module pm_symbol
   data sym_names(sym_proc_is_file)          /'is_file'/
   data sym_names(sym_proc_is_not_inlinable) /'is_not_inlinable'/
   data sym_names(sym_proc_needs_type)       /'needs_type'/
+  data sym_names(sym_proc_prints_out)       /'prints_out'/
 
   data sym_names(sym_literal)          /'literal'/
   

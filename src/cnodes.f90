@@ -195,6 +195,7 @@ module pm_cnodes
   integer(access_kind),parameter:: access_is_var=1
   integer(access_kind),parameter:: access_used_ever=2
   integer(access_kind),parameter:: access_used_now=4
+  integer(access_kind),parameter:: access_holds_result=8
   integer(access_kind),parameter:: access_everything=&
        access_is_var+access_used_ever+access_used_now
   
@@ -639,6 +640,9 @@ contains
           elseif(k==sp_sig_noop) then
              str=repeat(' ',depth)//'call [noop]'//&
                   pm_name_as_string(context,name)
+          elseif(k==sp_sig_deactivated) then
+             str=repeat(' ',depth)//'call [----]'//&
+                  pm_name_as_string(context,name)
           elseif(k<0) then
              str=repeat(' ',depth)//'call '//'!![-'//trim(pm_int_as_string(-k))//']'&
                   //pm_name_as_string(context,name)
@@ -744,8 +748,12 @@ contains
           endif
           if(.not.pm_fast_isnull(rvec)) then
              tno=rvec%data%i(rvec%offset+cnode_get_num(cnode,var_index))
-             call append_to_line(iunit,str,i,&
-                  '['//trim(pm_type_as_string(context,tno))//']',.false.,depth)
+             if(tno==sp_sig_deactivated) then
+                call append_to_line(iunit,str,i,'[----]',.false.,depth)
+             else
+                call append_to_line(iunit,str,i,&
+                     '['//trim(pm_type_as_string(context,tno))//']',.false.,depth)
+             endif
           endif
           if(cnode_flags_set(cnode,var_flags,var_is_maybe_not_private)) then
              call append_to_line(iunit,str,i,'^',.false.,depth)

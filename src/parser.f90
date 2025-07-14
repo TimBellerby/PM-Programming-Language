@@ -5358,6 +5358,8 @@ contains
              flags=ior(flags,proc_is_not_inlinable)
           case(sym_proc_needs_type)
              flags=ior(flags,proc_needs_type)
+          case(sym_proc_prints_out)
+             flags=ior(flags,proc_prints_out)
           case default
              call parse_error(parser,'Bad PM__intrinsic attribute')
              return
