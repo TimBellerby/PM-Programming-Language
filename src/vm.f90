@@ -63,9 +63,7 @@ contains
     integer:: err
     type(pm_ptr),dimension(1):: arg
     type(pm_ptr),target:: ve
-
-    write(*,*) 'ext_mult=',pm_ext_mult,pm_jump_offset
-    
+   
     context%funcs=funcs
     
     ! Create intial vector engine structure

@@ -98,7 +98,7 @@ PM__intrinsic ++(fix(string),fix(string))->(fix(string)) : "concat_fold"
 //  **************************************
 
 //  String type
-PM__intrinsic<<is_impure>> print(string): "print"
+PM__intrinsic<<is_impure,prints_out>> print(string): "print"
 
 proc print(x) {
   print(string(x)) 

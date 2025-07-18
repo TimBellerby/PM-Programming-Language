@@ -51,6 +51,7 @@ module pm_infer
 
   ! Print compiler debugging messages
   logical,parameter:: debug_inference=.false.
+  logical,parameter:: debug_bprop=.false.
   
   ! Maximum times a procedure template can call itself with
   ! *different* arguments types each time
@@ -505,12 +506,8 @@ contains
        return
     endif
 
-    write(*,*) 'TAINTS ARE', taints,coder%taints
-
     ! Flag recursive calls with taints or keyword args as unfinished
     taints=iand(coder%taints,proc_taints)
-
-    write(*,*) 'AND THEN',taints
 
     ! Determine a hash key with any polymorphic elements eliminated
     added=.false.
@@ -561,7 +558,6 @@ contains
     call code_num(coder,rtype)
     call code_num(coder,new_atype)
 
-    write(*,*) '##~',coder%vtop
     if(added) then
        call bprop(coder,cnode_get(procnode,pr_cblock),&
             coder%stack(coder%base+1:coder%base+cnode_get_num(procnode,pr_max_index)),&
@@ -571,12 +567,10 @@ contains
             rvec%data%i(rvec%offset+1:rvec%offset+cnode_get_num(procnode,pr_max_index)),&
             .true.)
     endif
-    write(*,*) '####~~~',coder%vtop
     if(proc_nkeys==0) call code_null(coder)
     call make_code(coder,pm_null_obj,cnode_is_resolved_proc,7)
     call pm_dict_set_val(coder%context,coder%proc_cache,k,top_code(coder))
     call drop_code(coder)
-    write(*,*) 'CODED',k
     call code_num(coder,int(k))
     call pop_stack_frame(coder)
     call cnode_incr_num(procnode,pr_recurse,-1)
@@ -585,7 +579,7 @@ contains
     
  
 
-    if(debug_inference.or..true.) then
+    if(debug_inference) then
        write(*,*) 'ENDPROCNODE>',trim(pm_name_as_string(coder%context,&
             cnode_get_name(procnode,pr_name))),k,coder%taints
     endif
@@ -594,7 +588,6 @@ contains
     coder%proc_taints=iand(coder%taints,proc_taints)
     coder%taints=ior(save_taints,coder%proc_taints)
 
-    write(*,*) 'FINALLY',coder%taints
   contains
     include 'fnewnc.inc'
     include 'fistiny.inc'
@@ -1005,9 +998,6 @@ contains
     ! Pass out taint information
     coder%proc_taints=iand(proc_taints,cnode_get_num(procnode,pr_flags))
     coder%taints=ior(coder%taints,coder%proc_taints)
-
-    write(*,*) 'TAINTS',coder%taints,iand(coder%taints,proc_must_run)
-
     return
     
   contains
@@ -1093,18 +1083,32 @@ contains
   subroutine inf_cblock(coder,cblock)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock
-    integer:: nvars,i,newbase
+    integer:: save_taints
     type(pm_ptr):: p
     if(pm_fast_isnull(cblock)) return
+    save_taints=coder%taints
+    coder%taints=0
     p=cnode_get(cblock,cblock_first_call)
     do while(.not.pm_fast_isnull(p))
        call inf_call(coder,cblock,p)      
        p=cnode_get(p,call_link)
-       write(*,*) 'TAINTS NOW',coder%taints
     enddo
+    coder%stack(coder%base+cnode_get_num(cblock,cblock_index))=coder%taints
+    coder%taints=ior(save_taints,coder%taints)
   contains
     include 'fisnull.inc'
   end subroutine inf_cblock
+
+  !==========================================
+  ! Return tainta associated with a block
+  ! - inference on block must be complete
+  !==========================================
+  function cblock_taints(coder,cblock) result(taints)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: cblock
+    integer:: taints
+    taints=coder%stack(coder%base+cnode_get_num(cblock,cblock_index))
+  end function cblock_taints
 
   !=======================================================
   ! Type infer general calls
@@ -1999,20 +2003,6 @@ contains
       enddo
     end subroutine check_loop_writes
 
-    subroutine clear_cblock_mark(list)
-      type(pm_ptr),intent(in):: list
-      integer:: slot
-      slot=coder%base+cnode_get_num(list,cblock_index)
-      coder%stack(slot)=0
-    end subroutine clear_cblock_mark
-
-    function cblock_marked(list) result(marked)
-      type(pm_ptr),intent(in):: list
-      logical:: marked
-      integer:: slot
-      slot=coder%base+cnode_get_num(list,cblock_index)
-      marked=coder%stack(slot)/=0
-    end function cblock_marked
 
     !==================================================================
     ! Flag if an import or export option actually
@@ -3777,18 +3767,21 @@ contains
     logical,intent(in):: update
     integer(access_kind),allocatable,dimension(:):: access_info
     integer:: save_loop_depth,i
-    write(*,*) 'BP'
-    allocate(access_info(size(rvec)))
+    if(debug_bprop) then
+       write(*,*) 'BP'
+    endif
+    allocate(access_info(size(rvec)+pm_max_args))
     access_info=0
     save_loop_depth=coder%loop_depth
     call bprop_cblock(coder,cblock,access_info,rvec)
     coder%loop_depth=save_loop_depth
     if(update) then
-       write(*,*) 'acc=',access_info
        do i=1,size(rvec)
           if(access_info(i)==access_deactivated_call.or.&
                access_info(i)==access_is_var) then
-             write(*,*) 'Deactivate',i
+             if(debug_bprop) then
+                write(*,*) 'BP Deactivate',i
+             endif
              rvec(i)=sp_sig_deactivated
           endif
        end do
@@ -3805,12 +3798,17 @@ contains
     type(pm_ptr),intent(in):: cblock
     integer,dimension(:),intent(in)::rvec
     integer(access_kind),dimension(*),intent(inout):: access_info
-    integer:: nvars,i,newbase
+    integer:: nvars,idx,newbase
     type(pm_ptr):: p
     if(pm_fast_isnull(cblock)) return
+    p=cnode_get(cblock,cblock_first_var)
+    do while(.not.pm_fast_isnull(p))
+       idx=cnode_get_num(p,var_index)
+       access_info(idx)=ior(access_info(idx),access_is_var)
+       p=cnode_get(p,var_link)
+    enddo
     p=cnode_get(cblock,cblock_last_call)
     do while(.not.pm_fast_isnull(p))
-       write(*,*) 'BPcall'
        call bprop_call(coder,cblock,p,access_info,rvec)      
        p=cnode_get(p,call_back_link)
     enddo
@@ -3823,35 +3821,54 @@ contains
     type(pm_ptr),intent(in):: callnode,cblock
     integer,dimension(:),intent(in):: rvec
     integer(access_kind),dimension(*),intent(inout):: access_info
-    type(pm_ptr):: args,arg,procnode
-    integer:: nret,sig,nargs,opcode,i
+    type(pm_ptr):: args,arg,tv
+    integer:: nret,nargs,nvargs,opcode,i,sig,tno
     nret=cnode_get_num(callnode,call_nret)
     sig=-cnode_get_num(callnode,call_sig)
     args=cnode_get(callnode,call_args)
     nargs=cnode_numargs(args)-nret
     call enable
     if(sig>0) then
-       write(*,*) 'BPc ',sym_names(sig)
+       if(debug_bprop) then
+          write(*,*) 'BPcall ',sym_names(sig)
+       endif
        select case(sig)
        case(sym_while,sym_while_invar)
-!!! check whole loop (needs taints at block level)
-          coder%loop_depth=coder%loop_depth+1
-          call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
-          call access(cnode_arg(args,2))
-          call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
-          if(coder%loop_depth==1) then
-             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+          if(cblock_must_run(cnode_arg(args,1)).or.cblock_must_run(cnode_arg(args,3)) &
+               .or.block_writes_accessed(4)) then
+             coder%loop_depth=coder%loop_depth+1
              call access(cnode_arg(args,2))
              call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
+             call access(cnode_arg(args,2))
+             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+             if(coder%loop_depth==1) then
+                call access(cnode_arg(args,2))
+                call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
+                call access(cnode_arg(args,2))
+                call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+             endif
+          else
+             if(debug_bprop) then
+                write(*,*) 'DISABLE while'
+             endif
+             call disable
           endif
        case(sym_until,sym_until_invar)
-!!! check whole loop (needs taints at block level)
-          call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
-          call access(cnode_arg(args,2))
-          if(coder%loop_depth==1) then
-             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
-             call access(cnode_arg(args,2))
-          endif
+         if(cblock_must_run(cnode_arg(args,1)).or.&
+              block_writes_accessed(3)) then
+            call access(cnode_arg(args,2))
+            call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+            call access(cnode_arg(args,2))
+            if(coder%loop_depth==1) then
+               call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+               call access(cnode_arg(args,2))
+            endif
+         else
+            if(debug_bprop) then
+               write(*,*) 'DISABLE until'
+             endif
+            call disable
+         endif
        case(sym_if,sym_if_invar)
           call bprop_if(count_updates(cnode_arg(args,4),1))
        case(sym_do)
@@ -3861,11 +3878,32 @@ contains
        case(sym_pm_ref)
           call std_access(.false.,2)
        case(sym_open)
-          call code_val(coder,pm_new(coder%context,access_pm_type,int(max(nargs,1),pm_ln)))
+          arg=cnode_arg(args,nargs)
+          nvargs=0
+          if(cnode_get_kind(arg)==cnode_is_var) then
+             if(cnode_flags_set(arg,var_flags,var_is_varg)) then
+                tno=rvec(cnode_get_num(arg,var_index))
+                if(tno>0) then
+                   tv=pm_type_vect(coder%context,tno)
+                   if(pm_tv_kind(tv)==pm_type_is_tuple.and.&
+                        iand(pm_tv_flags(tv),pm_type_is_list)==0) then
+                      nvargs=pm_tv_numargs(tv)
+                      call combine_access_info(arg,access_holds_result)
+                   endif
+                endif
+             endif
+          endif
+          call code_val(coder,pm_new(coder%context,&
+               access_pm_type,int(max(nargs+nvargs,1),pm_ln)))
           arg=top_code(coder)
           do i=1,nargs
              arg%data%i8(arg%offset+i-1)=get_access_info(cnode_arg(args,i))
-             write(*,*) 'store access',arg%data%i8(arg%offset+i-1)
+             if(debug_bprop) then
+                write(*,*) 'BP store access',arg%data%i8(arg%offset+i-1),cnode_get_num(cnode_arg(args,i),var_index)
+             endif
+          enddo
+          do i=1,nvargs-1
+             arg%data%i8(arg%offset+i+nargs-1)=access_info(size(rvec)+i)
           enddo
        case(sym_key)
           do i=2,nargs,2
@@ -3887,39 +3925,13 @@ contains
           call std_access(.false.,1)
        end select
     else
-       sig=rvec(cnode_get_num(callnode,call_index))
-       if(sig<=0) then
-          call std_access(.false.,1)
-       else
-          write(*,*) 'BPsig=',sig,trim(sig_name_str(coder,cnode_get_num(callnode,call_sig)))
-          procnode=pm_dict_val(coder%context,coder%proc_cache,&
-               int(sig,pm_ln))
-          if(cnode_get_kind(procnode)==cnode_is_autoconv_sig) then
-             procnode=pm_dict_val(coder%context,coder%proc_cache,&
-                  int(cnode_num_arg(procnode,cnode_numargs(procnode)),pm_ln))
-          endif
-          if(cnode_get_kind(procnode)==cnode_is_resolved_proc) then
-             call bprop_proc_call
-          else
-             opcode=cnode_get_num(procnode,bi_opcode)
-             select case(opcode)
-             case(op_assign)
-                if(accessed(cnode_arg(args,2))) then
-                   call access(cnode_arg(args,3))
-                   call modify(cnode_arg(args,2))
-                else
-                   call disable
-                endif
-             case default
-                call std_access(iand(cnode_get_num(procnode,pr_flags),proc_must_run)/=0,1)
-             end select
-          endif
-       endif
+       call bprop_proc_call
     endif
   contains
 
     include 'fesize.inc'
     include 'fisnull.inc'
+    include 'fvkind.inc'
 
     subroutine bprop_if(nupdates)
       integer:: nupdates
@@ -3927,10 +3939,17 @@ contains
       integer(access_kind),dimension(nupdates):: save_access
       integer:: i
       integer(access_kind):: acc
+
+      if(.not.(block_writes_accessed(4).or.cblock_must_run(cnode_arg(args,2)).or.&
+           cblock_must_run(cnode_arg(args,3)))) then
+         call disable
+         return
+      endif
+      
       readlist=cnode_arg(cnode_arg(args,4),1)
       i=1
       p=readlist
-      do
+      do while(.not.pm_fast_isnull(p))
          var=p%data%ptr(p%offset)
          save_access(i)=get_access_info(var)
          p=p%data%ptr(p%offset+1)
@@ -3939,7 +3958,7 @@ contains
       call bprop_cblock(coder,cnode_arg(args,2),access_info,rvec)
       i=1
       p=readlist
-      do
+      do while(.not.pm_fast_isnull(p))
          var=p%data%ptr(p%offset)
          acc=access_info(cnode_get_num(var,var_index))
          call set_access_info(var,save_access(i))
@@ -3950,37 +3969,74 @@ contains
       call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
       i=1
       p=readlist
-      do
+      do while(.not.pm_fast_isnull(p))
          var=p%data%ptr(p%offset)
          call combine_access_info(var,save_access(i))
          p=p%data%ptr(p%offset+1)
          i=i+1
       enddo
+      call access(cnode_arg(args,1))
     end subroutine bprop_if
 
     subroutine bprop_proc_call
-      type(pm_ptr):: arg_access,key_access,key_names,proc_keys,arg,amps
-      integer:: i,j,nkeys,nproc_keys,taints
-      logical:: arg_accessed,is_accessed, all_accessed, needs_to_run
+      type(pm_ptr):: arg_access,key_access,key_names,proc_keys,arg,amps,key_args,procnode
+      integer:: i,j,nkeys,nproc_keys,taints,sig
+      logical:: arg_accessed,is_accessed, all_accessed, needs_to_run, is_builtin
 
-      amps=cnode_get(callnode,call_amp)
-      taints=cnode_num_arg(procnode,3)
-
-      write(*,*) 'BPcall',iand(taints,proc_must_run)
+      sig=rvec(cnode_get_num(callnode,call_index))
+      if(sig<=0) then
+         call std_access(.false.,1)
+         return
+      endif
       
+      amps=cnode_get(callnode,call_amp)
+
+      if(debug_bprop) then
+         write(*,*) 'BPsig=',sig,trim(sig_name_str(coder,cnode_get_num(callnode,call_sig)))
+      endif
+      procnode=pm_dict_val(coder%context,coder%proc_cache,&
+           int(sig,pm_ln))
+
+      if(pm_fast_vkind(procnode)/=pm_pointer) then
+         ! Recursive call
+         call std_access(.false.,1)
+         return
+      endif
+
+      if(cnode_get_kind(procnode)==cnode_is_autoconv_sig) then
+         procnode=pm_dict_val(coder%context,coder%proc_cache,&
+              int(cnode_num_arg(procnode,cnode_numargs(procnode)),pm_ln))
+      endif
+
+      is_builtin=cnode_get_kind(procnode)==cnode_is_builtin
+
+      if(is_builtin) then
+         taints=cnode_get_num(procnode,pr_flags)
+      else
+         taints=cnode_num_arg(procnode,3)
+      endif
+
+      if(debug_bprop) then
+         write(*,*) 'BPcall  taints=',iand(taints,proc_must_run)
+      endif
+
       is_accessed=.false.
       all_accessed=.true.
       do i=1,nret
          arg=cnode_arg(args,i)
          arg_accessed=accessed(arg)
+         if(debug_bprop) then
+            write(*,*) 'accessed #',i,cnode_get_num(arg,var_index),arg_accessed
+         endif
          is_accessed=is_accessed.or.arg_accessed
          all_accessed=all_accessed.and.arg_accessed
          call modify(arg)
       enddo
+      
       if(.not.pm_fast_isnull(amps)) then
          amps=pm_name_val(coder%context,int(amps%offset))
          do i=0,pm_fast_esize(amps)
-            arg=cnode_arg(args,amps%data%i(amps%offset+i))
+            arg=cnode_arg(args,nret+amps%data%i(amps%offset+i))
             arg_accessed=accessed(arg)
             is_accessed=is_accessed.or.arg_accessed
             all_accessed=all_accessed.and.arg_accessed
@@ -3988,8 +4044,12 @@ contains
          enddo
       endif
 
+      if(debug_bprop) then
+         write(*,*) 'BPa',is_accessed,all_accessed
+      endif
+      
       if(.not.is_accessed.and.iand(taints,proc_must_run)==0) then
-         write(*,*) 'disable',is_accessed,iand(taints,proc_must_run)
+         if(debug_bprop) write(*,*) 'BP disable',is_accessed,iand(taints,proc_must_run)
          call disable
          return
       endif
@@ -4000,31 +4060,44 @@ contains
          enddo
          if(.not.pm_fast_isnull(amps)) then
             do i=0,pm_fast_esize(amps)
-               arg=cnode_arg(args,amps%data%i(amps%offset+i))
+               arg=cnode_arg(args,nret+amps%data%i(amps%offset+i))
                call combine_access_info(arg,access_holds_result)
             enddo
          endif
       endif
 
-      arg_access=cnode_arg(procnode,6)
-      key_access=cnode_arg(procnode,7)
-      do i=1,nargs
-         write(*,*) 'Combine #',i,'with',arg_access%data%i8(arg_access%offset+i-1)
-         call combine_access_info(cnode_arg(args,i),arg_access%data%i8(arg_access%offset+i-1))
-      enddo
-      if(.not.pm_fast_isnull(cnode_get(callnode,call_keys))) then
-         nkeys=cnode_numargs(cnode_get(callnode,call_keys))
-         key_names=pm_name_val(coder%context,cnode_get_num(callnode,call_key_names))
-         proc_keys=cnode_get(cnode_arg(procnode,1),pr_keys)
-         nproc_keys=pm_fast_esize(proc_keys)/2
-         outer: do j=1,nproc_keys
-            do i=1,nkeys
-               if(proc_keys%data%i(proc_keys%offset+j-1)==key_names%data%i(key_names%offset+i-1)) then
-                  call combine_access_info(cnode_arg(args,i),key_access%data%i8(key_access%offset+j-1))
-                  cycle outer
-               endif
-            enddo
-         enddo outer
+      if(is_builtin) then
+         do i=1,nargs
+            call access(cnode_arg(args,nret+i))
+         enddo
+      else
+         arg_access=cnode_arg(procnode,6)
+         key_access=cnode_arg(procnode,7)
+         do i=1,nargs
+    !!$            write(*,*) 'Combine #',i,cnode_get_num(cnode_arg(args,i+nret),var_index),'with',arg_access%data%i8(arg_access%offset+i-1)
+    !!! Need to cater for vargs
+            call combine_access_info(cnode_arg(args,i+nret),&
+                 arg_access%data%i8(arg_access%offset+i-1))
+         enddo
+         do i=nargs+1,pm_fast_esize(arg_access)+1
+            j=size(rvec)+i-nargs
+            access_info(j)=ior(access_info(j),arg_access%data%i8(arg_access%offset+i-1))
+         enddo
+         if(.not.pm_fast_isnull(cnode_get(callnode,call_keys))) then
+            nkeys=cnode_numargs(cnode_get(callnode,call_keys))
+            key_names=pm_name_val(coder%context,cnode_get_num(callnode,call_key_names))
+            proc_keys=cnode_get(cnode_arg(procnode,1),pr_keys)
+            nproc_keys=pm_fast_esize(proc_keys)/2
+            key_args=cnode_get(callnode,call_keys)
+            outer: do j=1,nproc_keys
+               do i=1,nkeys
+                  if(proc_keys%data%i(proc_keys%offset+j-1)==key_names%data%i(key_names%offset+i-1)) then
+                     call combine_access_info(cnode_arg(key_args,i),key_access%data%i8(key_access%offset+j-1))
+                     cycle outer
+                  endif
+               enddo
+            enddo outer
+         endif
       endif
 
     end subroutine bprop_proc_call
@@ -4034,7 +4107,8 @@ contains
       integer,intent(in):: start
       type(pm_ptr):: arg
       integer:: i
-      logical:: arg_accessed,is_accessed,all_accessed
+      logical:: arg_accessed,is_accessed,all_accessed,should_disable
+      should_disable=.false.
       is_accessed=.false.
       all_accessed=.true.
       do i=1,nret
@@ -4054,27 +4128,37 @@ contains
             enddo
          endif
       else
-         call disable
+         should_disable=.true.
       endif
       do i=1,nargs
          arg=cnode_arg(args,i+nret)
          if(cnode_get_kind(arg)==cnode_is_cblock) then
-            write(*,*) 'SUBBLOCK'
             call bprop_cblock(coder,arg,access_info,rvec)
+            should_disable=.false.
          endif
       enddo
+      if(should_disable) call disable
     end subroutine std_access
 
     subroutine access(var)
       type(pm_ptr):: var
       integer:: idx
+      if(debug_bprop) then
+         if(cnode_get_kind(var)==cnode_is_var) then
+            write(*,*) 'Make access to',cnode_get_num(var,var_index)
+         endif
+      endif
       call combine_access_info(var,access_used_ever+access_used_now+access_is_var)
     end subroutine access
 
     function accessed(var) result(ok)
       type(pm_ptr):: var
       logical:: ok
-      ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
+       if(cnode_get_kind(var)==cnode_is_var) then
+          ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
+       else
+          ok=.true.
+       endif
     end function accessed
 
     subroutine modify(var)
@@ -4121,6 +4205,26 @@ contains
       endif
     end function get_access_info
 
+    function cblock_must_run(cblock) result(ok)
+      type(pm_ptr),intent(in):: cblock
+      logical:: ok
+      ok=iand(cblock_taints(coder,cblock),proc_must_run)/=0
+    end function cblock_must_run
+
+    function block_writes_accessed(n) result(is_accessed)
+      integer,intent(in):: n
+      logical:: is_accessed
+      type(pm_ptr):: writelist,p,var
+      writelist=cnode_arg(cnode_arg(args,n),2)
+      p=writelist
+      is_accessed=.false.
+      do while(.not.pm_fast_isnull(p))
+         var=p%data%ptr(p%offset)
+         is_accessed=is_accessed.or.accessed(var)
+         p=p%data%ptr(p%offset+1)
+      enddo
+    end function block_writes_accessed
+    
   end subroutine bprop_call
     
   !===================================================

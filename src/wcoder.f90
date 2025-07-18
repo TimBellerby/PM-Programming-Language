@@ -503,7 +503,7 @@ contains
     type(pm_ptr),intent(out):: pp
     integer:: npar
     type(pm_ptr):: p,tv
-    integer:: slot,i
+    integer:: slot,i,rslot
     integer:: v,xpar
     integer:: typ
     logical:: isref,isshared
@@ -521,11 +521,11 @@ contains
              write(*,*) 'ALLOCATING PARAM>',&
                   trim(pm_name_as_string(wcd%context,cnode_get_name(p,var_name)))
           endif
-          wcd%rdata(slot+wcd%base)=alloc_param_var(wcd,&
+          rslot=alloc_param_var(wcd,&
                typ,isref,.false.,cnode_get_num(p,var_name))
           if(debug_wcode) write(*,*) 'TO>',wcd%rdata(slot+wcd%base)
-          
-          npar=npar+1
+          wcd%rdata(slot+wcd%base)=rslot
+          if(rslot/=0) npar=npar+1
           p=cnode_get(p,var_link)
           if(pm_fast_isnull(p)) exit
        enddo
@@ -627,8 +627,9 @@ contains
     cs=wcd%cs
     top=wcd%cotop(cs)+1
     wcd%cotop(cs)=top
-    if(top>max_costack) &
-         call pm_panic('Program too complex')
+    if(top>max_costack) then
+       call pm_panic('Program too complex - costack full')
+    endif
     wcd%costack(cs,top)%cblock=cblock
     wcd%costack(cs,top)%p=p
     wcd%costack(cs,top)%first_pc=first_pc
@@ -718,7 +719,7 @@ contains
           slot=cnode_get_num(p,var_index)
           nam=cnode_get(p,var_name)
           wcd%rdata(slot+wcd%base)=alloc_general_var(wcd,p,rv)
-          if(cnode_get_num(p,var_name)/=0.or.pm_is_compiling) &
+          if(slot/=0.and.cnode_get_num(p,var_name)/=0.or.pm_is_compiling) &
                num_named=num_named+1
        endif
        p=cnode_get(p,var_link)
@@ -737,7 +738,7 @@ contains
     integer,intent(in):: first_pc,nvars
     type(pm_ptr),optional,intent(in):: pp
     type(pm_ptr):: p
-    integer:: slot,j
+    integer:: slot,rslot,j
     integer:: name
 
     ! Info entry for parameters & named multi-use variables
@@ -761,11 +762,12 @@ contains
        if(arg_is_mvar(p).or.cnode_flags_set(p,var_flags,var_is_param)) then
           slot=cnode_get_num(p,var_index)
           if(.not.pm_is_compiling) then
-             call release_var(wcd,wcd%rdata(slot+wcd%base))
+             rslot=wcd%rdata(slot+wcd%base)
+             call release_var(wcd,rslot)
              name=cnode_get_num(p,var_name)
-             if(name/=0) then
+             if(name/=0.and.rslot/=0) then
                 wcd%wc(wcd%last+j*2)=name
-                wcd%wc(wcd%last+j*2-1)=wcd%rdata(slot+wcd%base)
+                wcd%wc(wcd%last+j*2-1)=rslot
                 j=j+1
              endif
           endif
@@ -3680,7 +3682,7 @@ contains
        if(iskey)   flags=ior(flags,v_is_key)
        k=cvar_alloc(wcd,typ,flags,name)
     else
-       k=alloc_var(wcd,typ)
+       k=alloc_var(wcd,0)  ! use zero type to avoid not allocating unused parameters
     endif
   end function alloc_param_var
 
@@ -3696,7 +3698,7 @@ contains
        flags=v_is_result
        k=cvar_alloc(wcd,typ,flags)
     else
-       k=alloc_var(wcd,typ)
+       k=alloc_var(wcd,0)
     endif
   end function alloc_result_var
   
@@ -3719,7 +3721,8 @@ contains
                ':',trim(pm_type_as_string(wcd%context,typ))
        endif
     else
-       k=alloc_var(wcd,0)
+       typ=get_var_type(wcd,var,rv)
+       k=alloc_var(wcd,typ)
     endif
   end function alloc_general_var
 
@@ -3732,7 +3735,7 @@ contains
     integer:: i
     integer::k
     if(typ==sp_sig_deactivated) then
-       k=-999
+       k=0
        return
     endif
     if(pm_is_compiling) then
@@ -3776,7 +3779,7 @@ contains
     integer,intent(in):: slot
     integer:: k
     if(pm_is_compiling) return
-    if(slot<0) return
+    if(slot<=0) return
     k=slot-pm_stack_locals+1
     if(pm_debug_checks) then
        if(k<1.or.k>wcd%mvar) then

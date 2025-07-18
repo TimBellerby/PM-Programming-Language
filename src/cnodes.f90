@@ -601,8 +601,15 @@ contains
     type(pm_ptr):: p,args,amps,keys,keynames
     character(len=120):: str,location
     signo=cnode_get_num(cnode,call_sig)
+    str=' '
+    if(.not.pm_fast_isnull(rvec)) then
+       k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
+       if(k==sp_sig_deactivated) then
+          str='[--]'
+       endif
+    endif
     if(signo<0) then
-       str=repeat(' ',depth)//pm_name_as_string(context,-signo)
+       str=repeat(' ',depth)//trim(str)//pm_name_as_string(context,-signo)
        i=len_trim(str)+1
        if(.not.pm_fast_isnull(rvec)) then
           k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
@@ -612,7 +619,7 @@ contains
           endif
        endif
     elseif(signo==0) then
-       str=repeat(' ',depth)//'var-call'
+       str=repeat(' ',depth)//trim(str)//'var-call'
        i=len_trim(str)+1
        call print_value_cnode(context,iunit,rvec,sig_cache,&
             cnode_get(cnode,call_var),depth,str,i)
@@ -622,32 +629,32 @@ contains
             int(signo,pm_ln))
        name=p%data%i(p%offset+pm_fast_esize(p))
        if(.not.pm_fast_isnull(cnode_get(cnode,call_var))) then
-          str=repeat(' ',depth)//'call *('
+          str=repeat(' ',depth)//trim(str)//'call *('
           i=depth+7
           call print_value_cnode(context,iunit,rvec,sig_cache,&
                cnode_get(cnode,call_var),depth,str,i)
           call append_to_line(iunit,str,i,') ',.false.,depth)
        elseif(pm_fast_isnull(rvec)) then
-          str=repeat(' ',depth)//'call '//pm_name_as_string(context,name)
+          str=repeat(' ',depth)//trim(str)//'call '//pm_name_as_string(context,name)
        else
           k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
           if(k==sp_sig_link) then
-             str=repeat(' ',depth)//'call [link]'//&
+             str=trim(str)//repeat(' ',depth)//trim(str)//'call [link]'//&
                   pm_name_as_string(context,name)
           elseif(k==sp_sig_dup) then
-             str=repeat(' ',depth)//'call [dup]'//&
+             str=repeat(' ',depth)//trim(str)//'call [dup]'//&
                   pm_name_as_string(context,name)
           elseif(k==sp_sig_noop) then
-             str=repeat(' ',depth)//'call [noop]'//&
+             str=repeat(' ',depth)//trim(str)//'call [noop]'//&
                   pm_name_as_string(context,name)
           elseif(k==sp_sig_deactivated) then
-             str=repeat(' ',depth)//'call [----]'//&
+             str=repeat(' ',depth)//trim(str)//'call '//&
                   pm_name_as_string(context,name)
           elseif(k<0) then
-             str=repeat(' ',depth)//'call '//'!![-'//trim(pm_int_as_string(-k))//']'&
+             str=repeat(' ',depth)//trim(str)//'call '//'!![-'//trim(pm_int_as_string(-k))//']'&
                   //pm_name_as_string(context,name)
           else
-             str=repeat(' ',depth)//'call '//'['//trim(pm_int_as_string(k))//']'&
+             str=repeat(' ',depth)//trim(str)//'call '//'['//trim(pm_int_as_string(k))//']'&
                   //pm_name_as_string(context,name)
           endif
        endif
@@ -700,6 +707,10 @@ contains
     modl=cnode_get_num(cnode,cnode_modl_name)
     line=cnode_get_num(cnode,cnode_lineno)
     location=trim(pm_name_as_string(context,modl))//':'//pm_int_as_string(line)
+    if(i>len(str)-len_trim(location)) then
+       write(iunit,'(a)') str
+       str=' '
+    endif
     str(len(str)-len_trim(location)+1:)=location
     write(iunit,'(a)') str
 
@@ -749,7 +760,7 @@ contains
           if(.not.pm_fast_isnull(rvec)) then
              tno=rvec%data%i(rvec%offset+cnode_get_num(cnode,var_index))
              if(tno==sp_sig_deactivated) then
-                call append_to_line(iunit,str,i,'[----]',.false.,depth)
+                call append_to_line(iunit,str,i,'[---]',.false.,depth)
              else
                 call append_to_line(iunit,str,i,&
                      '['//trim(pm_type_as_string(context,tno))//']',.false.,depth)

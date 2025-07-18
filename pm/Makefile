@@ -98,7 +98,7 @@ infer.o : ../src/infer.f90 codegen.o cnodes.o ast.o symbol.o vmdefs.o types.o li
 wcoder.o : ../src/wcoder.f90 array.o infer.o cnodes.o ast.o symbol.o vmdefs.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
-vm.o : ../src/vm.f90 parlib.o array.o types.o symbol.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
+vm.o : ../src/vm.f90 parlib.o array.o types.o symbol.o lib.o vmdefs.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
 	$(FC) $(FFLAGS) -c $<
 
 main.o : ../src/main.f90 vm.o parlib.o array.o wcoder.o infer.o codegen.o linker.o parser.o symbol.o types.o lib.o opts.o hash.o memory.o kinds.o pcomp.o sysdep.o
