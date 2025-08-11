@@ -558,6 +558,7 @@ contains
     call code_num(coder,rtype)
     call code_num(coder,new_atype)
 
+    ! Back-prop pass - push use info vectors for args and keys
     if(added) then
        call bprop(coder,cnode_get(procnode,pr_cblock),&
             coder%stack(coder%base+1:coder%base+cnode_get_num(procnode,pr_max_index)),&
@@ -568,17 +569,18 @@ contains
             .true.)
     endif
     if(proc_nkeys==0) call code_null(coder)
+
+    ! Create record -- proc resvec flags rtype new_atype arg_uses key_uses
     call make_code(coder,pm_null_obj,cnode_is_resolved_proc,7)
     call pm_dict_set_val(coder%context,coder%proc_cache,k,top_code(coder))
     call drop_code(coder)
     call code_num(coder,int(k))
+
+    ! Pop frame
     call pop_stack_frame(coder)
     call cnode_incr_num(procnode,pr_recurse,-1)
-
     call restore_proc_state
     
- 
-
     if(debug_inference) then
        write(*,*) 'ENDPROCNODE>',trim(pm_name_as_string(coder%context,&
             cnode_get_name(procnode,pr_name))),k,coder%taints
@@ -3906,6 +3908,9 @@ contains
              arg%data%i8(arg%offset+i+nargs-1)=access_info(size(rvec)+i)
           enddo
        case(sym_key)
+          do i=1,nret/2
+             call access(cnode_arg(args,i))
+          enddo
           do i=2,nargs,2
              if(accessed(cnode_arg(args,i/2+nret/2))) then
                 call access(cnode_arg(args,nret+i))

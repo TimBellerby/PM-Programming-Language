@@ -84,8 +84,8 @@ program pm
   
   ! Run wordcodes or use them to generate source
   if(pm_is_compiling) then
-     if(pm_debug_level>1) write(*,*) 'OPTIMISING...'
-     call optimise_prog(context,code_cache,poly_cache)
+     if(pm_debug_level>1.or..true.) write(*,*) 'OPTIMISING...'
+     !call optimise_prog(context,code_cache,poly_cache)
      if(pm_opts%out_debug_files) then
        open(unit=pm_comp_file_unit,file='optimiser.out')
        context%funcs=code_cache
@@ -93,7 +93,7 @@ program pm
        close(pm_comp_file_unit)
     endif
  
-     if(pm_debug_level>1) write(*,*) 'CREATING SOURCE...'
+     if(pm_debug_level>1.or..true.) write(*,*) 'CREATING SOURCE...'
      open(unit=9,file='PMOUT.F90')
      call gen_prog(context,code_cache,poly_cache,typeset,9)
      close(9)

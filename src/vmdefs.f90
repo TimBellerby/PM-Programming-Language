@@ -848,7 +848,7 @@ module pm_vmdefs
   data op_flags(op_extractelm)      /0/
   data op_flags(op_iota)            /0/
   data op_flags(op_indices)         /0/
-  data op_flags(op_get_key)         /0/
+  data op_flags(op_get_key)         /op_1_block/
   data op_flags(op_present)         /0/
   data op_flags(op_export_array)    /0/
   data op_flags(op_miss_arg)        /0/
@@ -1431,6 +1431,7 @@ module pm_vmdefs
   integer,parameter:: v_is_chan_vect=13
   integer,parameter:: v_is_unit_elem=14
   integer,parameter:: v_is_vect_wrapped=15
+  integer,parameter:: v_is_keyarg=16
 
   integer,parameter:: cvar_flag_mask=31
   integer,parameter:: cvar_flag_mult=cvar_flag_mask+1
@@ -1451,7 +1452,8 @@ module pm_vmdefs
   integer,parameter:: v_is_array_par_vect=2048
   integer,parameter:: v_is_array_par_dom=4096
   integer,parameter:: v_is_farray=8192
-  integer,parameter:: v_extra_flags=16384
+  integer,parameter:: v_is_key_ptr=16384
+  integer,parameter:: v_extra_flags=32768
  
   ! Variable group types (compiling only)
   integer,parameter:: v_is_var_array=0
@@ -2262,25 +2264,27 @@ contains
     type(pm_ptr),intent(in):: funcs
     type(pm_ptr):: p,q,qq
     integer(pm_ln):: idx
+    integer:: kvar
     do idx=1_pm_ln,pm_dict_size(context,funcs)
        p=pm_dict_val(context,funcs,idx)
        if(pm_fast_isnull(p)) cycle
        q=p%data%ptr(p%offset)
        qq=p%data%ptr(p%offset+1)
+       kvar=p%data%ptr(p%offset+3)%offset
        call print_comp_proc(context,iunit,q%data%i(q%offset+2),int(idx),&
-            q%data%i(q%offset),q%data%i(q%offset+3),q%data%i(q%offset+1),&
+            q%data%i(q%offset),q%data%i(q%offset+3),q%data%i(q%offset+1),kvar,&
             q%data%i(q%offset+4:),1,qq%data%i(qq%offset:),context%funcs,p%data%ptr(p%offset:),2,.true.)
     enddo
   contains
     include 'fisnull.inc'
   end subroutine print_comp_procs
 
-  subroutine print_comp_proc(context,iunit,name,index,rvar,vevar,pvar,&
+  subroutine print_comp_proc(context,iunit,name,index,rvar,vevar,pvar,kvar,&
        op,first_index,vars,dict,values,depth,masked,wstack,vsets,oindex)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
     integer,dimension(:),intent(in):: op,vars
-    integer,intent(in):: name,index,rvar,vevar,pvar,first_index,depth
+    integer,intent(in):: name,index,rvar,vevar,pvar,kvar,first_index,depth
     type(pm_ptr),intent(in):: dict
     type(pm_ptr),dimension(*),intent(in):: values
     logical,intent(in):: masked
@@ -2302,10 +2306,12 @@ contains
     endif
     if(pvar>0) then
        call print_cvar(context,iunit,vars,max(pvar,0),values,.true.,depth,line,i)
-       call append_to(iunit,line,i,'{',.true.,depth)
-    else
-       call append_to(iunit,line,i,'{',.true.,depth)
     endif
+    if(kvar>0) then
+       call append_to(iunit,line,i,' KEYS',.false.,depth)
+       call print_cvar(context,iunit,vars,max(kvar,0),values,.true.,depth,line,i)
+    endif
+    call append_to(iunit,line,i,' {',.true.,depth)
     if(size(op)>0) then
        call print_comp_op_block(context,iunit,op,first_index,vars,dict,values,2,masked,wstack,vsets,oindex)
     endif
@@ -2316,7 +2322,7 @@ contains
   subroutine print_comp_op(context,iunit,op,index,vars,dict,values,depth,masked,wstack,vsets,oindex)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
-    integer,dimension(*),intent(in):: op,vars
+    integer,dimension(:),intent(in):: op,vars
     integer,intent(in):: index,depth
     type(pm_ptr),intent(in):: dict
     type(pm_ptr),dimension(*),intent(in):: values
@@ -2363,6 +2369,8 @@ contains
        nblocks=0
     endif
 
+    !write(iunit,*)'>>',op(index:index+comp_op_arg0+nargs-1)
+    
     if(masked.and.op(index+comp_op_arg0)>0) then
        line=' '
        j=depth
@@ -2422,7 +2430,7 @@ contains
   subroutine print_comp_op_block(context,iunit,op,index,vars,dict,values,depth,masked,wstack,vsets,oindex)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
-    integer,dimension(*),intent(in):: op,vars
+    integer,dimension(:),intent(in):: op,vars
     type(pm_ptr),intent(in):: dict
     type(pm_ptr),dimension(*),intent(in):: values
     integer,intent(in):: index,depth
@@ -2447,7 +2455,7 @@ contains
   subroutine print_cvar(context,iunit,var,index,values,addtype,depth,str,i)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
-    integer,dimension(*),intent(in):: var
+    integer,dimension(:),intent(in):: var
     integer,intent(in):: index,depth
     type(pm_ptr),dimension(*),intent(in):: values 
     logical,intent(in):: addtype
@@ -2472,9 +2480,11 @@ contains
       elseif(index==0) then
          call append('^')
          return
+      elseif(index>size(var)) then
+         call append('*???*')
+         return
       end if
 
-      !write(*,*) 'index=',index
 
       kind=iand(var(index),cvar_flag_mask)
       v1=var(index)/cvar_flag_mult
@@ -2545,6 +2555,9 @@ contains
          call append('.1')
       case(v_is_vect_wrapped)
          call append('%')
+         call printv(v1,.false.)
+      case(v_is_keyarg)
+         call append(trim(pm_name_as_string(context,v2))//'=')
          call printv(v1,.false.)
       case(v_is_group)
          select case(v2)
@@ -2630,7 +2643,7 @@ contains
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,vset,depth
     integer,dimension(:),intent(in):: wstack
-    integer,dimension(*),intent(in):: var
+    integer,dimension(:),intent(in):: var
     type(pm_ptr),dimension(*),intent(in):: values
     integer,dimension(*):: oindex
     character(len=wcode_file_cols):: line
@@ -2653,7 +2666,7 @@ contains
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,bset,depth
     integer,dimension(:),intent(in):: wstack
-    integer,dimension(*),intent(in):: var
+    integer,dimension(:),intent(in):: var
     type(pm_ptr),dimension(*),intent(in):: values
     integer,dimension(*):: oindex
     character(len=wcode_file_cols):: line

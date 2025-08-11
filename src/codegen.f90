@@ -3168,7 +3168,7 @@ contains
           call make_temp_var(coder,cblock,node)
        else
           q=coder%var(i)
-          if(cnode_flags_set(q,var_flags,var_is_key)) then
+          if(cnode_flags_set(q,var_flags,var_is_key_ptr)) then
              call code_val(coder,cnode_get(q,var_extra_info))
              call make_sp_call_rtn(coder,cblock,node,sym_present,1,1)
           else
@@ -5003,6 +5003,8 @@ contains
     call code_val(coder,node_get(node,proc_amplocs))
     call code_val(coder,node_get(node,proc_name))
 
+    keycall=pm_null_obj
+    
     sym=node_sym(node)
     if(sym==sym_builtin) then
 
@@ -5234,7 +5236,7 @@ contains
          newbase=coder%top
          do i=1,node_numargs(p)/3
             call make_var(coder,cblock,p,vname,&
-                 flags0+var_is_param+var_is_key+var_is_multi_access+var_is_shadowed)
+                 flags0+var_is_key+var_is_multi_access+var_is_shadowed)
             call code_val(coder,coder%var(base+i))
             call make_sys_call(coder,cblock,node,sym_export_param,1,1)
          enddo
@@ -5260,7 +5262,7 @@ contains
       do i=1,node_numargs(p),3
          vname=node_num_arg(p,i)
          call make_var(coder,cblock,p,vname,&
-              flags0+var_is_key+var_is_multi_access+var_is_shadowed,&
+              flags0+var_is_key_ptr+var_is_multi_access+var_is_shadowed,&
               extra_info=coder%var(base+(i+2)/3))
       enddo
       
@@ -5274,6 +5276,9 @@ contains
       ! Create blocks to compute default values
       do i=1,node_numargs(p),3
          cblock2=make_cblock(coder,cblock,node,sym_key)
+         call make_var(coder,cblock,p,node_num_arg(p,i),&
+              flags0+var_is_key+var_is_multi_access+var_is_shadowed)
+         call dup_code(coder)
          call trav_expr(coder,cblock2,p,node_arg(p,i+2))
          tno=tkeys%data%i(tkeys%offset+n+i/3)
          ! For stated type constraints, convert default value to
@@ -5284,10 +5289,11 @@ contains
             call make_sp_call_rtn(coder,cblock2,node,sym_type_val,1,1)
             call make_sp_call_rtn(coder,cblock2,node,sym_cast,2,1)
          endif
+         call make_sys_call(coder,cblock2,node,sym_clone,1,1) !!! should this be clone?
          call close_cblock(coder,cblock2)
          call reveal_vars(coder,base+n+(i+2)/3,base+n+(i+2)/3)
       enddo
-
+      
       ! Create call: key keyarg... keyvar... (block defvar)...
       call make_sp_call(coder,cblock,node,sym_key,n*2,n*2)
       key_call=cnode_get(cnode_get(cblock,cblock_last_call),call_args)

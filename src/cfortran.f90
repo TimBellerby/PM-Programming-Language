@@ -281,7 +281,7 @@ contains
     type(gen_state):: g
     integer,intent(in):: iunit,index
     logical,intent(in),optional:: tsets
-    call print_comp_proc(g%context,iunit,g%name,index,g%rvar,g%vevar,g%pvar,&
+    call print_comp_proc(g%context,iunit,g%name,index,g%rvar,g%vevar,g%pvar,0,&
          g%codes,1,g%vars,g%procs,g%fn%data%ptr(g%fn%offset:),2,.true.,g%wstack,tsets,&
          oindex=g%vardata%oindex)
   end subroutine g_print_out
@@ -293,8 +293,8 @@ contains
     type(gen_state):: g
     type(pm_ptr),intent(in)::p
     integer,intent(in):: no
-    integer:: i,n,rvar,pvar,vevar,name,start
-    type(pm_ptr)::q,taint,keys
+    integer:: i,n,rvar,pvar,keys,vevar,name,start
+    type(pm_ptr)::q,taint
     logical:: iscomm
 
     ! Get  wordcodes & meta-info for this function
@@ -307,9 +307,9 @@ contains
     vevar=q%data%i(q%offset+3)
     g%codes=>q%data%i(q%offset+4:q%offset+pm_fast_esize(q))
     taint=p%data%ptr(p%offset+2)
-    keys=p%data%ptr(p%offset+3)
+    keys=p%data%ptr(p%offset+3)%offset
     g%taints=taint%offset
-    iscomm=iand(int(taint%offset),proc_is_comm)/=0
+    iscomm=iand(int(taint%offset),proccall_is_comm)/=0
 
     g%rvar=rvar
     g%pvar=pvar
@@ -333,12 +333,8 @@ contains
     if(vevar/=-1) then
        call create_var(g,vevar,.false.)
     endif
-    if(.not.pm_fast_isnull(keys)) then
-       do i=0,pm_fast_esize(keys)
-          call create_var(g,keys%data%i(keys%offset+i),.false.)
-       enddo
-    endif
     if(pvar/=-1) call create_var(g,pvar,.false.)
+    if(keys/=-1) call create_var(g,keys,.false.)
     if(size(g%codes)>0) call create_vars_for_block(g,comp_op_start)
     if(rvar/=-1) call create_var(g,rvar,.false.)
 
@@ -362,12 +358,8 @@ contains
        call use_var(g,vevar)
        call cross_var(g,vevar)
     endif
-    if(.not.pm_fast_isnull(keys)) then
-       do i=0,pm_fast_esize(keys)
-          call use_var(g,keys%data%i(keys%offset+i))
-       enddo
-    endif
     if(pvar/=-1) call use_var(g,pvar)
+    if(keys/=-1) call use_var(g,keys)
     if(size(g%codes)>0) call gen_var_block(g,comp_op_start)
     if(rvar/=-1) call use_var(g,rvar)
 
@@ -390,7 +382,7 @@ contains
     endif
     if(iand(int(taint%offset),proc_is_recursive)/=0) &
          call out_str(g,'RECURSIVE ')
-    if(iand(int(taint%offset),proc_is_impure)==0) &
+    if(iand(int(taint%offset),proc_is_impure)==0.and..not.keys>0) &
          call out_str(g,'PURE ')
     call out_str(g,'SUBROUTINE PM__P')
     call out_idx(g,no)
@@ -408,13 +400,11 @@ contains
     if(rvar/=-1) then
        call out_param(g,rvar)
     endif
-    if(.not.pm_fast_isnull(keys)) then
-       do i=0,pm_fast_esize(keys)
-          call out_param(g,keys%data%i(keys%offset+i))
-       enddo
-    endif
     if(pvar/=-1) then
        call out_param(g,pvar)
+    endif
+    if(keys/=-1) then
+       call out_param(g,keys)
     endif
     call out_close(g)
     call out_new_line(g)
@@ -576,7 +566,7 @@ contains
     case(v_is_sub,v_is_vsub)
        call create_var(g,g_v1(g,var),modify)
        call create_var(g,g_v2(g,var),modify)
-    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped,v_is_keyarg)
        call create_var(g,g_v1(g,var),modify)
     case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
        continue
@@ -782,7 +772,7 @@ contains
     case(v_is_sub,v_is_vsub)
        call record_var_access(g,g_v1(g,var),mode)
        call record_var_access(g,g_v2(g,var),mode)
-    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped,v_is_keyarg)
        call record_var_access(g,g_v1(g,var),mode)
     case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
        continue
@@ -1941,7 +1931,7 @@ contains
     case(v_is_sub,v_is_vsub)
        call use_var(g,g_v1(g,var),isassign)
        call use_var(g,g_v2(g,var),isassign)
-    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped,v_is_keyarg)
        call use_var(g,g_v1(g,var),isassign)
     case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
        continue
@@ -1961,7 +1951,7 @@ contains
              call use_var(g,g_v1(g,var))
           endif
           flags=g%vardata(i)%flags
-          if(iand(g%taints,proc_is_comm)/=0.and.&
+          if(iand(g%taints,proccall_is_comm)/=0.and.&
                iand(flags,v_is_param+v_is_result)/=0) then
              if(iand(flags,v_is_shared)/=0) then
                 g%vardata(i)%state=var_state_used
@@ -2067,7 +2057,7 @@ contains
     case(v_is_sub,v_is_vsub)
        call cross_var(g,g_v1(g,var))
        call cross_var(g,g_v2(g,var))
-    case(v_is_elem,v_is_unit_elem)
+    case(v_is_elem,v_is_unit_elem,v_is_keyarg)
        call cross_var(g,g_v1(g,var))
     case(v_is_alias)
        call cross_var(g,g_v1(g,var))
@@ -2554,6 +2544,21 @@ contains
        enddo
        call out_close(g)
        call out_new_line(g)
+    case(op_get_key)
+       call out_str(g,'IF(PRESENT(')
+       call out_arg(g,g%codes(a+3),0)
+       call out_line(g,')) THEN')
+       call out_arg(g,g%codes(a+2),0)
+       call out_str(g,'=>')
+       call out_arg(g,g%codes(a+3),0)
+       call out_new_line(g)
+       call out_line(g,'ELSE')
+       call gen_block(g,g%codes(a+1))
+       call out_arg(g,g%codes(a+2),0)
+       call out_str(g,'=>')
+       call out_arg(g,g%codes(a+4),0)
+       call out_new_line(g)
+       call out_line(g,'ENDIF')
     case(op_comm_loop,op_comm_loop_par)
        call gen_loop(g,l,.true.)
        need_endif=.false.
@@ -5524,7 +5529,7 @@ contains
          call outpack(pm_tv_arg(tv,1),varname//'%E1%P(IP'//trim(ibuffer)//')',depth+1)
          call out_line(g,'ENDDO')
          call outpack(pm_tv_arg(tv,2),varname//'%E2',depth)
-      case(pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
+      case(pm_type_is_rec,pm_type_is_dref)
          do i=1,pm_tv_numargs(tv)
             write(ibuffer,'(i5)') i
             call outpack(pm_tv_arg(tv,i),varname//'%E'//trim(adjustl(ibuffer)),depth)
@@ -5556,7 +5561,7 @@ contains
             enddo
          endif
          call out_line(g,'END SELECT')
-      case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
+      case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_literal_value,pm_type_is_fix_value)
          continue
       case(pm_type_is_all,pm_type_is_par_kind,&
          pm_type_is_vect)
@@ -5611,7 +5616,7 @@ contains
             enddo
          endif
       case(pm_type_is_array,&
-           pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
+           pm_type_is_rec,pm_type_is_dref)
          do i=1,pm_tv_numargs(tv)
             call declare_poly_vars(pm_tv_arg(tv,i))
          enddo
@@ -5651,7 +5656,7 @@ contains
          call outunpack(pm_tv_arg(tv,1),varname//'%E1%P(IP'//trim(ibuffer)//')',depth+1)
          call out_line(g,'ENDDO')
          call outunpack(pm_tv_arg(tv,2),varname//'%E2',depth)
-      case(pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
+      case(pm_type_is_rec,pm_type_is_dref)
          do i=1,pm_tv_numargs(tv)
             write(ibuffer,'(i5)') i
             call outunpack(pm_tv_arg(tv,i),varname//'%E'//trim(adjustl(ibuffer)),depth)
@@ -5680,7 +5685,7 @@ contains
             enddo
          endif
          call out_line(g,'END SELECT')
-      case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
+      case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_literal_value,pm_type_is_fix_value)
          continue
       case(pm_type_is_all,pm_type_is_par_kind,&
            pm_type_is_vect)
@@ -5754,14 +5759,14 @@ contains
           has_depth=.true.
        endif
        counts(pm_long)=counts(pm_long)+1
-    case(pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
+    case(pm_type_is_rec,pm_type_is_dref)
        do i=1,pm_tv_numargs(tv)
           call precount(g,pm_tv_arg(tv,i),counts,has_depth)
        enddo
     case(pm_type_is_poly)
        counts(pm_int)=counts(pm_int)+1
        has_depth=.true.
-    case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
+    case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_literal_value,pm_type_is_fix_value)
        continue
     case default
        call pm_panic("precount")
@@ -5850,12 +5855,12 @@ contains
           enddo
        endif
        call out_line(g,'END SELECT')
-    case(pm_type_is_struct,pm_type_is_rec,pm_type_is_dref)
+    case(pm_type_is_rec,pm_type_is_dref)
        do i=1,pm_tv_numargs(tv)
           write(ibuffer,'(i5)') i
           call outcount(g,pm_tv_arg(tv,i),varname//'%E'//trim(adjustl(ibuffer)),depth)
        enddo
-    case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_value)
+    case(pm_type_is_single_name,pm_type_is_proc,pm_type_is_literal_value,pm_type_is_fix_value)
        continue
     case(pm_type_is_all,pm_type_is_par_kind,&
          pm_type_is_vect)
@@ -6022,8 +6027,6 @@ contains
           call out_str(g,',INTENT(OUT)')
        endif
     endif
-
-    if(iand(flags,v_is_key)/=0) call out_str(g,',OPTIONAL')
  
     if(isvect) then
        if(iand(flags,v_is_array_par_vect+v_is_array_par_dom)/=0) then
@@ -6175,7 +6178,7 @@ contains
        do i=1,n
           call out_alloc_var(g,g_ptr(g,var,i),nc)
        enddo
-    case(v_is_sub,v_is_vsub,v_is_elem,v_is_unit_elem)
+    case(v_is_sub,v_is_vsub,v_is_elem,v_is_unit_elem,v_is_keyarg)
        write(*,*) 'v_',var
        call pm_panic('out_alloc_var')
     case(v_is_cove)
@@ -6365,6 +6368,8 @@ contains
        call out_call_arg(g,g_v1(g,var),ior(opts,arg_wrapped))
     case(v_is_alias)
        call out_call_arg(g,g_v1(g,var),opts)
+    case(v_is_keyarg)
+       call out_arg(g,g_v1(g,var),opts)
     case default
        tno=g_type(g,var)
        if(pm_type_kind(g%context,tno)==pm_type_is_array) then
@@ -6391,7 +6396,7 @@ contains
   recursive subroutine out_dref_vect_arg(g,var,tno,opts)
     type(gen_state):: g
     integer,intent(in):: var,tno,opts
-    if(pm_type_get_mode(g%context,tno)>=sym_mirrored) then
+    if(pm_type_get_mode(g%context,tno)>=sym_uniform) then
        call out_call_arg(g,var,opts)
     else
        call out_call_arg(g,var,ior(opts,arg_wrapped))
@@ -6463,6 +6468,9 @@ contains
        call out_elem(g,g_v1(g,var),g_v2(g,var),opts)
     case(v_is_unit_elem)
        call out_arg(g,g_v1(g,var),opts)
+!!$    case(v_is_keyarg)
+!!$       i=1
+!!$       call out_key_arg(g_v1(g,var),g_v2(g,var),opts,i)
     case(v_is_chan_vect)
        call out_arg(g,g_v1(g,var),ior(opts,arg_chan))
     case(v_is_const)
@@ -6553,7 +6561,7 @@ contains
   subroutine out_const(g,v)
     type(gen_state):: g
     type(pm_ptr),intent(in):: v
-    character(len=max_line):: buffer
+    character(len=ftn_max_line):: buffer
     integer:: vk,i,n
     buffer=' '
     vk=pm_fast_vkind(v)
@@ -6814,7 +6822,7 @@ contains
     j=add_to_root_set(tno)
     tv=pm_type_vect(g%context,tno)
     select case(pm_tv_kind(tv))
-    case(pm_type_is_struct,pm_type_is_rec)
+    case(pm_type_is_rec)
        do i=1,pm_tv_numargs(tv)
           j=add_mpi_type(g,pm_tv_arg(tv,i))
        enddo
@@ -7542,5 +7550,13 @@ contains
   subroutine finalise_par(context)
     type(pm_context),pointer:: context
   end subroutine finalise_par
+
+  !===============================================
+  ! Placefiller - not needed for compiler
+  !================================================
+  subroutine pm_run_prog(context,funcs)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: funcs
+  end subroutine pm_run_prog
   
 end module pm_backend

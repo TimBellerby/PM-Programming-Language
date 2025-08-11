@@ -145,6 +145,7 @@ module pm_cnodes
   integer,parameter:: var_is_maybe_not_private=4096
   integer,parameter:: var_is_where=8192
   integer,parameter:: var_is_reference=16384
+  integer,parameter:: var_is_key_ptr=32768
 
   ! Offsets into proc & builtin nodes
   integer,parameter:: pr_ptype=cnode_args+0
