@@ -178,6 +178,7 @@ module pm_backend
   integer,parameter:: arg_comm_arg=4
   integer,parameter:: arg_wrapped=8
   integer,parameter:: arg_chan=16
+  integer,parameter:: arg_no_lit=32
  
   ! Type of pack routine (for g_add_packable)
   integer,parameter:: pack_scalar=0
@@ -566,14 +567,14 @@ contains
     case(v_is_sub,v_is_vsub)
        call create_var(g,g_v1(g,var),modify)
        call create_var(g,g_v2(g,var),modify)
-    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped,v_is_keyarg)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
        call create_var(g,g_v1(g,var),modify)
     case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
        continue
     case(v_is_cove)
        call create_var(g,g_v2(g,var),modify)
        g%varindex(var)=g%varindex(g_v2(g,var))
-    case(v_is_alias)
+    case(v_is_alias,v_is_pointer)
        call create_var(g,g_v1(g,var),modify)
        g%varindex(var)=g%varindex(g_v1(g,var))
     case(v_is_chan_vect)
@@ -769,10 +770,10 @@ contains
        do i=1,g_v1(g,var)
           call record_var_access(g,g_ptr(g,var,i),mode)
        enddo
-    case(v_is_sub,v_is_vsub)
+    case(v_is_sub,v_is_vsub,v_is_pointer)
        call record_var_access(g,g_v1(g,var),mode)
        call record_var_access(g,g_v2(g,var),mode)
-    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped,v_is_keyarg)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
        call record_var_access(g,g_v1(g,var),mode)
     case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
        continue
@@ -1928,10 +1929,10 @@ contains
        do i=1,g_v1(g,var)
           call use_var(g,g_ptr(g,var,i),isassign)
        enddo
-    case(v_is_sub,v_is_vsub)
+    case(v_is_sub,v_is_vsub,v_is_pointer)
        call use_var(g,g_v1(g,var),isassign)
        call use_var(g,g_v2(g,var),isassign)
-    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped,v_is_keyarg)
+    case(v_is_elem,v_is_unit_elem,v_is_vect_wrapped)
        call use_var(g,g_v1(g,var),isassign)
     case(v_is_const,v_is_ctime_const,v_is_parstmt_ve)
        continue
@@ -2054,10 +2055,10 @@ contains
        do i=1,g_v1(g,var)
           call cross_var(g,g_ptr(g,var,i))
        enddo
-    case(v_is_sub,v_is_vsub)
+    case(v_is_sub,v_is_vsub,v_is_pointer)
        call cross_var(g,g_v1(g,var))
        call cross_var(g,g_v2(g,var))
-    case(v_is_elem,v_is_unit_elem,v_is_keyarg)
+    case(v_is_elem,v_is_unit_elem)
        call cross_var(g,g_v1(g,var))
     case(v_is_alias)
        call cross_var(g,g_v1(g,var))
@@ -2183,7 +2184,7 @@ contains
     integer(pm_ln):: j
     integer:: key(3)
     if(debug_g) write(*,*) 'Allocate ',v
-    if(iand(g%vardata(v)%flags,v_is_param+v_is_chan+v_is_result+v_is_shared)==0) then
+    if(iand(g%vardata(v)%flags,v_is_param+v_is_chan+v_is_result+v_is_shared+v_is_target+v_is_ptr)==0) then
        isvect=merge(2,1,g_var_at_index_is_a_vect(g,v))
        tno=g%vardata(v)%tno
        if(tno<pm_int) then
@@ -2278,8 +2279,8 @@ contains
     if(g%vardata(e)%finish==i.and.&
          g%vardata(v)%start==i.and.&
          g%vardata(e)%finish_on_assign.and.&
-         iand(g%vardata(v)%flags,v_is_param+v_is_chan+v_is_result+v_is_shared)==0.and.&
-         iand(g%vardata(e)%flags,v_is_param+v_is_chan+v_is_result+v_is_shared)==0.and.&
+         iand(g%vardata(v)%flags,v_is_param+v_is_chan+v_is_result+v_is_shared+v_is_target+v_is_ptr)==0.and.&
+         iand(g%vardata(e)%flags,v_is_param+v_is_chan+v_is_result+v_is_shared+v_is_target+v_is_ptr)==0.and.&
          g%vardata(v)%tno==g%vardata(e)%tno) then
        if(g%vardata(e)%index==0.or.&
             (g_var_at_index_is_a_vect(g,v).neqv.g_var_at_index_is_a_vect(g,e))) then
@@ -2625,7 +2626,7 @@ contains
        else
           call out_simple(g,'$1=SIZE($2%E1%P)',l)
        endif
-    case(op_dref,op_init_var)
+    case(op_dref,op_init_var,op_must_compute)
        ! This does not generate code
        ! - just present for Phase I
        continue
@@ -2894,6 +2895,8 @@ contains
                   merge('Y','N',g_vars_are_merged(g,g%codes(a+1),g%codes(a+2))))
           endif
        endif
+    case(op_assign_ptr)
+       call out_simple_scalar(g,'$1=>$2',l)
     case(op_init_farray)
        if(pm_opts%ftn_annotate) then
           call out_comment_line(g,'! INIT FARRAY')
@@ -4512,7 +4515,7 @@ contains
           endif
           call out_line(g,'IF(LNEW) CALL MPI_TYPE_FREE(JTYPE,JERRNO)')
        endif
-    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped)
+    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped,v_is_pointer)
        call gen_mpi_send(g,g_v1(g,v),tag,s,merge(mode_vect,mode,k==v_is_chan_vect),comm)
     case default
        write(*,*) 'v=',v,'k=',k
@@ -4664,7 +4667,7 @@ contains
              call out_line(g,'IF(LNEW) CALL MPI_TYPE_FREE(JTYPE,JERRNO)')
           endif
        endif
-    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped)
+    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped,v_is_pointer)
        call gen_mpi_recv(g,g_v1(g,v),tag,s,mode,rest,comm)
     case default
        write(*,*) 'v=',v,'k=',k
@@ -4779,7 +4782,7 @@ contains
              call out_line(g,'IF(LNEW) CALL MPI_TYPE_FREE(JTYPE,JERRNO)')
           endif
        endif
-    case(v_is_alias)
+    case(v_is_alias,v_is_pointer)
        call gen_mpi_bcast(g,g_v1(g,v))
     case default
        call pm_panic('problem var in gen_mpi_bcast')
@@ -4907,7 +4910,7 @@ contains
                   ',PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM,JERRNO)')
           endif
        endif
-    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped)
+    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped,v_is_pointer)
        call gen_mpi_send_part(g,g_v1(g,v),tag,s,dv,dv1,dv2,mode,dvv)
     case default
        write(*,*) 'v=',v,'k=',k
@@ -4995,7 +4998,7 @@ contains
              endif
           endif
        endif
-    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped)
+    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped,v_is_pointer)
        call gen_mpi_recv_part(g,g_v1(g,v),tag,s,rest,dv,dv1,dv2,mode,dvv)
     case default
        write(*,*) 'v=',v,'k=',k
@@ -5078,7 +5081,7 @@ contains
                   'PM__NODE_FRAME(PM__NODE_DEPTH)%THIS_COMM,JERRNO)')
           endif
        endif
-    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped)
+    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped,v_is_pointer)
        call gen_mpi_bcast_part(g,g_v1(g,v),isshared,dv,dv1,dv2,mode,dvv)
     case default 
        call pm_panic('problem var in gen_mpi_bcast_disp')
@@ -6027,6 +6030,14 @@ contains
           call out_str(g,',INTENT(OUT)')
        endif
     endif
+
+    if(iand(flags,v_is_ptr)/=0) then
+       call out_str(g,',POINTER')
+    endif
+
+    if(iand(flags,v_is_target)/=0) then
+       call out_str(g,',TARGET')
+    endif
  
     if(isvect) then
        if(iand(flags,v_is_array_par_vect+v_is_array_par_dom)/=0) then
@@ -6038,14 +6049,19 @@ contains
              call out_str(g,',DIMENSION(N1)')
           endif
        else
-          call out_str(g,',ALLOCATABLE,DIMENSION(:)')
+          if(iand(flags,v_is_ptr)/=0) then
+             call out_str(g,',DIMENSION(:)')
+          else
+             call out_str(g,',ALLOCATABLE,DIMENSION(:)')
+          endif
        endif
     endif
     
     call out_str(g,'::')
     call out_var_name_at_index(g,i)
 
-    call out_str(g,'    ! '//trim(pm_type_as_string(g%context,g%vardata(i)%tno)))
+    call out_str(g,'    ! '//trim(pm_type_as_string(g%context,g%vardata(i)%tno))//&
+         ' '//trim(pm_int_as_string(oindex)))
 
     if(pm_opts%ftn_annotate) then
        call out_simple_part(g,'  idx=$N', n=oindex)
@@ -6178,12 +6194,12 @@ contains
        do i=1,n
           call out_alloc_var(g,g_ptr(g,var,i),nc)
        enddo
-    case(v_is_sub,v_is_vsub,v_is_elem,v_is_unit_elem,v_is_keyarg)
+    case(v_is_sub,v_is_vsub,v_is_elem,v_is_unit_elem)
        write(*,*) 'v_',var
        call pm_panic('out_alloc_var')
     case(v_is_cove)
        call out_alloc_var(g,g_v2(g,var),nc)
-    case(v_is_alias)
+    case(v_is_alias,v_is_pointer)
        call out_alloc_var(g,g_v1(g,var),nc)
     case(v_is_const,v_is_ctime_const)
        continue
@@ -6331,24 +6347,12 @@ contains
           call out_arg(g,g_ptr(g,var,1),opts)
           call out_comma(g)
           call out_arg(g,g_ptr(g,var,2),opts)
-       case(v_is_dref,v_is_shared_dref)
+       case(v_is_dref,v_is_shared_dref,v_is_list)
           n=g_v1(g,var)
-          if(iand(opts,arg_wrapped)/=0) then
-             tv=pm_type_vect(g%context,g_type(g,var))
-             call out_dref_vect_arg(g,g_ptr(g,var,1),pm_tv_arg(tv,1),opts)
-             call out_comma(g)
-             call out_call_arg(g,g_ptr(g,var,2),opts)
-             call out_comma(g)
-             do i=3,n
-                call  out_dref_vect_arg(g,g_ptr(g,var,i),pm_tv_arg(tv,i),opts)
-                if(i/=n) call out_comma(g)
-             enddo
-          else
-             do i=1,n
-                call out_call_arg(g,g_ptr(g,var,i),opts)
-                if(i/=n) call out_comma(g)
-             enddo
-          end if
+          do i=1,n
+             call out_call_arg(g,g_ptr(g,var,i),ior(opts,arg_no_lit))
+             if(i/=n) call out_comma(g)
+          enddo
        case default
           n=g_v1(g,var)
           do i=1,n
@@ -6366,10 +6370,8 @@ contains
        endif
     case(v_is_vect_wrapped)
        call out_call_arg(g,g_v1(g,var),ior(opts,arg_wrapped))
-    case(v_is_alias)
+    case(v_is_alias,v_is_pointer)
        call out_call_arg(g,g_v1(g,var),opts)
-    case(v_is_keyarg)
-       call out_arg(g,g_v1(g,var),opts)
     case default
        tno=g_type(g,var)
        if(pm_type_kind(g%context,tno)==pm_type_is_array) then
@@ -6421,7 +6423,7 @@ contains
           call out_param(g,g_ptr(g,var,i))
           call out_comma(g)
        enddo
-    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped)
+    case(v_is_alias,v_is_chan_vect,v_is_vect_wrapped,v_is_pointer)
        call out_param(g,g_v1(g,var))
     case(v_is_ctime_const)
        continue
@@ -6438,18 +6440,25 @@ contains
   !     arg_no_index  Do not index vectors
   !     arg_ix_index  Index vectors with IX
   !     arg_wrapped   Argument is wrapped vector
+  !     arg_no_lit    Do not output literals
   !================================================
   recursive subroutine out_arg(g,avar,opts)
     type(gen_state):: g
     integer,intent(in):: avar,opts
-    integer:: var,i,n,k
+    integer:: var,i,n,k,gk,aopts
     var=abs(avar)
     k=g_kind(g,var)
     select case(k)
     case(v_is_group)
        n=g_v1(g,var)
+       gk=g_v2(g,var)
+       if(gk==v_is_dref) then
+          aopts=ior(aopts,arg_no_lit)
+       else
+          aopts=opts
+       endif
        do i=1,n
-          call out_arg(g,g_ptr(g,var,i),opts)
+          call out_arg(g,g_ptr(g,var,i),aopts)
           if(i/=n) call out_comma(g)
        enddo
     case(v_is_sub)
@@ -6468,18 +6477,19 @@ contains
        call out_elem(g,g_v1(g,var),g_v2(g,var),opts)
     case(v_is_unit_elem)
        call out_arg(g,g_v1(g,var),opts)
-!!$    case(v_is_keyarg)
-!!$       i=1
-!!$       call out_key_arg(g_v1(g,var),g_v2(g,var),opts,i)
     case(v_is_chan_vect)
        call out_arg(g,g_v1(g,var),ior(opts,arg_chan))
     case(v_is_const)
-       call out_const(g,g%fn%data%ptr(g%fn%offset+2+g_v1(g,var)))
+       if(iand(opts,arg_no_lit)==0) then
+          call out_const(g,g%fn%data%ptr(g%fn%offset+2+g_v1(g,var)))
+       endif
     case(v_is_ctime_const)
-       call out_const(g,g%fn%data%ptr(g%fn%offset+2+g_v1(g,var)))
+       if(iand(opts,arg_no_lit)==0) then
+          call out_const(g,g%fn%data%ptr(g%fn%offset+2+g_v1(g,var)))
+       endif
     case(v_is_cove)
        call out_arg(g,g_v2(g,var),opts)
-    case(v_is_alias)
+    case(v_is_alias,v_is_pointer)
        call out_arg(g,g_v1(g,var),opts)
     case default
        call out_arg_name(g,var,opts)
@@ -6609,7 +6619,7 @@ contains
        n=pm_fast_esize(v)
        g%linebuffer(g%n+1:g%n+12)='PM__STRVAL("'
        g%n=g%n+12
-       do i=0,n-1
+       do i=0,n
           if(g%n>ftn_max_line-5) call out_line_break(g)
           g%n=g%n+1
           g%linebuffer(g%n:g%n)=v%data%s(v%offset+i)
@@ -7297,7 +7307,7 @@ contains
       integer:: i
       select case(g_kind(g,n))
       case(v_is_alias,v_is_elem,v_is_chan_vect,&
-           v_is_unit_elem,v_is_vect_wrapped)
+           v_is_unit_elem,v_is_vect_wrapped,v_is_pointer)
          depth=get_depth(g_v1(g,n))
       case(v_is_sub,v_is_vsub)
          depth=max(get_depth(g_v1(g,n)),get_depth(g_v2(g,n)))
@@ -7326,7 +7336,7 @@ contains
     n=abs(v)
     select case(g_kind(g,n))
     case(v_is_alias,v_is_elem,v_is_chan_vect,&
-         v_is_unit_elem,v_is_vect_wrapped)
+         v_is_unit_elem,v_is_vect_wrapped,v_is_pointer)
        ok=g_is_shared(g,g_v1(g,n))
     case(v_is_sub,v_is_vsub)
        ok=g_is_shared(g,g_v1(g,n)).and.g_is_shared(g,g_v2(g,n))

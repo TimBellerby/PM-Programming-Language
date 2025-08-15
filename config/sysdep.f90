@@ -76,6 +76,7 @@ module pm_sysdep
   integer,parameter:: pm_default_ftn_dims=15
   logical,parameter:: pm_default_ftn_has_contiguous=.true.
   integer,parameter:: pm_default_ftn_lines=255
+  logical,parameter:: pm_default_ftn_nonptr_arg=.false.
   integer,parameter:: pm_default_ftn_max_stack_array=10*1024*1024
 
 

@@ -2610,6 +2610,7 @@ contains
           else
              etype=pm_type_arg(context,tno,offset)
           endif
+          if(tk==pm_type_is_dref) offset=offset-1
           return
        else
           offset=0

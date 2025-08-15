@@ -197,6 +197,7 @@ module pm_cnodes
   integer(access_kind),parameter:: access_used_ever=2
   integer(access_kind),parameter:: access_used_now=4
   integer(access_kind),parameter:: access_holds_result=8
+  integer(access_kind),parameter:: access_not_passed=16
   integer(access_kind),parameter:: access_everything=&
        access_is_var+access_used_ever+access_used_now
   
@@ -501,6 +502,9 @@ contains
              call print_proc_cnode(context,iunit,cnode_arg(cnode,2),&
                   sig_cache,cnode_arg(cnode,1))
           endif
+          write(iunit,*) '   ----------------'
+          call pm_dump_tree(context,iunit,cnode_arg(cnode,6),2)
+          call pm_dump_tree(context,iunit,cnode_arg(cnode,7),2)
           write(iunit,'(a)') '}'
        case(cnode_is_callsig)
           write(iunit,'(a)') 'sig{'

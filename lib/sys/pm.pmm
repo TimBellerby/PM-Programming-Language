@@ -1821,17 +1821,19 @@ proc ==(x:<any>,y:<any>)=x inc y and y inc x
 PM__intrinsic error_type()->(=1) : "error_type"
 
 //  Debugging
-PM__intrinsic<<is_impure>> _dump(any,any): "new_dump"
+PM__intrinsic<<is_impure,prints_out>> _dump(any,any): "new_dump"
 proc PM__dump'(x)<<no_inline>>:_dump("Value:",x)
 proc PM__dump'(y,x)<<no_inline>>:if y:_dump("Value:",x)
 
-PM__intrinsic<<is_impure>> old_dump(any): "dump"
+PM__intrinsic<<is_impure,prints_out>> old_dump(any): "dump"
 proc old_dumpit(a) {
   old_dump(a)
   return a 
 }
+
+PM__intrinsic<<prints_out>> must_compute(any): "must_compute"
  
-PM__intrinsic<<is_impure>> old_dump_id(any): "dump_id"
+PM__intrinsic<<is_impure,prints_out>> old_dump_id(any): "dump_id"
 
 proc PM__filesys()=1234 {
     let junk=<PM__fix_tuple>

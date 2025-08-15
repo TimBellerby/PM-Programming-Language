@@ -4689,14 +4689,16 @@ contains
     ! Determine properties of call
     name=node_arg(node,1)
     list=node_arg(node,2)
+    nargs=node_numargs(list)
     amp=node_arg(node,3)
     keys=node_arg(node,4)
+    nkeys=0
+    if(.not.pm_fast_isnull(keys)) nkeys=node_numargs(keys)
     keynames=node_arg(node,5)
     flags=node_num_arg(node,6)
     if(node_sym(list)==sym_dotdotdot) then
        flags=ior(flags,call_is_vararg)
     endif
-    nargs=node_numargs(list)
     iscomm=iand(flags,proccall_is_comm)/=0
     isdot=iand(flags,proccall_is_ref)/=0
     
@@ -4712,6 +4714,15 @@ contains
             'Cannot call a "%" procedure outside of a parallel context: ',int(name%offset))
     endif
 
+    if(.not.amps_ok) then
+       if(iand(flags,proccall_is_yield)/=0) then
+          call code_error(coder,list,'"yield" cannot be a component of an expression')
+       elseif(.not.pm_fast_isnull(amp).and.iand(flags,proccall_is_ref)==0) then
+          call code_error(coder,list,&
+               'Call using "&" arguments cannot be a component of an expression')
+       endif
+    endif
+    
     base=coder%vtop
 
     ! write(*,*) 'AMP',pm_fast_isnull(amp),trim(pm_name_as_string(coder%context,int(name%offset)))
@@ -4722,35 +4733,29 @@ contains
           call trav_expr(coder,cblock,list,&
                node_arg(list,i))
        enddo
+       do i=1,nkeys
+          call trav_expr(coder,cblock,keys,&
+               node_arg(keys,i))
+       enddo
     else
        amps=pm_name_val(coder%context,int(amp%offset))
        flags=ior(flags,call_is_assign_call)
-       if(.not.amps_ok) then
-          if(iand(flags,proccall_is_yield)/=0) then
-             call code_error(coder,list,'"yield" cannot be a component of an expression')
-          elseif(iand(flags,proccall_is_ref)==0) then
-             call code_error(coder,list,&
-                 'Call using "&" arguments cannot be a component of an expression')
-          endif
-       endif
        call process_amp_args(list,amps)
     endif
 
+    ! Create argument list node from nkeys values on vstack
+    if(nkeys>0) then
+       call make_arglist(coder,cblock,node,nkeys,0,.false.,iscomm)
+    else
+       call code_null(coder)
+    endif
+    coder%temp2=pop_code(coder)
+    
     ! Create argument list node from nargs + nret values on vstack
     call make_arglist(coder,cblock,node,nargs,nret,.false.,iscomm,comm_args_present=.true.)
 
-    ! Keyword arguments
-    if(.not.pm_fast_isnull(keys)) then
-       nkeys=node_numargs(keys)
-       do i=1,nkeys
-          call trav_expr(coder,cblock,node,node_arg(keys,i))
-       enddo
-       call make_arglist(coder,cblock,node,nkeys,0,.false.,iscomm)
-    else
-       nkeys=0
-       call code_null(coder)
-    endif
-
+    call code_val(coder,coder%temp2)
+    
     ! Find procs with this name
     proc=pm_null_obj
     if(pm_fast_isname(name)) then
@@ -4834,10 +4839,6 @@ contains
                trim(pm_name_as_string(coder%context,int(name%offset)))
           call pm_panic('trav_call wstack mismatch')
        endif
-!!$       if(coder%top/=otop) then
-!!$          write(*,*) coder%top,'/=',otop
-!!$          call pm_panic('trav_call local stack mismatch')
-!!$       endif
     endif
 
     if(debug_codegen) then
@@ -4858,7 +4859,7 @@ contains
       type(pm_ptr),intent(in):: amp
       integer:: i,j,jj,k,sym,first_amp
       type(pm_ptr):: arg,arg2
-      logical:: aliased(nargs),xaliased(nargs,nargs),is_amp(nargs),alias,any_aliased
+      logical:: aliased(nargs+nkeys),xaliased(nargs+nkeys,nargs),is_amp(nargs),alias,any_aliased
       character(len=*),parameter:: emess='An "&" argument aliases another argument'
 
       j=0
@@ -4878,6 +4879,7 @@ contains
                      aliased(i)=.true.
                      aliased(k)=.true.
                      xaliased(k,i)=.true.
+                     any_aliased=.true.
                   endif
                endif
             enddo
@@ -4887,14 +4889,34 @@ contains
             if(sym==sym_reference.or.sym==sym_name) then
                do k=first_amp,i-1
                   if(is_amp(k)) then
-                     if(check_aliased(coder,arg,arg2,emess)) then 
+                     arg2=node_arg(list,k)
+                     if(check_aliased(coder,arg2,arg,emess)) then 
                         aliased(i)=.true.
                         aliased(k)=.true.
                         xaliased(i,k)=.true.
+                        any_aliased=.true.
                      endif
                   endif
                enddo
             endif
+         endif
+      enddo
+
+      do i=nargs+1,nargs+nkeys
+         arg=node_arg(keys,i-nargs)
+         sym=node_sym(arg)
+         if(sym==sym_reference.or.sym==sym_name) then
+            do k=first_amp,i-1
+               if(is_amp(k)) then
+                  arg2=node_arg(list,k)
+                  if(check_aliased(coder,arg,arg2,emess)) then 
+                     aliased(i)=.true.
+                     aliased(k)=.true.
+                     xaliased(i,k)=.true.
+                     any_aliased=.true.
+                  endif
+               endif
+            enddo
          endif
       enddo
 
@@ -4906,6 +4928,15 @@ contains
             elseif(is_amp(i)) then
                call trav_reference(coder,cblock,node,arg,.true.,.true.,.false.)
                call code_null(coder)
+            else
+               call trav_expr(coder,cblock,node,arg)
+               call code_null(coder)
+            endif
+         enddo
+         do i=1,nkeys
+            arg=node_arg(keys,i)
+            if(aliased(i+nargs)) then
+               call trav_reference(coder,cblock,node,arg,.false.,.true.,.true.)
             else
                call trav_expr(coder,cblock,node,arg)
                call code_null(coder)
@@ -4923,12 +4954,20 @@ contains
                      endif
                   endif
                enddo
+               do j=nargs+1,nkeys
+                  if(xaliased(k,j)) then
+                     call code_val(coder,coder%vstack(base+i*2-1))
+                     call code_val(coder,coder%vstack(base+j*2-1))
+                     call make_sys_call(coder,cblock,node_arg(node,i),&
+                          sym_check_alias,2,0)
+                  endif
+               enddo
             endif
          enddo
-         do i=1,nargs
+         do i=1,nargs+nkeys
             coder%vstack(base+i)=coder%vstack(base+2*i)
          enddo
-         coder%vtop=coder%vtop-nargs
+         coder%vtop=coder%vtop-nargs-nkeys
       else
          do i=1,nargs
             arg=node_arg(node,i)
@@ -4937,6 +4976,9 @@ contains
             else
                call trav_expr(coder,cblock,node,arg)
             endif
+         enddo
+         do i=1,nkeys
+            call trav_expr(coder,cblock,node,node_arg(keys,i))
          enddo
       endif
     end subroutine process_amp_args

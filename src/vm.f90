@@ -1266,6 +1266,8 @@ contains
           call mesg_q_print_str(context,&
                '=================================================================')
        endif
+    case(op_must_compute)
+       continue
     case(op_concat)
        newve=shrink_ve(context,ve,esize)
        call set_arg(2,vector_concat_string(context,newve,&
@@ -1276,7 +1278,7 @@ contains
        errno=0
        call vector_assign(context,arg(2),arg(3),ve,errno,esize)
        if(errno/=0) goto 997
-    case(op_struct,op_rec)
+    case(op_rec)
        v=pm_fast_newusr(context,pm_rec_type,int(nargs,pm_p))
        call set_arg(2,v)
        v%data%ptr(v%offset+1_pm_p)=&
@@ -1378,13 +1380,12 @@ contains
        else
           call set_arg(2,arg(3))
        endif
-
     case(op_dref)
-       v=pm_fast_newusr(context,&
-            merge(pm_dref_type,pm_dref_shared_type,opcode2==0),&
-            int(6,pm_p))
-       v%data%ptr(v%offset+1:v%offset+nargs-2)=arg(3:nargs)
+       v=pm_fast_newusr(context,pm_dref_type,int(nargs,pm_p))
        call set_arg(2,v)
+       v%data%ptr(v%offset+1_pm_p)=&
+            pm_fast_tinyint(context,opcode2)
+       v%data%ptr(v%offset+2:v%offset+nargs-1)=arg(3:nargs)
     case(op_import_dref)
        call set_arg(2,&
             copy_dref(context,arg(3),esize+1,.true.,arg(1)))

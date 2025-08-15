@@ -61,6 +61,7 @@ module pm_options
      integer:: ftn_dims
      integer:: ftn_lines
      logical:: ftn_contig
+     logical:: ftn_nonptr_arg
      integer(pm_ln):: ftn_max_stack_array
      logical:: ftn_comment_lines
      logical:: ftn_comment_ops
@@ -115,6 +116,7 @@ contains
     pm_opts%ftn_lines=pm_default_ftn_lines
     pm_opts%ftn_max_stack_array=pm_default_ftn_max_stack_array
     pm_opts%ftn_contig=pm_default_ftn_has_contiguous
+    pm_opts%ftn_nonptr_arg=pm_default_ftn_nonptr_arg
     pm_opts%ftn_comment_lines=.false.
     pm_opts%ftn_comment_ops=.false.
     pm_opts%ftn_annotate=.false.
@@ -227,6 +229,8 @@ contains
           write(*,*) '                 Maximum size (n) of array that can be stored on the stack'
           write(*,*) '  -ftn-max-lines=n'
           write(*,*) '                 Maximum number of continuation lines'
+          write(*,*) '  -ftn-nonptr-args'
+          write(*,*) '                 Can associate TARGET variables with POINTER parameters'
           write(*,*) '  -ftn-comment-lines'
           write(*,*) '                 Comment Fortran code with source lines'
           write(*,*) '  -ftn-comment-ops'
@@ -356,6 +360,10 @@ contains
                 pm_opts%ftn_contig=.true.
              elseif(arg=='-ftn-no-contig') then
                 pm_opts%ftn_contig=.false.
+             elseif(arg=='-ftn-ptr-arg') then
+                pm_opts%ftn_nonptr_arg=.false.
+             elseif(arg=='-ftn-nonptr-arg') then
+                pm_opts%ftn_nonptr_arg=.true.
              elseif(arg=='-ftn-comment-lines') then
                 pm_opts%ftn_comment_lines=.true.
              elseif(arg=='-ftn-comment-ops') then

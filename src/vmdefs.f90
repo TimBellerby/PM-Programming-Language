@@ -162,8 +162,9 @@ module pm_vmdefs
   integer,parameter:: op_new_dump = op_misc3 + 19
   integer,parameter:: op_show = op_misc3 + 20
   integer,parameter:: op_show_stack = op_misc3 + 21
+  integer,parameter:: op_must_compute = op_misc3 + 22
 
-  integer,parameter:: op_comm = op_show_stack + 1
+  integer,parameter:: op_comm = op_must_compute + 1
 
   integer,parameter:: op_this_node = op_comm + 0
   integer,parameter:: op_this_nnode = op_comm + 1
@@ -244,7 +245,8 @@ module pm_vmdefs
   integer,parameter:: op_assign = first_assign_op + 7
   integer,parameter:: op_fill = first_assign_op + 8
   integer,parameter:: op_number = first_assign_op + 9
-  integer,parameter:: last_assign_op = first_assign_op+9
+  integer,parameter:: op_assign_ptr = first_assign_op + 10
+  integer,parameter:: last_assign_op = first_assign_op+19
 
   integer,parameter:: op_eq = last_assign_op +1
   integer,parameter:: op_ne = last_assign_op +2
@@ -741,7 +743,8 @@ module pm_vmdefs
   integer,parameter:: first_fold=-32
   integer,parameter:: op_clone_var = -33
   integer,parameter:: op_error_type = -34
-  integer,parameter:: min_op=op_error_type
+  integer,parameter:: op_noop = -35
+  integer,parameter:: min_op=op_noop
  
   integer,dimension(0:num_op):: op_flags
   integer,parameter:: op_is_call=1
@@ -883,6 +886,7 @@ module pm_vmdefs
   data op_flags(op_new_dump)        /0/
   data op_flags(op_show)            /0/
   data op_flags(op_show_stack)      /0/
+  data op_flags(op_must_compute)    /op_prints_out/
 
   data op_flags(op_this_node)       /0/
   data op_flags(op_this_nnode)      /0/
@@ -962,6 +966,7 @@ module pm_vmdefs
   data op_flags(op_assign)           /0/
   data op_flags(op_fill)             /0/
   data op_flags(op_number)           /0/
+  data op_flags(op_assign_ptr)       /0/
 
   data op_flags(op_eq)               /op_is_arith/
   data op_flags(op_ne)               /op_is_arith/
@@ -1431,7 +1436,7 @@ module pm_vmdefs
   integer,parameter:: v_is_chan_vect=13
   integer,parameter:: v_is_unit_elem=14
   integer,parameter:: v_is_vect_wrapped=15
-  integer,parameter:: v_is_keyarg=16
+  integer,parameter:: v_is_pointer=16
 
   integer,parameter:: cvar_flag_mask=31
   integer,parameter:: cvar_flag_mult=cvar_flag_mask+1
@@ -1452,8 +1457,9 @@ module pm_vmdefs
   integer,parameter:: v_is_array_par_vect=2048
   integer,parameter:: v_is_array_par_dom=4096
   integer,parameter:: v_is_farray=8192
-  integer,parameter:: v_is_key_ptr=16384
-  integer,parameter:: v_extra_flags=32768
+  integer,parameter:: v_is_ptr=16384
+  integer,parameter:: v_is_target=32768
+  integer,parameter:: v_extra_flags=65536
  
   ! Variable group types (compiling only)
   integer,parameter:: v_is_var_array=0
@@ -1463,6 +1469,7 @@ module pm_vmdefs
   integer,parameter:: v_is_shared_dref=4
   integer,parameter:: v_is_storageless=5
   integer,parameter:: v_is_tuple=6
+  integer,parameter:: v_is_list=7
 
   ! Variable access flags
   integer,parameter:: acc_read=1
@@ -1590,6 +1597,7 @@ contains
     op_names(op_new_dump)='new_dump'
     op_names(op_show)='show'
     op_names(op_show_stack)='show_stack'
+    op_names(op_must_compute)='must_compute'
 
     op_names(op_this_node)='this_node'
     op_names(op_this_nnode)='this_nnode'
@@ -1669,6 +1677,7 @@ contains
     op_names(op_assign)='assign'
     op_names(op_fill)='fill'
     op_names(op_number)='number'
+    op_names(op_assign_ptr)='assign_ptr'
 
     op_names(op_eq)='eq'
     op_names(op_ne)='ne'
@@ -2139,6 +2148,7 @@ contains
     op_names(op_same_rec_fold)='same_rec_fold'
     op_names(op_clone_var)='clone_var'
     op_names(op_error_type)='error_type'
+    op_names(op_noop)='noop'
      
 !!$    do i=op_call,op_comm_loop_par
 !!$       if(op_names(i)=='??')then
@@ -2494,7 +2504,7 @@ contains
       case(v_is_undef)
          call append('??')
       case(v_is_basic)
-         is_shared=iand(v2,v_is_shared)/=0
+         is_shared=iand(v2,v_is_target)/=0
          if(v1/=0) then
             if(.not.append_if_name(trim(pm_name_as_string(context,v1))//&
                  merge('!','#',is_shared)//&
@@ -2516,6 +2526,12 @@ contains
          call append('[:')
          call printv(v2,.false.)
          call append(']')
+      case(v_is_pointer)
+         call append('^'//trim(pm_int_as_string(index))//'(')
+         call printv(v1,.false.)
+         call append(',')
+         call printv(v2,.false.)
+         call append(')')
       case(v_is_elem)
          call append('(')
          call printv(v1,.true.)
@@ -2556,9 +2572,6 @@ contains
       case(v_is_vect_wrapped)
          call append('%')
          call printv(v1,.false.)
-      case(v_is_keyarg)
-         call append(trim(pm_name_as_string(context,v2))//'=')
-         call printv(v1,.false.)
       case(v_is_group)
          select case(v2)
          case(v_is_var_array)
@@ -2584,6 +2597,8 @@ contains
          case(v_is_tuple)
             call group(index,v1,v2,'(',')',.true.)
             return
+         case(v_is_list)
+            call group(index,v1,v2,'PM__list(',')',.true.)
          case default
             call append('?g?'//pm_int_as_string(v2))
          end select

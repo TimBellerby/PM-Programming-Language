@@ -4110,7 +4110,7 @@ contains
        else
           write(*,*) spaces(1:depth*2),'D-ref shared ('
        endif
-       do i=1,pm_fast_esize(v)
+       do i=2,pm_fast_esize(v)
           call vector_dump(context,v%data%ptr(v%offset+i),depth+1)
        enddo
        write(*,*) spaces(1:depth*2),')'
@@ -4118,11 +4118,11 @@ contains
        tno=full_type(v)
        name=pm_type_vect(context,tno)
        if(pm_tv_kind(name)==pm_type_is_tuple) then
-          write(*,*) spaces(1:depth*2),'(:'
+          write(*,*) spaces(1:depth*2),'PM__list('
           do i=2,pm_fast_esize(v)
              call vector_dump(context,v%data%ptr(v%offset+i),depth+2)
           enddo
-          write(*,*) spaces(1:depth*2),':)'
+          write(*,*) spaces(1:depth*2),')'
        else
           name=pm_name_val(context,pm_tv_name(name))
           tno=name%data%i(name%offset)
@@ -4202,7 +4202,7 @@ contains
        else
           call output(context,spaces(1:depth*2)//'D-ref shared (')
        endif
-       do i=1,pm_fast_esize(v)
+       do i=2,pm_fast_esize(v)
           call vector_dump_to(context,v%data%ptr(v%offset+i),j,output,depth+1)
        enddo
        call output(context,spaces(1:depth*2)//')')
