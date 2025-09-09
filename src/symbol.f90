@@ -207,7 +207,8 @@ module pm_symbol
   integer,parameter:: sym_any_invar= last_decl + 34
   integer,parameter:: sym_all = last_decl + 35
   integer,parameter:: sym_sync_while = last_decl + 36
-  integer,parameter:: last_resv = sym_sync_while
+  integer,parameter:: sym_repeat = last_decl + 37
+  integer,parameter:: last_resv = sym_repeat
 
   ! Names used by internal system
   integer,parameter:: sym_pm_send = last_resv + 1
@@ -287,9 +288,13 @@ module pm_symbol
 
   ! Specialised types
   integer,parameter:: sym_literal = num_sym + 27
+  integer,parameter:: sym_integer = num_sym + 28
+  integer,parameter:: sym_real = num_sym + 29
+  integer,parameter:: sym_logical = num_sym + 30
+  integer,parameter:: sym_string_type = num_sym + 31
   
   ! Symbols used as node types (actual name not really used)
-  integer,parameter:: node0 = num_sym + 27
+  integer,parameter:: node0 = num_sym + 31
   integer,parameter:: sym_iter = node0 + 1
   integer,parameter:: sym_list = node0 + 2
   integer,parameter:: sym_builtin = node0 + 3
@@ -343,9 +348,10 @@ module pm_symbol
   integer,parameter:: sym_key = node0 + 51
   integer,parameter:: sym_reference = node0 + 52
   integer,parameter:: sym_repl_line = node0 + 53
+  integer,parameter:: sym_call = node0 + 54
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 54
+  integer,parameter:: hook = node0 + 55
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -413,7 +419,8 @@ module pm_symbol
   integer,parameter:: sym_init_const = hook + 64
   integer,parameter:: sym_print = hook + 65
   integer,parameter:: sym_fix_tuple = hook + 66
-  integer,parameter:: hook1 = hook + 66
+  integer,parameter:: sym_unbounded = hook + 67
+  integer,parameter:: hook1 = hook + 67
   
   integer,parameter:: sym_d1= hook1 + 1
   integer,parameter:: sym_d2= hook1 + 2
@@ -696,6 +703,7 @@ module pm_symbol
   data sym_names(sym_any_invar)        /'any invar'/
   data sym_names(sym_all)              /'all'/
   data sym_names(sym_sync_while)       /'sync(while)'/
+  data sym_names(sym_repeat)           /'repeat'/
   
   data sym_names(sym_pm_send)          /'PM__send'/
   data sym_names(sym_pm_recv)          /'PM__recv'/
@@ -766,6 +774,10 @@ module pm_symbol
   data sym_names(sym_proc_prints_out)       /'prints_out'/
 
   data sym_names(sym_literal)          /'literal'/
+  data sym_names(sym_integer)          /'int'/
+  data sym_names(sym_real)             /'real'/
+  data sym_names(sym_logical)          /'bool'/
+  data sym_names(sym_string_type)      /'string'/
   
   ! Symbols that are node names only
   data sym_names(sym_iter)             /'<iter>'/
@@ -823,6 +835,7 @@ module pm_symbol
   data sym_names(sym_key)              /'<key>'/
   data sym_names(sym_reference)        /'<reference>'/
   data sym_names(sym_repl_line)        /'<repl-line>'/
+  data sym_names(sym_call)             /'<call>'/
   
   ! Misc. symbols referenced by compiler
   
@@ -895,6 +908,7 @@ module pm_symbol
   data sym_names(sym_init_const)       /'PM__init_const'/
   data sym_names(sym_print)            /'print'/
   data sym_names(sym_fix_tuple)        /'PM__fix_tuple'/
+  data sym_names(sym_unbounded)        /'UNBOUNDED'/
   
   data sym_names(sym_d1)               /'PM__d1'/
   data sym_names(sym_d2)               /'PM__d2'/

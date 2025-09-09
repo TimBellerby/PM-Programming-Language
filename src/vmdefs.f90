@@ -111,8 +111,12 @@ module pm_vmdefs
   integer,parameter:: op_chan_array_vect = op_misc + 27
   integer,parameter:: op_list_concat = op_misc + 28
   integer,parameter:: op_list_splice = op_misc + 29
+  integer,parameter:: op_substr = op_misc + 30
+  integer,parameter:: op_string_ge = op_misc + 31
+  integer,parameter:: op_string_gt = op_misc + 32
+  integer,parameter:: op_string_fmt = op_misc + 33
 
-  integer,parameter:: op_misc2=op_list_splice
+  integer,parameter:: op_misc2=op_string_fmt
 
   integer,parameter:: op_array_get_elem = op_misc2 + 1
   integer,parameter:: op_array_set_elem = op_misc2 + 2
@@ -840,6 +844,10 @@ module pm_vmdefs
   data op_flags(op_chan_array_vect) /0/
   data op_flags(op_list_concat)     /0/
   data op_flags(op_list_splice)     /0/
+  data op_flags(op_substr)          /0/
+  data op_flags(op_string_ge)       /0/
+  data op_flags(op_string_gt)       /0/
+  data op_flags(op_string_fmt)      /0/
 
   data op_flags(op_array_get_elem)  /0/
   data op_flags(op_array_set_elem)  /0/
@@ -1551,6 +1559,10 @@ contains
     op_names(op_chan_array_vect)='chan_array_vect'
     op_names(op_list_concat)='list_concat'
     op_names(op_list_splice)='list_splice'
+    op_names(op_substr)='substr'
+    op_names(op_string_ge)='string_ge'
+    op_names(op_string_gt)='string_gt'
+    op_names(op_string_fmt)='string_fmt'
 
     op_names(op_array_get_elem)='array_get_elem'
     op_names(op_array_set_elem)='array_set_elem'

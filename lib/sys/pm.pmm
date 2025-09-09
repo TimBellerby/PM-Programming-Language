@@ -111,12 +111,16 @@ proc print_all(x) {
 }
  
 PM__intrinsic ++(string,string)->(string) : "concat"
+PM__intrinsic PM__substr(string,int,int)->(string): "substr"
+PM__intrinsic >=(string,string)->(bool) : "string_ge"
+PM__intrinsic >(string,string)->(bool) : "string_gt"
 
 proc ++(x:string,y)=$++.(x,string(y))
 proc ++(x,y)=$++.(string(x),string(y))
 proc string(x:string)=x
 proc string(x:null)="null"
-proc fmt(x,y)=x:compile_error( """fmt"" operator not yet implmented")
+proc fmt(x,y)=string(x) fmt y
+PM__intrinsic fmt(s:string,y:int)->(string): "string_fmt"
 
 //  sint type
 PM__intrinsic PM__assign_var(&sint,sint): "assign_i"
@@ -427,6 +431,7 @@ PM__intrinsic min(sreal,sreal)->(sreal) : "min_r"
 PM__intrinsic -(sreal)->(sreal) : "uminus_r"
 PM__intrinsic string(sreal)->(string) : "string_r"
 PM__intrinsic _fmt(sreal,int,int)->(string) : "fmt_dp_r"
+PM__intrinsic _fmt(sreal,int)->(string) : "fmt_dp_r"
 PM__intrinsic strunc(sreal)->(sint) : "int_r"
 PM__intrinsic trunc(sreal)->(int) : "long_r"
 PM__intrinsic ltrunc(sreal)->(lint) : "offset_r"
@@ -474,6 +479,7 @@ PM__intrinsic min(real,real)->(real) : "min_d"
 PM__intrinsic -(real)->(real) : "uminus_d"
 PM__intrinsic string(real)->(string) : "string_d"
 PM__intrinsic _fmt(real,int,int)->(string) : "fmt_dp_d"
+PM__intrinsic _fmt(real,int)->(string) : "fmt_dp_d"
 PM__intrinsic strunc(real)->(sint) : "int_d"
 PM__intrinsic trunc(real)->(int) : "long_d"
 PM__intrinsic ltrunc(real)->(lint) : "offset_d"
@@ -574,7 +580,7 @@ proc scpx(x:real_num)=cpx(sreal(x))
 proc string(x:any_int)=string(int64(x))
 proc string(x:any_cpx)= string(re(x))++if(im>=0=>"+"++string(im),"-"++string(-im))++"i" where im=im(x)
 proc fmt(x:real_num,f:[int,int])=_fmt(x,f.1,f.2)
-proc fmt(x:real_num,f:int)=_fmt(x,f,max(1,abs(f)-6))
+proc fmt(x:real_num,f:int)=_fmt(x,f)
 proc int(x:fix(int))=x
 
 
@@ -1024,59 +1030,71 @@ proc int(x:tuple(num))=map($int,x)
 proc sreal(x:tuple(num))=map($sreal,x)
 proc real(x:tuple(num))=map($real,x)
 
-proc string(x:tuple1d)="[ "++x.1++" ]"
-proc string(x:tuple2d)="[ "++x.1++", "++x.2++" ]"
-proc string(x:tuple3d)="[ "++x.1++", "++x.2++", "++x.3++" ]"
-proc string(x:tuple4d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++" ]"
-proc string(x:tuple5d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++" ]"
-proc string(x:tuple6d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++", "++x.6++" ]"
-proc string(x:tuple7d)="[ "++x.1++", "++x.2++", "++x.3++", "++x.4++", "++x.5++", "++x.6++", "++x.7++" ]"
+proc string(x:tuple1d)="["++_tstring(x.1)++"]"
+proc string(x:tuple2d)="["++_tstring(x.1)++","++_tstring(x.2)++"]"
+proc string(x:tuple3d)="["++_tstring(x.1)++","++_tstring(x.2)++","++_tstring(x.3)++"]"
+proc string(x:tuple4d)="["++_tstring(x.1)++","++_tstring(x.2)++","++_tstring(x.3)++","++_tstring(x.4)++"]"
+proc string(x:tuple5d)="["++_tstring(x.1)++","++_tstring(x.2)++","++_tstring(x.3)++","++_tstring(x.4)++","++_tstring(x.5)++"]"
+proc string(x:tuple6d)="["++_tstring(x.1)++","++_tstring(x.2)++","++_tstring(x.3)++","++_tstring(x.4)++","++_tstring(x.5)++","++_tstring(x.6)++"]"
+proc string(x:tuple7d)="["++_tstring(x.1)++","++_tstring(x.2)++","++_tstring(x.3)++","++_tstring(x.4)++","++_tstring(x.5)++","++_tstring(x.6)++","++_tstring(x.7)++"]"
 
 //  *****************************************************
 //  RANGES AND SEQUENCES
 //  *****************************************************
 
 // Partial ranges and sequences for slicing
-type underscore is unique{PM__underscore}
-type _subscript is any_int,range(any_int),seq(any_int,any_int),underscore,range_below(any_int),range_above(any_int),seq_above(any_int,any_int), seq_below(any_int,any_int), seq_stride(any_int)
+type unbounded is unique{UNBOUNDED}
+type _subscript is any_int,range(any_int),seq(any_int,any_int),unbounded,range_below(any_int),range_above(any_int),
+      seq_above(any_int,any_int), seq_below(any_int,any_int), seq_stride(any_int)
 type subscript is _subscript or tuple(_subscript)
 type extent(ndim:dimension_number) is tuple(range(int),ndim)
 proc size(x:extent)=map_reduce($size,$*,x)
-
-proc complete(x:extent,y:subscript)=_complete(x,y) check "Subscript "++y++" is out of bounds "++x=>y in x
-proc _complete(x:tuple1d,y:_subscript)=_complete(x.1,y)
-proc _complete(x:range(int),y:any_int)=int(y)
-proc _complete(x:range(int),y:range(any_int))=int(y)
-proc _complete(x:range(int),y:seq(any_int,any_int))=int(y)
-proc _complete(x:range(int),y:underscore)=x
-proc _complete(x:range(int),y:range_below(any_int))=low(x)..int(y._t)
-proc _complete(x:range(int),y:range_above(any_int))=int(y._t)..high(x)
-proc _complete(x:range(int),y:seq_below(any_int))=low(x)..int(y._t) by int(y._st)
-proc _complete(x:range(int),y:seq_above(any_int))=int(y._t)..high(x) by int(y._st)
-proc _complete(x:range(int),y:seq_step(any_int))=x by int(y._st)
-proc _complete(x,y)=map($_complete,x,y) check "Subscript has incorrect rank"=>rank(x)==rank(y)
 
 type range_below(x:range_base) is rec {_t:x}
 type range_above(x:range_base) is rec {_t:x}
 type seq_below(x:range_base,s:step_base) is rec {_t:x,_st:step_base}
 type seq_above(x:range_base,s:step_base) is rec {_t:x,_st:step_base}
 type seq_step(x:step_base) is rec {_st:step_base}
-proc ..(x:underscore,y:range_base)=rec range_below{_t=x}
-proc ..(x:range_base,y:underscore)=rec range_above{_t=x}
+proc ..(x:range_base)=rec range_below{_t=x}
+proc ..(x:unbounded,y:range_base)=rec range_below{_t=x}
+proc ..(x:range_base,y:unbounded)=rec range_above{_t=x}
 proc by(x:range_below,y:step_base)=rec seq_below{_t=x,_st=y}
 proc by(x:range_above,y:step_base)=rec seq_above{_t=x,_st=y}
-proc by(x:underscore,y:step_base)=rec seq_step{_st=y}
-proc string(x:range_below)="_.."++x._t
-proc string(x:range_above)=x._t++".._"
-proc string(x:seq_below)="_.."++x._t++" by "++x._st
-proc string(x:seq_above)=x._t++".._ by "++x._st
-proc string(x:seq_step)="_ by "++x._st
+proc by(x:unbounded,y:step_base)=rec seq_step{_st=y}
+proc by(x:step_base)=rec seq_step{_st=x}
+proc string(x:range_below)="(.."++x._t++")"
+proc string(x:range_above)="("++x._t++"..)"
+proc string(x:seq_below)="(.."++x._t++" by "++x._st++")"
+proc string(x:seq_above)="("++x._t++".. by "++x._st++")"
+proc string(x:seq_step)="(by "++x._st++")"
+proc string(x:unbounded)="(..)"
+proc _tstring(x)=x
+proc _tstring(x:range_below)=".."++x._t
+proc _tstring(x:range_above)=x._t++".."
+proc _tstring(x:seq_below)=x._t++" by "++x._st
+proc _tstring(x:seq_above)=x._t++".. by "++x._st
+proc _tstring(x:seq_step)="by "++x._st
+proc _tstring(x:unbounded)=""
 proc low(x:range_below or seq_below or seq_step)=_
 proc high(x:range_above or seq_above or seq_step)=_
 proc step(x:range_above or range_below)=literal(1)
 proc low(x:range_above or seq_above)=x._t
 proc high(x:range_below or seq_below)=x._t
 proc step(x:seq_above or seq_below or seq_step)=x._st
+
+proc complete(x:extent,y:subscript)=_complete(x,y) check "Subscript "++y++" is out of bounds "++x=>y in x
+proc _complete(x,y)=map($_complete,x,y) check "Subscript has incorrect rank"=>rank(x)==rank(y)
+proc _complete(x:tuple1d,y:_subscript)=[_complete(x.1,y)]
+proc _complete(x,y:unbounded)=x
+proc _complete(x:range(int),y:any_int)=int(y)
+proc _complete(x:range(int),y:range(any_int))=int(y)
+proc _complete(x:range(int),y:seq(any_int,any_int))=int(y)
+proc _complete(x:range(int),y:range_below(any_int))=low(x)..int(y._t)
+proc _complete(x:range(int),y:range_above(any_int))=int(y._t)..high(x)
+proc _complete(x:range(int),y:seq_below(any_int))=low(x)..int(y._t) by int(y._st)
+proc _complete(x:range(int),y:seq_above(any_int))=int(y._t)..high(x) by int(y._st)
+proc _complete(x:range(int),y:seq_step(any_int))=x by int(y._st)
+
 
 //  Not in operator
 proc notin(x,y)=not(x in y)
@@ -1451,12 +1469,31 @@ PM__endif
 
 */
 
-PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any)->(=x) : "array"
-PM__intrinsic<<needs_type>> _varray(x:any,y:any,z:any)->(=x) : "var_array"
+PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any)->(*) : "array"
+PM__intrinsic<<needs_type>> _varray(x:any,y:any,z:any)->(*) : "var_array"
 
-
-PM__intrinsic _array_mshape(x:any^any)->(=x) : "get_dom"
-PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
+PM__if_compiling
+PM__intrinsic _array_mshape(x:any^any)->(*) : "get_dom"
+PM__intrinsic _get_aelem(x:any^any,y:int)->(*) : "array_get_elem"
+PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
+proc _point2list(m:_mshape,t:tuple(int,1))=PM__list(t.1-low(mx.1)) where mx=m._extent
+proc _point2list(m:_mshape,t:tuple(int,2))=PM__list(t.1-low(mx.1),t.2-low(mx.2)) where mx=m._extent
+proc _point2list(m:_mshape,t:tuple(int,3))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3)) where mx=m._extent
+proc _point2list(m:_mshape,t:tuple(int,4))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3),t.4-low(mx.4)) where mx=m._extent
+proc _point2list(m:_mshape,t:tuple(int,5))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3),t.4-low(mx.4),t.5-low(mx.5)) where mx=m._extent
+proc _point2list(m:_mshape,t:tuple(int,6))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3),t.4-low(mx.4),t.5-low(mx.5),t.6-low(mx.6)) where mx=m._extent
+proc _point2list(m:_mshape,t:tuple(int,7))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3),t.4-low(mx.4),t.5-low(mx.5),t.6-low(mx.6),t.7-low(mx.7)) where mx=m._extent
+proc array(x,d:extent)=_array(x,_mshape(d),dims(d))
+proc #'(x:any^any)=_array_mshape(x)._extent
+proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2list(_array_mshape(a),t))
+proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2list(_array_mshape(a),t),v)
+proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2list(_array_mshape(a),t),v)
+proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,t)
+proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v)
+proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v)
+PM__else
+PM__intrinsic _array_mshape(x:any^any)->(*) : "get_dom"
+PM__intrinsic _get_aelem(x:any^any,y:int)->(*) : "array_get_elem"
 PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 PM__intrinsic PM__setmaelem(&x:any^any,y:int,z:any): "array_set_multi_elem"
 proc array(x,d:extent)=_array(x,_mshape(d),size(d))
@@ -1467,6 +1504,7 @@ proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point
 proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(#(a),t))
 proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(#(a),t),v)
 proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(PM__import(#a),t),v)
+PM__endif
 
 /*
 PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
@@ -1490,7 +1528,7 @@ PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 */
 
 proc _make_subref(a:any^any,t:tuple(int))=_make_subref(a,_point2index(_array_mshape(a),t))
-PM__intrinsic _make_subref(a:any^any,i:int)->(=a) : "make_rf"
+PM__intrinsic _make_subref(a:any^any,i:int)->(*) : "make_rf"
 
 type _mshape(ndim:dimension_number,contig:literal(bool)) is rec {_extent:extent(ndim),_m:tuple(int,ndim),_n:int,_o:int,_c:contig}
 proc _mshape(g:extent(1))=rec _mshape{_extent=g,_m=[1],_n=size(g.1),_o=o,_c=true} where o=-_point2index(dims(g),low(g))
@@ -1631,17 +1669,17 @@ proc PM__check_iter(x,y){}
 proc PM__check_iter_amp(x,y){}
 proc PM__check_iter_star(x,y){}
 
-proc PM__get_elem(x:PM__list,h)=PM__each_index(i in num_elements(x):PM__get_elem(x.{i},h))
+proc PM__get_elem(x:PM__list,h)=PM__each_index(i in num_elements(x):PM__get_elem(x^{i},h))
 proc PM__get_elem(x:any^any,h)=_get_array_elementz(x,h)
 proc PM__get_elem(x,h)=element(x,h)
-proc PM__set_elem(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_elem(&x.{i},y.{i},h <<PM__ignore>>)}
+proc PM__set_elem(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_elem(&x^{i},y^{i},h <<PM__ignore>>)}
 proc PM__set_elem(&x:any^any,y,h) {_set_array_elementz(&x,h,y)}
-proc PM__set_multi_elem(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_multi_elem(&x.{i},y.{i},h <<PM__ignore>>)}
+proc PM__set_multi_elem(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_multi_elem(&x^{i},y^{i},h <<PM__ignore>>)}
 proc PM__set_multi_elem(&x:any^any,y,h) {_set_array_multi_elementz(&x,h,y)}
 
-proc PM__import(x:PM__list)=PM__each_index(i in num_elements(x):PM__import(x.{i}))
-PM__intrinsic PM__import(x:any)->(=x) : "import_val"
-proc PM__export(&x:PM__list,y:PM__list) {PM__each_index i in num_elements(x){PM__export(&x.{i},y.{i})}}
+proc PM__import(x:PM__list)=PM__each_index(i in num_elements(x):PM__import(x^{i}))
+PM__intrinsic PM__import(x:any)->(*) : "import_val"
+proc PM__export(&x:PM__list,y:PM__list) {PM__each_index i in num_elements(x){PM__export(&x^{i},y^{i})}}
 PM__intrinsic PM__export(&x:any,y:any): "export"
 
 proc PM__generate(x,n)=_elts(x,1,n)
@@ -1670,7 +1708,7 @@ proc PM__getkey(x:null,y:any)=y
 proc PM__checkcase(x:literal,y:literal)=match_switch_case(x,y)
 proc PM__checkcase(x,y)=match_switch_case(x,y)
 proc match_switch_case(x:literal,y:literal)=x==y
-proc match_switch_case(x:fix(any),y:fix(any))=x==y
+proc match_switch_case(x:fix,y:fix)=x==y
 proc match_switch_case(x,y)=x==y
 proc match_switch_case(x:real_num,y:range(real_num))=x>=y._lo and x<=y._hi
 proc match_switch_case(x:literal(int),y:range(literal(int),literal(int)))=(x>=y._lo and x<=y._hi)
@@ -1704,7 +1742,11 @@ proc PM__switch(w:fix(string),x:fix(string),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w:fix(bool),x:fix(bool),y,z)=PM__if(w==x,y,z)
 proc PM__switch(w,x,y,...)=PM__switch(w,x,y,PM__switch(w,...))
 
- 
+
+type element_accessor is literal(string) or literal(int) or a_unique
+
+proc convert(x,y:a_poly)=x as typeof(y)
+
 proc PM__assign_op(&a:any,b:any,c:proc) {
     compile_error("Not a recognised assignment operator") 
 }
@@ -1716,19 +1758,23 @@ proc PM__assign(&a:any,b:any) {
 }
 
 proc PM__assign(&a:any^any,b:any,j:tuple(int)) {
-   _set_array_element(&a,j,b)
+    _set_array_element(&a,j,c) where c=convert(b,_get_array_element(a,j))
 }
 
-proc PM__assign(&a:a_rec,b:any,j:literal(string or int)) {
-   PM__assign(*a.{j},b)
+proc PM__assign(&a:a_rec,b:any,j:element_accessor) {
+   PM__assign(&a^&{j},b)
+}
+
+proc PM__assign(&a,b:any,j,...) {
+    PM__assign(&a^PM__lhs(j),...)
 }
 
 proc PM__assign(&a:any^any,b:any,j:tuple(int),...) {
-    PM__assign(&a.^_make_subref(j),b,...)
+    PM__assign(&a^_make_subref(j),b,...)
 }
 
-proc PM__assign(&a:a_rec,b:any,j:literal(string or int),...) {
-    PM__assign(&a.{j},b,...)
+proc PM__assign(&a:a_rec,b:any,j:element_accessor,...) {
+    PM__assign(&a^&{j},b,...)
 }
 
 proc PM__assign_var(&a:any,b:any) {
@@ -1737,45 +1783,83 @@ proc PM__assign_var(&a:any,b:any) {
 }
 
 proc PM__assign_var(&a:a_rec,b:a_rec) {
-    test "Cannot assign different records"=>same_rec(a,b)
+  test "Cannot assign different records"=>same_rec(a,b)
   PM__each_index i in num_elements(a) {
-      PM__assign(&a.^_element_at_index(i),b.{i})
+      PM__assign(&a^{i},b^{i})
   }
 }
 
-proc PM__assign(&a:literal,b:literal) {
-    test "Cannot assign values"=>same_type(a,b)
+/*proc PM__assign_var(&a:a_rec,b:a_rec when same_type(a,b)) {
+  _assign_element(&a,b)
 }
-proc PM__assign(&a:fix,b:fix) {
+*/
+
+proc PM__assign_var(&a:literal,b:literal) {
     test "Cannot assign values"=>same_type(a,b)
 }
 
-PM__intrinsic PM__get_ref(x:any)->(=x) : "get_rf"
+proc PM__assign_var(&a:fix,b:fix) {
+    test "Cannot assign values"=>same_type(a,b)
+}
+
+PM__intrinsic PM__get_ref(x:PM__ref(any))->(*) : "get_rf"
+proc PM__get_ref(x)=x
 proc PM__get_ref'(x)=PM__get_ref(x)
-proc PM__get_ref'(x,...)=PM__get_ref(x,...)
-proc PM__get_ref(x:a_rec,j:literal(int or string) or a_unique)=x.{j}
+proc PM__get_ref'(x,j)=PM__get_ref(x,j)
+proc PM__get_ref'(x,j,...)=PM__get_ref(PM__get_ref(x,j),...)
+proc PM__get_ref(x,j,...)=PM__get_ref(PM__get_ref(x,j),...)
+proc PM__get_ref(x:a_rec,j:element_accessor)=x^{j}
 proc PM__get_ref(x:any^any,j:tuple(int))=_get_array_element(x,j)
-proc PM__get_ref(x:a_rec,j:literal(int or string) or a_unique,...)=PM__get_ref(x.{j},...)
-proc PM__get_ref(x:any^any,j:tuple(int),...)=PM__get_ref(_get_array_element(x,j),...)
+proc PM__get_ref(x:any,j:PM__list(proc,any)) {
+    PM__set_dotdotdot(j^{2})
+    return PM__get_ref(x,j^{1}.(x,... <<PM__ref>>))
+}
+proc PM__get_ref(x:any,j:PM__list(null,any))=j^{2}
+proc PM__get_ref(x:any,j:PM__list) {
+    PM__set_dotdotdot(j)
+    return PM__get_ref(x,...)
+}
+proc PM__get_ref(x:a_poly,j:PM__list(proc,any)) {
+    PM__set_dotdotdot(j^{2})
+    let r...
+    any x {let ...r=PM__get_ref(x,j^{1}.(x,... <<PM__ref>>))}
+    return r
+}
 
-proc PM__subs(x,...)=tuple(x,...)
+proc PM__lhs'(x,j)=PM__lhs(x,j)
+proc PM__lhs(x)=x
+proc PM__lhs(x,j:element_accessor)=x^&{j}
+proc PM__lhs(x,j,...)=PM__lhs(PM__lhs(x,j),...)
+proc PM__lhs(x,j:tuple(int))=x^_make_subref(j)
+proc PM__lhs(x:any,j:PM__list(proc,any)) {
+    PM__set_dotdotdot(j^{2})
+    return PM__lhs(x,j^{1}.(x,... <<PM__ref>>))
+}
+proc PM__lhs(x:any,j:PM__list(null,any))=j^{2}
+proc PM__lhs(x:any,j:PM__list) {
+    PM__set_dotdotdot(j)
+    return PM__lhs(x,...)
+}
+
+proc PM__subs(x)=[x]
+proc PM__subs(x,...)=[x,...]
 proc PM__subs(x:tuple)=x
 
-PM__intrinsic PM__clone(x:any)->(=x) : "clone"
-PM__intrinsic PM__make_var(x:any)->(=x) : "clone" priv
-PM__intrinsic PM__make_var'(x:priv)->(=x) : "clone_var" priv
-PM__intrinsic PM__make_var'(x:any)->(=x) : "clone" priv
-PM__intrinsic PM__make_const'(x:any)->(=x) : "clone_var"
-PM__intrinsic PM__make_const(x:any)->(=x) : "clone_var"
+PM__intrinsic PM__clone(x:any)->(*) : "clone"
+PM__intrinsic PM__make_var(x:any)->(*) : "clone" priv
+PM__intrinsic PM__make_var'(x:priv)->(*) : "clone_var" priv
+PM__intrinsic PM__make_var'(x:any)->(*) : "clone" priv
+PM__intrinsic PM__make_const'(x:any)->(*) : "clone_var"
+PM__intrinsic PM__make_const(x:any)->(*) : "clone_var"
 proc PM__init_var(x:any,y:any)=PM__make_var(x,y)
 proc PM__init_const(x:any,y:any)=PM__make_const(x,y)
 proc PM__init_var'(x:any,y:any)=PM__make_var'(x,y)
 proc PM__init_const'(x:any,y:any)=PM__make_const'(x,y)
 proc PM__make_var(x,y)=PM__make_var(x as y)
 proc PM__make_const(x,y)=PM__make_const(x as y)
-PM__intrinsic PM__dechan'(x:any)->(=x): "clone_var" 
-PM__intrinsic same_type(x:any,y:any)->(==x,y) : "same_type_fold"
-PM__intrinsic same_rec(x:any,y:any)->(==x,y) : "same_rec_fold"
+PM__intrinsic PM__dechan'(x:any)->(*): "clone_var" 
+PM__intrinsic same_type(x:any,y:any)->(*) : "same_type_fold"
+PM__intrinsic same_rec(x:any,y:any)->(*) : "same_rec_fold"
 
 proc ==(x:a_rec,y:a_rec) {
   test "Cannot apply ""=="" to different records"=> same_rec(x,y)
@@ -1791,7 +1875,7 @@ proc /=(x:any,y:any) {
 }
 proc _eq(x,y,&ok) <<inline>> {
     PM__each_index i in num_elements(x) {
-        ok=ok and x.{i}==y.{i}
+        ok=ok and x^{i}==y^{i}
     }
 }
 
@@ -1799,26 +1883,26 @@ proc _eq(x,y,&ok) <<inline>> {
 proc PM__valref(x)=x
 proc PM__check_alias(...){}
  
-PM__intrinsic PM__copy_out(x:any)->(=x) : "clone"
-PM__intrinsic PM__copy_back(x:any)->(=x) : "assign"
+PM__intrinsic PM__copy_out(x:any)->(*) : "clone"
+PM__intrinsic PM__copy_back(x:any)->(*) : "assign"
 proc next_enum(x:int)=x+convert(1,x)
 proc next_enum(x:int,y:int)=x+convert(y,x)
 
-PM__intrinsic<<needs_type>> .element_at_index(&x:any,y:fix(int))->(|x):"elem"
-PM__intrinsic<<needs_type>> _element_at_index(x:any,y:fix(int))->(|x):"elem"
+PM__intrinsic<<needs_type>> .element_at_index(&x:any,y:fix(int))->(*):"elem"
+PM__intrinsic<<needs_type>> _element_at_index(x:any,y:fix(int))->(*):"elem"
 
 
 //  Type values
-PM__intrinsic<<needs_type>> typeof(x:any)->(type x) : "make_type_val"
+PM__intrinsic<<needs_type>> typeof(x:any)->(*) : "make_type_val"
 proc is(x,t)=t inc typeof(x)
 proc isnot(x,t)=not(x is t)
 proc as(x,t:<any>)...=PM__cast(x,t)
 proc as(x,t)=convert(x,t)
 proc convert(x,t:a_poly or proc)=PM__cast(x,typeof(t))
 proc convert(x,t)=x
-PM__intrinsic<<needs_type>> inc(x:<any>,y:<any>)->( inc x,y) : "type_include_fold"
+PM__intrinsic<<needs_type>> inc(x:<any>,y:<any>)->(*) : "type_include_fold"
 proc ==(x:<any>,y:<any>)=x inc y and y inc x
-PM__intrinsic error_type()->(=1) : "error_type"
+PM__intrinsic error_type()->(*) : "error_type"
 
 //  Debugging
 PM__intrinsic<<is_impure,prints_out>> _dump(any,any): "new_dump"
@@ -1854,8 +1938,8 @@ proc PM__import_param'(&x,y){}
 
 proc PM__make_over'(a)=a
 
-PM__intrinsic<<needs_type>> PM__list_concat(x:PM__list,y:PM__list)->(=x):"list_concat"
-PM__intrinsic<<needs_type>> PM__list_splice(x:PM__list,y:PM__list,i:literal(int),j:literal(int))->(=x):"list_splice"
+PM__intrinsic<<needs_type>> PM__list_concat(x:PM__list,y:PM__list)->(*):"list_concat"
+PM__intrinsic<<needs_type>> PM__list_splice(x:PM__list,y:PM__list,i:literal(int),j:literal(int))->(*):"list_splice"
 
 proc compile_error(mess:literal(string)): test mess=>false
 

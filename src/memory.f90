@@ -1309,7 +1309,7 @@ contains
        if(.not.present(nocrash))&
             call pm_panic('Corrupt memory')
        if(present(ok)) ok=.false.
-    else if(ptr%data%vkind>pm_null) then
+    else if(ptr%data%vkind>pm_null.and.ptr%data%esize>0) then
        if(ptr%offset<1.or.ptr%offset>ptr%data%size) then
           write(*,*) 'Bad ptr offset',&
                ptr%offset,ptr%data%size,ptr%data%vkind,' in: ',emess

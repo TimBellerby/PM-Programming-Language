@@ -96,16 +96,15 @@ module pm_ast
   integer,parameter:: proc_num_args=17
 
   !   - built in procs
-  integer,parameter:: proc_retas=node_args+12
-  integer,parameter:: proc_opcode=node_args+13
-  integer,parameter:: proc_opcode2=node_args+14
-  integer,parameter:: proc_data=node_args+15
-  integer,parameter:: proc_coded_builtin=node_args+16
-  integer,parameter:: sysproc_num_args=17
+  integer,parameter:: proc_opcode=node_args+12
+  integer,parameter:: proc_opcode2=node_args+13
+  integer,parameter:: proc_data=node_args+14
+  integer,parameter:: proc_coded_builtin=node_args+15
+  integer,parameter:: sysproc_num_args=16
 
   ! Values for proc flags
   integer,parameter:: proccall_is_comm=       1
-  integer,parameter:: proccall_is_ref =       2
+  integer,parameter:: proccall_is_method =    2
   integer,parameter:: proccall_is_general =   4
   integer,parameter:: proccall_is_block =     8
 

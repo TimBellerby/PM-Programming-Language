@@ -1272,6 +1272,18 @@ contains
        newve=shrink_ve(context,ve,esize)
        call set_arg(2,vector_concat_string(context,newve,&
             arg(3),arg(4)))
+    case(op_substr)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_substr(context,newve,&
+            arg(3),arg(4),arg(5)))
+    case(op_string_ge,op_string_gt)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_strcmp(context,newve,&
+            arg(3),arg(4),opcode==op_string_ge))
+    case(op_string_fmt)
+       newve=shrink_ve(context,ve,esize)
+       call set_arg(2,vector_fmt_string(context,newve,&
+            arg(3),arg(4)))
     case(op_clone)
        call set_arg(2,copy_vector(context,arg(3),ve,0_pm_ln,esize+1))
     case(op_assign)
@@ -6633,8 +6645,13 @@ contains
             newve,arg(3),fmt_r_width,fmt_r,arg(4)))
     case(op_fmt_dp_r)
        newve=shrink_ve(context,ve,esize)
-       call set_arg(2,vector_make_string(context,&
-            newve,arg(3),fmt_r_width,fmt_r_dp,arg(4),arg(5)))
+       if(nargs==5) then
+          call set_arg(2,vector_make_string(context,&
+               newve,arg(3),fmt_r_width,fmt_r_dp,arg(4),arg(5)))
+       else
+          call set_arg(2,vector_make_string(context,&
+               newve,arg(3),fmt_r_width,fmt_r_wid,arg(4),arg(4)))
+       endif
     case(op_assign_r)
        if(pm_fast_vkind(ve)==pm_null) then
           arg(2)%data%r(arg(2)%offset:arg(2)%offset+esize)=&
@@ -7681,8 +7698,13 @@ contains
             newve,arg(3),fmt_d_width,fmt_d,arg(4)))
     case(op_fmt_dp_d)
        newve=shrink_ve(context,ve,esize)
-       call set_arg(2,vector_make_string(context,&
-            newve,arg(3),fmt_d_width,fmt_d_dp,arg(4),arg(5)))
+       if(nargs==5) then
+          call set_arg(2,vector_make_string(context,&
+               newve,arg(3),fmt_d_width,fmt_d_dp,arg(4),arg(5)))
+       else
+          call set_arg(2,vector_make_string(context,&
+               newve,arg(3),fmt_d_width,fmt_d_wid,arg(4),arg(4)))
+       endif
     case(op_assign_d)
        if(pm_fast_vkind(ve)==pm_null) then
           arg(2)%data%d(arg(2)%offset:arg(2)%offset+esize)=&

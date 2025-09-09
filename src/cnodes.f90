@@ -448,22 +448,22 @@ contains
   end function cblock_has_comm
 
   
-  subroutine print_all_sigs(context,iunit,sig_cache,proc_cache)
+  subroutine print_all_sigs(context,iunit,sig_cache,proc_cache,poly_cache)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
-    type(pm_ptr),intent(in):: sig_cache,proc_cache
+    type(pm_ptr),intent(in):: sig_cache,proc_cache,poly_cache
     integer:: i
 
     do i=1,pm_dict_size(context,proc_cache)
-       call print_sig(context,iunit,sig_cache,proc_cache,i)
+       call print_sig(context,iunit,sig_cache,proc_cache,poly_cache,i)
     enddo
     
   end subroutine print_all_sigs
     
-  subroutine print_sig(context,iunit,sig_cache,proc_cache,n)
+  subroutine print_sig(context,iunit,sig_cache,proc_cache,poly_cache,n)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,n
-    type(pm_ptr),intent(in):: sig_cache,proc_cache
+    type(pm_ptr),intent(in):: sig_cache,proc_cache,poly_cache
     integer:: kind,i
     type(pm_ptr):: cnode,key,rvec
     key=pm_dict_key(context,proc_cache,int(n,pm_ln))
@@ -498,10 +498,10 @@ contains
           
           if(pm_fast_istiny(rvec)) then
              write(iunit,*) '---->',cnode%offset
-          else
-             call print_proc_cnode(context,iunit,cnode_arg(cnode,2),&
-                  sig_cache,cnode_arg(cnode,1))
+             rvec=pm_dict_val(context,poly_cache,int(rvec%offset,pm_ln))
           endif
+          call print_proc_cnode(context,iunit,rvec,&
+               sig_cache,proc_cache,cnode_arg(cnode,1))
           write(iunit,*) '   ----------------'
           call pm_dump_tree(context,iunit,cnode_arg(cnode,6),2)
           call pm_dump_tree(context,iunit,cnode_arg(cnode,7),2)
@@ -510,7 +510,7 @@ contains
           write(iunit,'(a)') 'sig{'
           do i=1,cnode_numargs(cnode)
              call print_proc_cnode(context,iunit,pm_null_obj,&
-                  sig_cache,cnode_arg(cnode,i))
+                  sig_cache,proc_cache,cnode_arg(cnode,i))
           enddo
           write(iunit,'(a)') '}'
        case(cnode_is_arglist)
@@ -522,7 +522,7 @@ contains
                   trim(pm_type_as_string(context,&
                   cnode_num_arg(cnode,i)))//' {'
              call print_proc_cnode(context,iunit,pm_null_obj,&
-                  sig_cache,cnode_arg(cnode,i+1))
+                  sig_cache,proc_cache,cnode_arg(cnode,i+1))
              write(iunit,'(a)') '  }'
           enddo
           write(iunit,'(a)') '}'
@@ -541,7 +541,7 @@ contains
        case(cnode_is_builtin)
           write(iunit,'(a)') '['//trim(pm_int_as_string(n))//'] {'
           call print_proc_cnode(context,iunit,pm_null_obj,&
-               sig_cache,cnode)
+               sig_cache,proc_cache,cnode)
           write(iunit,'(a)') '}'
        case default
           write(iunit,'("????",i5)') kind
@@ -555,16 +555,16 @@ contains
     include 'fistiny.inc'
   end subroutine print_sig
 
-  subroutine print_proc_cnode(context,iunit,rvec,sig_cache,cnode)
+  subroutine print_proc_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
-    type(pm_ptr),intent(in):: rvec,sig_cache,cnode
+    type(pm_ptr),intent(in):: rvec,sig_cache,proc_cache,cnode
     integer:: flags
 
     write(iunit,'(a)') '  '//&
          trim(pm_name_as_string(context,cnode_get_num(cnode,pr_name)))//&
          merge('.',merge(merge('''','%',cnode_flags_set(cnode,pr_flags,proccall_is_general)),' ',&
-         cnode_flags_set(cnode,pr_flags,proccall_is_comm)),cnode_flags_set(cnode,pr_flags,proccall_is_ref))//&
+         cnode_flags_set(cnode,pr_flags,proccall_is_comm)),cnode_flags_set(cnode,pr_flags,proccall_is_method))//&
          trim(pm_type_as_string(context,cnode_get_num(cnode,pr_ptype)))//' {'
     
     if(cnode_get_kind(cnode)==cnode_is_builtin) then
@@ -576,7 +576,7 @@ contains
             '   [nargs=',&
             cnode_get_num(cnode,pr_nargs),',nret=',cnode_get_num(cnode,pr_nret),&
             ',ncalls=',cnode_get_num(cnode,pr_ncalls),']'
-       call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode_get(cnode,pr_cblock),4)
+       call print_cblock_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_get(cnode,pr_cblock),4)
     endif
 
     write(iunit,'(a)') '  }'
@@ -584,27 +584,34 @@ contains
     include 'fisnull.inc'
   end subroutine print_proc_cnode
   
-  recursive subroutine print_cblock_cnode(context,iunit,rvec,sig_cache,cnode,depth)
+  recursive subroutine print_cblock_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode,depth)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,depth
-    type(pm_ptr),intent(in):: rvec,sig_cache,cnode
+    type(pm_ptr),intent(in):: rvec,sig_cache,proc_cache,cnode
     type(pm_ptr)::p
     p=cnode_get(cnode,cblock_first_call)
     do while(.not.pm_fast_isnull(p))
-       call print_call_cnode(context,iunit,rvec,sig_cache,p,depth)
+       call print_call_cnode(context,iunit,rvec,sig_cache,proc_cache,p,depth)
        p=cnode_get(p,call_link)
     enddo
   contains
     include 'fisnull.inc'
   end subroutine print_cblock_cnode
   
-  recursive subroutine print_call_cnode(context,iunit,rvec,sig_cache,cnode,depth)
+  recursive subroutine print_call_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode,depth)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,depth
-    type(pm_ptr),intent(in):: rvec,sig_cache,cnode
+    type(pm_ptr),intent(in):: rvec,sig_cache,proc_cache,cnode
     integer:: signo,name,i,j,k,nret,nargs,modl,line
     type(pm_ptr):: p,args,amps,keys,keynames
     character(len=120):: str,location
+
+    args=cnode_get(cnode,call_args)
+    nargs=cnode_numargs(args)
+    nret=cnode_get_num(cnode,call_nret)
+    amps=cnode_get(cnode,call_amp)
+    amps=pm_name_val(context,int(amps%offset))
+    
     signo=cnode_get_num(cnode,call_sig)
     str=' '
     if(.not.pm_fast_isnull(rvec)) then
@@ -617,16 +624,24 @@ contains
        str=repeat(' ',depth)//trim(str)//pm_name_as_string(context,-signo)
        i=len_trim(str)+1
        if(.not.pm_fast_isnull(rvec)) then
-          k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
+          k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))          
           if(k>=0) then
-             call append_to_line(iunit,str,i,&
-                  '['//trim(pm_int_as_string(k))//'] ',.false.,depth)
+             if(signo==-sym_any.or.signo==-sym_any_invar) then
+                call multi_version(k,2,4)
+                goto 10
+             elseif(signo==-sym_pm_each_index) then
+                call multi_version(k,nret+2,nret+3)
+                goto 10
+             else
+                call append_to_line(iunit,str,i,&
+                     '['//trim(pm_int_as_string(k))//'] ',.false.,depth)
+             endif
           endif
        endif
     elseif(signo==0) then
        str=repeat(' ',depth)//trim(str)//'var-call'
        i=len_trim(str)+1
-       call print_value_cnode(context,iunit,rvec,sig_cache,&
+       call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,&
             cnode_get(cnode,call_var),depth,str,i)
        call append_to_line(iunit,str,i,': ',.false.,depth)
     else
@@ -636,7 +651,7 @@ contains
        if(.not.pm_fast_isnull(cnode_get(cnode,call_var))) then
           str=repeat(' ',depth)//trim(str)//'call *('
           i=depth+7
-          call print_value_cnode(context,iunit,rvec,sig_cache,&
+          call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,&
                cnode_get(cnode,call_var),depth,str,i)
           call append_to_line(iunit,str,i,') ',.false.,depth)
        elseif(pm_fast_isnull(rvec)) then
@@ -668,15 +683,9 @@ contains
        i=i+1
     end if
 
-    args=cnode_get(cnode,call_args)
-    nargs=cnode_numargs(args)
-    nret=cnode_get_num(cnode,call_nret)
-    amps=cnode_get(cnode,call_amp)
-    amps=pm_name_val(context,int(amps%offset))
-    
     if(nret>0) then
        do j=1,nret
-          call print_value_cnode(context,iunit,rvec,sig_cache,cnode_arg(args,j),depth,str,i)
+          call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_arg(args,j),depth,str,i)
           i=i+1
        enddo
        call append_to_line(iunit,str,i,'<- ',.false.,depth)
@@ -694,7 +703,7 @@ contains
              endif
           endif
        endif
-       call print_value_cnode(context,iunit,rvec,sig_cache,cnode_arg(args,j),depth,str,i)
+       call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_arg(args,j),depth,str,i)
        i=i+1
     enddo
     keys=cnode_get(cnode,call_keys)
@@ -705,10 +714,12 @@ contains
           call append_to_line(iunit,str,i,&
                trim(pm_name_as_string(context,keynames%data%i(keynames%offset+j-1))),.false.,depth)
           call append_to_line(iunit,str,i,':=:'//trim(pm_name_as_string(context,name))//':',.false.,depth)
-          call print_value_cnode(context,iunit,rvec,sig_cache,cnode_arg(keys,j),depth,str,i)
+          call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_arg(keys,j),depth,str,i)
           i=i+1
        enddo
     endif
+
+10  continue
     modl=cnode_get_num(cnode,cnode_modl_name)
     line=cnode_get_num(cnode,cnode_lineno)
     location=trim(pm_name_as_string(context,modl))//':'//pm_int_as_string(line)
@@ -723,12 +734,47 @@ contains
     include 'fesize.inc'
     include 'fisnull.inc'
     include 'fvkind.inc'
+
+    subroutine multi_version(csig,block_arg,limits_arg)
+      integer,intent(in):: csig,block_arg,limits_arg
+      integer:: j,k,slot1,slot2
+      type(pm_ptr):: arg,rv,rvs,slots
+      slots=cnode_arg(cnode_arg(args,limits_arg),1)
+      slot1=slots%data%i(slots%offset)
+      slot2=slots%data%i(slots%offset+1)
+      rvs=pm_dict_val(context,proc_cache,&
+            int(csig,pm_ln))
+      do j=1,nret
+         call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_arg(args,j),depth,str,i)
+         i=i+1
+      enddo
+      call append_to_line(iunit,str,i,'<- ',.false.,depth)
+      do j=nret+1,nargs
+         if(j==block_arg) then
+            call append_to_line(iunit,str,i,'{ ',.false.,depth)
+            do k=1,cnode_numargs(rvs)
+               rv=cnode_arg(rvs,k)
+               rvec%data%i(rvec%offset+slot1:rvec%offset+slot2)=&
+                    rv%data%i(rv%offset:rv%offset+slot2-slot1)
+               call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_arg(args,j),depth,str,i)
+            enddo
+            call append_to_line(iunit,str,i,' }',.false.,depth)
+         elseif(j==limits_arg) then
+            call append_to_line(iunit,str,i,' '//trim(pm_int_as_string(slot1))//'..'//&
+                 trim(pm_int_as_string(slot2)),.false.,depth)
+         else
+            call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_arg(args,j),depth,str,i)
+         endif
+         i=i+1
+      enddo
+    end subroutine multi_version
+    
   end subroutine print_call_cnode
 
-  recursive subroutine print_value_cnode(context,iunit,rvec,sig_cache,cnode,depth,str,i)
+  recursive subroutine print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode,depth,str,i)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,depth
-    type(pm_ptr),intent(in):: rvec,sig_cache,cnode
+    type(pm_ptr),intent(in):: rvec,sig_cache,proc_cache,cnode
     character(len=*),intent(inout):: str
     integer,intent(inout):: i
     integer:: kind,name,tno
@@ -781,7 +827,7 @@ contains
                trim(pm_value_as_string(context,p)),.false.,depth)
        case(cnode_is_cblock)
           call append_to_line(iunit,str,i,'{',.true.,depth)
-          call print_cblock_cnode(context,iunit,rvec,sig_cache,cnode,min(50,depth+2))
+          call print_cblock_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode,min(50,depth+2))
           str=' '
           str(depth+1:depth+1)='}'
           i=depth+1
@@ -789,7 +835,7 @@ contains
           call append_to_line(iunit,str,i,'^(',.false.,depth)
           p=cnode_arg(cnode,1)
           do while(.not.pm_fast_isnull(p))
-             call print_value_cnode(context,iunit,rvec,sig_cache,p%data%ptr(p%offset),depth,str,i)
+             call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,p%data%ptr(p%offset),depth,str,i)
              p=p%data%ptr(p%offset+1)
              if(.not.pm_fast_isnull(p)) then
                 call append_to_line(iunit,str,i,',',.false.,depth)
@@ -798,7 +844,7 @@ contains
           call append_to_line(iunit,str,i,') &(',.false.,depth)
           p=cnode_arg(cnode,2)
           do while(.not.pm_fast_isnull(p))
-             call print_value_cnode(context,iunit,rvec,sig_cache,p%data%ptr(p%offset),depth,str,i)
+             call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,p%data%ptr(p%offset),depth,str,i)
              p=p%data%ptr(p%offset+1)
              if(.not.pm_fast_isnull(p)) then
                 call append_to_line(iunit,str,i,',',.false.,depth)
@@ -822,7 +868,7 @@ contains
     if(iand(flags,proccall_is_comm)/=0) then
        if(iand(flags,proccall_is_general)/=0) then
           call append_to_line(iunit,str,i,'''',.false.,depth)
-       elseif(iand(flags,proccall_is_ref)/=0) then
+       elseif(iand(flags,proccall_is_method)/=0) then
           call append_to_line(iunit,str,i,'.',.false.,depth)
        else
           call append_to_line(iunit,str,i,'%',.false.,depth)

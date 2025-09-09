@@ -4505,6 +4505,64 @@ contains
   end function index_vector_nested
 
   !=============================================================================
+  !  Apply fmt to each string element of v
+  !=============================================================================
+  function vector_fmt_string(context,ve,v,wid) result(str)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: ve,v,wid
+    type(pm_ptr):: str
+    integer(pm_ln):: vsize,esize,i,j,jj,k,n,length,length1,start1,disp
+    type(pm_ptr):: vec1,len1,off1
+    type(pm_ptr),target:: vec,len,off
+    type(pm_ptr):: ustr,fstr
+    type(pm_reg),pointer:: reg
+    vec1=v%data%ptr(v%offset+pm_array_vect)
+    len1=v%data%ptr(v%offset+pm_array_length)
+    off1=v%data%ptr(v%offset+pm_array_offset)
+    reg=>pm_register(context,'make_string',vec,len,off)
+    vsize=pm_fast_esize(ve)-1
+    esize=max(0,pm_fast_esize(v))
+    len=pm_new(context,pm_long,esize+1)
+    len%data%ln(len%offset:len%offset+esize)=0
+    off=pm_new(context,pm_long,esize+1)
+    off%data%ln(off%offset:off%offset+esize)=0
+    vec=pm_new(context,pm_pointer,esize+1)
+    j=0
+    do i=0,vsize
+       k=ve%data%ln(ve%offset+i)
+       length=wid%data%ln(wid%offset+k)
+       length1=len1%data%ln(len1%offset+k)
+       start1=off1%data%ln(off1%offset+k)
+       ustr=vec1%data%ptr(vec1%offset+k)
+       fstr=pm_new(context,pm_string,abs(length))
+       if(abs(length)>length1) then
+          if(length>0) then
+             disp=length-length1
+             fstr%data%s(fstr%offset:fstr%offset+disp-1)=' '
+             fstr%data%s(fstr%offset+disp:fstr%offset+length-1)=&
+                  ustr%data%s(ustr%offset+start1:ustr%offset+start1+length1-1)
+          else
+             fstr%data%s(fstr%offset:fstr%offset+length1-1)=&
+                  ustr%data%s(ustr%offset+start1:ustr%offset+start1+length1-1)
+             fstr%data%s(fstr%offset+length1:fstr%offset+abs(length)-1)=' '
+          endif
+       elseif(abs(length)==length1) then
+          fstr%data%s(fstr%offset:fstr%offset+abs(length)-1)=&
+               ustr%data%s(ustr%offset+start1:ustr%offset+start1+length1-1)
+       else
+          fstr%data%s(fstr%offset:fstr%offset+abs(length)-1)='*'
+       endif
+       vec%data%ptr(vec%offset+k)=fstr
+       len%data%ln(len%offset+k)=abs(length)
+    enddo
+    str=make_array(context,pm_array_type,int(pm_string_type),vec,len,len,off)
+    call pm_delete_register(context,reg)
+  contains
+    include 'fesize.inc'
+  end function vector_fmt_string
+
+  
+  !=============================================================================
   !  Apply fmt to each element of v to create vector of strings
   !=============================================================================
   function vector_make_string(context,ve,v,buf_size,fmt,wid,ndp) result(str)
@@ -4637,13 +4695,39 @@ contains
     endif
   end subroutine fmt_l
 
+   subroutine fmt_r_wid(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=15):: mess,fmt
+    mess=' '
+    write(fmt,'("(G25.",i2,")")') max(1,min(abs(m)-6,10))
+    write(mess,fmt=fmt) v%data%r(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_r_wid
+
+  subroutine fmt_d_wid(v,n,m,str)
+    type(pm_ptr),intent(in):: v
+    integer(pm_ln),intent(in):: n,m
+    character(len=*),intent(out):: str
+    character(len=25):: mess,fmt
+    mess=' '
+    write(fmt,'("(G25.",i2,")")') max(1,min(abs(m)-6,20))
+    write(mess,fmt=fmt) v%data%d(v%offset+n)
+    str=adjustl(mess)
+  end subroutine fmt_d_wid
+
   subroutine fmt_r_dp(v,n,m,str)
     type(pm_ptr),intent(in):: v
     integer(pm_ln),intent(in):: n,m
     character(len=*),intent(out):: str
     character(len=15):: mess,fmt
     mess=' '
-    write(fmt,'("(G15.",i2,")")') min(abs(m),10)
+    if(m>=0) then
+       write(fmt,'("(F15.",i2,")")') min(abs(m),10)
+    else
+       write(fmt,'("(G15.",i2,")")') min(abs(m),10)
+    endif
     write(mess,fmt=fmt) v%data%r(v%offset+n)
     str=adjustl(mess)
   end subroutine fmt_r_dp
@@ -4654,7 +4738,11 @@ contains
     character(len=*),intent(out):: str
     character(len=25):: mess,fmt
     mess=' '
-    write(fmt,'("(G25.",i2,")")') min(abs(m),20)
+    if(m>=0) then
+       write(fmt,'("(F25.",i2,")")') min(abs(m),20)
+    else
+       write(fmt,'("(G25.",i2,")")') min(abs(m),20)
+    endif
     write(mess,fmt=fmt) v%data%d(v%offset+n)
     str=adjustl(mess)
   end subroutine fmt_d_dp
@@ -4709,6 +4797,125 @@ contains
     include 'fesize.inc'
   end function vector_concat_string
 
+
+  !=================================================================================
+  ! Create a substring v1[v2:v3]
+  !  -- ve must be shrunk
+  !==================================================================================
+  function vector_substr(context,ve,v1,v2,v3) result(str)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: ve,v1,v2,v3
+    type(pm_ptr):: str
+    type(pm_ptr),target:: vec,len,off
+    type(pm_ptr):: vec1,len1,off1,s,s1,s2
+    integer(pm_ln):: i,j,k,start1,size,size1,vsize,esize,first,last
+    type(pm_reg),pointer:: reg
+    reg=>pm_register(context,'concat',vec,len,off)
+    vsize=pm_fast_esize(ve)-1
+    vec1=v1%data%ptr(v1%offset+pm_array_vect)
+    len1=v1%data%ptr(v1%offset+pm_array_length)
+    off1=v1%data%ptr(v1%offset+pm_array_offset)
+    esize=pm_fast_esize(len1)
+    len=pm_new(context,pm_long,esize+1)
+    len%data%ln(len%offset:len%offset+esize)=0
+    off=pm_new(context,pm_long,esize+1)
+    off%data%ln(off%offset:off%offset+esize)=0
+    vec=pm_new(context,pm_pointer,esize+1)
+    do i=0,vsize
+       j=ve%data%ln(ve%offset+i)
+       size1=len1%data%ln(len1%offset+j)
+       start1=off1%data%ln(off1%offset+j)
+       first=v2%data%ln(v2%offset+j)
+       last=v3%data%ln(v3%offset+j)
+       first=max(0,min(first,size1-1))
+       last=max(first-1,min(last,size1-1))
+       size=last-first+1
+       len%data%ln(len%offset+j)=size
+       s=pm_new(context,pm_string,size)
+       vec%data%ptr(vec%offset+j)=s
+       s1=vec1%data%ptr(vec1%offset+j)
+       s%data%s(s%offset:s%offset+size-1)=&
+            s1%data%s(s1%offset+start1+first:s1%offset+start1+last)
+    enddo
+    str=make_array(context,pm_array_type,int(pm_string_type),vec,len,len,off)
+    call pm_delete_register(context,reg)
+  contains
+    include 'fesize.inc'
+  end function vector_substr
+
+
+  !=============================================================================
+  ! Lexical comparison of two strings -- should implement lgt or lge
+  ! ve must be shrunk
+  ! returns true if v1>v2 (or v2>=v2 if is_ge is true)
+  !=============================================================================
+  function vector_strcmp(context,ve,v1,v2,is_ge) result(ok)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: ve,v1,v2
+    logical,intent(in):: is_ge
+    type(pm_ptr):: ok
+    type(pm_ptr):: vec1,vec2,len1,len2,off1,off2,s1,s2
+    integer(pm_ln):: i,j,k,start1,start2,size1,size2,vsize,esize,ic1,ic2
+    vsize=pm_fast_esize(ve)-1
+    vec1=v1%data%ptr(v1%offset+pm_array_vect)
+    vec2=v2%data%ptr(v2%offset+pm_array_vect)
+    len1=v1%data%ptr(v1%offset+pm_array_length)
+    len2=v2%data%ptr(v2%offset+pm_array_length)
+    off1=v1%data%ptr(v1%offset+pm_array_offset)
+    off2=v2%data%ptr(v2%offset+pm_array_offset)
+    esize=pm_fast_esize(len1)
+    ok=pm_new(context,pm_logical,esize+1)
+    outer: do i=0,vsize
+       j=ve%data%ln(ve%offset+i)
+       size1=len1%data%ln(len1%offset+j)
+       size2=len2%data%ln(len2%offset+j)
+       start1=off1%data%ln(off1%offset+j)
+       start2=off2%data%ln(off2%offset+j)
+       s1=vec1%data%ptr(vec1%offset+j)
+       s2=vec2%data%ptr(vec2%offset+j)
+       do k=0,min(size1-1,size2-1)
+          ic1=iachar(s1%data%s(s1%offset+start1+k))
+          ic2=iachar(s2%data%s(s2%offset+start2+k))
+          if(ic1>ic2) then
+             ok%data%l(ok%offset+j)=.true.
+             cycle outer
+          elseif(ic2>ic1) then
+             ok%data%l(ok%offset+j)=.false.
+             cycle outer
+          endif
+       enddo
+       if(size1<size2) then
+          do k=size1,size2-1
+             ic1=iachar(' ')
+             ic2=iachar(s2%data%s(s2%offset+start2+k))
+             if(ic1>ic2) then
+                ok%data%l(ok%offset+j)=.true.
+                cycle outer
+             elseif(ic2>ic1) then
+                ok%data%l(ok%offset+j)=.false.
+                cycle outer
+             endif
+          enddo
+       elseif(size1>size2) then
+          do k=size2,size1-1
+             ic1=iachar(s1%data%s(s1%offset+start1+k))
+             ic2=iachar(' ')
+             if(ic1>ic2) then
+                ok%data%l(ok%offset+j)=.true.
+                cycle outer
+             elseif(ic2>ic1) then
+                ok%data%l(ok%offset+j)=.false.
+                cycle outer
+             endif
+          enddo
+       endif
+       ok%data%l(ok%offset+j)=is_ge
+    enddo outer
+  contains
+    include 'fesize.inc'
+  end function vector_strcmp
+
+  
   !=============================================================================
   ! Get string for v[ve[i] where ve must be shrunk
   !=============================================================================

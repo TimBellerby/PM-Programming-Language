@@ -227,8 +227,22 @@ contains
     call out_line_noindent(g,'PROGRAM PM')
     i=iunit
     
-    ! The rtime code calls gen_procs and out_types
-    include 'rtime.inc'
+    call out_line(g," USE ISO_C_BINDING, ONLY: C_PTR,C_LOC,C_F_POINTER")
+    call out_line(g,"USE MPI")
+    call out_line(g,"USE PM__STD")
+    call out_line(g,"IMPLICIT INTEGER(KIND=MPI_ADDRESS_KIND)(I,N),INTEGER (J),LOGICAL(L),TYPE(PM__QBUFFER) (Q)")
+    call out_line(g,"IMPLICIT TYPE(PM__LBUFFER) (R),TYPE(PM__ZBUFFER) (Z),INTEGER(MPI_OFFSET_KIND) (O),TYPE(PM__WBUFFER) (W)")
+    
+    call out_types
+
+    call out_line(g,'CALL PM__INIT_PAR')
+    call out_line(g,'CALL PM__MAKE_MPI_TYPES')
+    call out_line(g,'CALL PM__P0')
+    call out_line(g,'CALL PM__FINALISE_PAR')
+
+    call out_line_noindent(g,"CONTAINS")
+
+    call gen_procs
 
     ! Tidy up
     call out_line_noindent(g,'END PROGRAM PM')
@@ -2366,7 +2380,7 @@ contains
     n=iand(g%codes(l+comp_op_nargs),comp_op_nargs_mask)
     a=l+comp_op_arg0
 
-    if(debug_g) write(*,*) 'GEN OP>',op_names(opcode),opcode2,n,'>',g%codes(a:a+n-1)
+    if(debug_g.or..true.) write(*,*) 'GEN OP>',op_names(opcode),opcode2,n,'>',g%codes(a:a+n-1)
 
     if(pm_opts%ftn_comment_ops) then
        call out_str(g,'! '//trim(op_names(opcode)))
@@ -2927,11 +2941,8 @@ contains
     case(op_array,op_var_array)
        ! V n x
        call out_simple_scalar(g,'IF(ALLOCATED($1%E1%P)) DEALLOCATE($1%E1%P)',l)
-       call out_simple(g,'ALLOCATE($1%E1%P(MAX($4,1)),SOURCE=$2)',l)
+       call out_simple(g,'ALLOCATE($1%E1%P($4),SOURCE=$2)',l)
        call out_simple(g,'$1%E2=$3',l)
-       if(g_type(g,g%codes(a+3))==pm_long) then
-          call out_simple(g,'$1%E3=$4',l)
-       endif
     case(op_fill)
        call gen_loop(g,l,.false.)
        call out_simple(g,'DO IJ=$N+1,$3',l,n=opcode2)
@@ -6230,7 +6241,7 @@ contains
           g%last_ve=ve
        endif
     endif
-    if(g_kind(g,arg1)/=v_is_ctime_const) then
+    if(arg1>0.or.g_kind(g,arg1)/=v_is_ctime_const) then
        call out_simple(g,str,l,n,x)
     endif
   end subroutine out_simple_scalar
@@ -6445,7 +6456,7 @@ contains
   recursive subroutine out_arg(g,avar,opts)
     type(gen_state):: g
     integer,intent(in):: avar,opts
-    integer:: var,i,n,k,gk,aopts
+    integer:: var,i,n,k,gk,aopts,s
     var=abs(avar)
     k=g_kind(g,var)
     select case(k)
@@ -6464,8 +6475,21 @@ contains
     case(v_is_sub)
        call out_arg(g,g_v1(g,var),opts)
        call out_str(g,'%E1%P((')
-       call out_arg(g,g_v2(g,var),opts)
-       call out_str(g,')+1)')
+       s=g_v2(g,var)
+       if(g_kind(g,s)==v_is_group) then
+          n=g_v1(g,s)
+          do i=1,g_v1(g,s)
+             call out_char(g,'(')
+             call out_arg(g,g_ptr(g,s,i),opts)
+             call out_str(g,')+1')
+             if(i/=n) call out_comma(g)
+          enddo
+       else
+          call out_char(g,'(')
+          call out_arg(g,g_v2(g,var),opts)
+          call out_str(g,')+1')
+       endif
+       call out_char(g,')')
     case(v_is_vsub)
        call out_arg(g,g_v1(g,var),opts)
        call out_str(g,'%P((')

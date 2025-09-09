@@ -202,6 +202,7 @@ module pm_types
 
   integer,public,parameter:: pm_partial_mode = (mode_mask+1)**2
   integer,public,parameter:: pm_complete_mode = 2*(mode_mask+1)**2
+
   
 contains
 
@@ -731,6 +732,18 @@ contains
     endif
   end function pm_type_kind
 
+  !===================================
+  ! Return the kind of a given type
+  !===================================
+  function pm_type_base_kind(context,tno) result(kind)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    integer:: kind
+    integer:: flags
+    flags=pm_type_flags(context,tno)
+    kind=iand(flags,pm_type_kind_mask)
+  end function pm_type_base_kind
+  
   !=========================================
   ! Return flags for a given type
   !=========================================
@@ -1476,7 +1489,7 @@ contains
           ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),mode,&
                params,base,user,ubase)
           return
-       elseif(tk/=pm_type_is_user) then
+       elseif(tk==pm_type_is_basic) then
           ok=pm_test_type_includes(context,p,pm_tv_arg(u,1),mode,&
                params,base,user,ubase)
           return
@@ -1682,6 +1695,7 @@ contains
        else
           nt=pm_tv_numargs(t)
           nu=pm_tv_numargs(u)
+          !write(*,*) 'nt=',nt,'nu=',nu
           if(nt>nu.and.uk/=pm_type_is_vtuple) then
              ok=.false.
              return
@@ -1720,10 +1734,12 @@ contains
                    return
                 endif
              enddo
-          else
+          elseif(nt>nu) then
+             ok=.false.
+             return
              do i=nu+1,nt
-                if(.not.pm_test_type_includes(context,pm_tv_arg(t,nt),&
-                     pm_tv_arg(u,i),mode,params,base,&
+                if(.not.pm_test_type_includes(context,pm_tv_arg(t,i),&
+                     pm_tv_arg(u,nu),mode,params,base,&
                      user,ubase)) then
                    ok=.false.
                    return
@@ -3348,7 +3364,9 @@ contains
           return
        endif
        if(pm_tv_name(tv)/=0) then
+   
           amps=pm_name_val(context,pm_tv_name(tv))
+          if(pm_fast_vkind(amps)==pm_int) then
           j=0
           do while(amps%data%i(amps%offset+j)<istart)
              if(j<pm_fast_esize(amps)) j=j+1
@@ -3365,6 +3383,9 @@ contains
              if(add_char('&')) return
           endif
           call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n,infix)
+          else
+            if(add_char('???'//trim(pm_int_as_string(pm_tv_name(tv))))) return
+          endif
        else
           do i=istart,narg-1
              call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)

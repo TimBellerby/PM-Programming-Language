@@ -206,9 +206,9 @@ contains
     if(debug_wcode) then
        write (*,*) 'WCODE PROG>'
     endif
-    call init_wcode_proc(wcd,p)
     cblock=cnode_arg(p,1)
     rv=cnode_arg(p,2)
+    call init_wcode_proc(wcd,p,rv)
     wcd%base=0
     wcd%top=pm_fast_esize(rv)+1
     init_ve=merge(0,pm_stack_nullve,pm_is_compiling)
@@ -248,7 +248,6 @@ contains
        n=p%data%i(p%offset)
        if(pm_is_compiling) vev=pm_fast_esize(p)
        proc=pm_dict_val(wcd%context,wcd%sig_cache,n)
-       call init_wcode_proc(wcd,proc)
        pr=cnode_arg(proc,1)
        rv=cnode_arg(proc,2)
        if(pm_fast_istiny(rv)) then
@@ -256,6 +255,7 @@ contains
        endif
        taints=cnode_arg(proc,3)
        rtype=cnode_num_arg(proc,4)
+       call init_wcode_proc(wcd,proc,rv)
        if(pm_is_compiling) then
           ve=0
        else
@@ -320,9 +320,9 @@ contains
   !====================================================
   ! Initialise wcoder state at start of proc
   !====================================================
-  subroutine init_wcode_proc(wcd,proc)
+  subroutine init_wcode_proc(wcd,proc,rv)
     type(wcoder),intent(inout):: wcd
-    type(pm_ptr),intent(in):: proc
+    type(pm_ptr),intent(in):: proc,rv
     wcd%pc=1
     wcd%last=max_code_size
     wcd%nval=0
@@ -331,7 +331,7 @@ contains
     wcd%avar=0
     wcd%npar=0
     wcd%base=0
-    wcd%top=pm_fast_esize(cnode_arg(proc,2))+1
+    wcd%top=pm_fast_esize(rv)+1
     wcd%xbase=wcd%top
     wcd%rdata(1:wcd%top)=-9999
     wcd%loop_extra_arg=0
@@ -1727,7 +1727,7 @@ contains
          
       enddo
       if(nret>1) then
-         call wc_call(wcd,callnode,op_struct,get_var_type(wcd,cnode_arg(args,1),rv),n+2,1,ve)
+         call wc_call(wcd,callnode,op_rec,get_var_type(wcd,cnode_arg(args,1),rv),n+2,1,ve)
          call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
          do kk=1,n
             call wc(wcd,rets(kk))
@@ -1900,8 +1900,10 @@ contains
           elseif(op==op_elem) then
              if(nargs==4) then
                 tno=check_arg_type(wcd,args,rv,4)
-                p=pm_type_val(wcd%context,tno)
-                op2=p%data%ln(p%offset)+1
+                if(tno>0) then
+                   p=pm_type_val(wcd%context,tno)
+                   op2=p%data%ln(p%offset)+1
+                endif
              endif
           else
               op2=check_arg_type(wcd,args,rv,1)
@@ -2210,6 +2212,8 @@ contains
 
     call save_proc_state
 
+    !if(wcd%top==0) wcd%top=1
+    
     wcd%lbbase=wcd%lbtop
 
     wcd%inline_args=args
@@ -2236,6 +2240,9 @@ contains
     if(debug_wcode) write(*,*) 'Inline>',pm_name_as_string(wcd%context,cnode_get_num(pr,pr_name))
     cblock=cnode_get(pr,pr_cblock)
     rv=cnode_arg(proc,2)
+    if(pm_fast_istiny(rv)) then
+       rv=pm_dict_val(wcd%context,wcd%poly_cache,int(rv%offset,pm_ln))
+    endif
     !nkeys=cnode_get_num(pr,pr_nkeys)
     npar=nret+1
     wcd%keybase=nret
@@ -2289,6 +2296,7 @@ contains
     wcd%xbase=wcd%top
     if(wcd%top>max_code_stack) call pm_panic('out of code stack')
 
+    
     ! Capture excess args into args... stored at top of frame
     if(debug_wcode) write(*,*) 'COPY EXCESSS> ',npar,n
     if(npar<=n) then
@@ -2413,6 +2421,7 @@ contains
   contains
     include 'fesize.inc'
     include 'fisnull.inc'
+    include 'fistiny.inc'
 
     subroutine save_proc_state
       save_lbl=wcd%lbbase
@@ -2580,22 +2589,9 @@ contains
             cvar_ptr(wcd,argslot(2),op2))
        return
     case(op_elem)
-       ! Note -- this only works if op_elem is only applied to a dref.
-       slot=argslot(1)
-       slot2=argslot(2+merge(num_comm_args,0,nargs>3))
-       if(cvar_kind(wcd,slot)==v_is_vect_wrapped) then
-          slot=cvar_v1(wcd,slot)
-       endif
-       if(cvar_kind(wcd,slot2)==v_is_vect_wrapped) then
-          slot2=cvar_v1(wcd,slot2)
-       endif
-       if(cvar_kind(wcd,slot2)==v_is_group.and.&
-            (cvar_v2(wcd,slot2)==v_is_dref.or.cvar_v2(wcd,slot2)==v_is_shared_dref)) then
-          slot2=cvar_ptr(wcd,slot2,op2)
-          call comp_alias_slots(wcd,slot,slot2)
-          return
-       endif
-       call pm_panic('transform op_elem')
+       call comp_get_elem(wcd,op_elem,argslot(1),argslot(2),op2-1)
+       return
+  
 !!$    case(op_intersect_aseq)
 !!$       call wc_call(wcd,callnode,op,op2,nargs+1,ve)
 !!$       call wc(wcd,-argslot(1))
@@ -3405,7 +3401,7 @@ contains
        if(last/=0) then
           wcd%wc(last)=wcd%pc
        endif
-       if(op==op_elem) call pm_panic('op_elem should not be here')
+!       if(op==op_elem) call pm_panic('op_elem should not be here')
        call wc(wcd,0)
        call wc(wcd,modl+line*modl_mult)
     else
@@ -3436,7 +3432,7 @@ contains
     
     flags=cnode_get_num(node,call_flags)
     if(.false..and.(.not.pm_is_compiling).and.&
-         iand(flags,proccall_is_comm+proccall_is_general+proccall_is_ref)/=0) then
+         iand(flags,proccall_is_comm+proccall_is_general+proccall_is_method)/=0) then
        if(pm_is_compiling) then
           call wc(wcd,op)
           call wc(wcd,op2)
@@ -4205,10 +4201,10 @@ contains
     integer:: svec,source,val
     type(pm_ptr):: tv
     if(.not.pm_is_compiling) call pm_panic('wc_get_elem')
-!!$    write(*,*) '====>',elem
-!!$    call dump_cvar(wcd,6,asource)
-!!$    call dump_cvar(wcd,6,dest)
-!!$    write(*,*) '<====='
+    write(*,*) '====>',elem
+    call dump_cvar(wcd,6,asource)
+    call dump_cvar(wcd,6,dest)
+    write(*,*) '<====='
     source=cvar_strip_alias(wcd,asource)
     dest=cvar_strip_alias(wcd,dest)
 !!$    write(*,*) '+====>'
@@ -4225,11 +4221,14 @@ contains
     select case(k)
     case(v_is_basic,v_is_elem,v_is_unit_elem,v_is_sub,v_is_vsub,&
          v_is_vect_wrapped,v_is_chan_vect)
-       if(cvar_kind(wcd,dest)==v_is_group) then
-          tv=pm_type_vect(wcd%context,cvar_type(wcd,dest))
-          call comp_alias_slots(wcd,dest,&
-               cvar_alloc_elem(wcd,source,elem))
-       else
+       k=cvar_kind(wcd,dest)
+       if(k==v_is_group) then
+          if(cvar_v1(wcd,dest)>0) then
+             tv=pm_type_vect(wcd%context,cvar_type(wcd,dest))
+             call comp_alias_slots(wcd,dest,&
+                  cvar_alloc_elem(wcd,source,elem))
+          endif
+       elseif(k/=v_is_const.and.k/=v_is_ctime_const) then
           if(source==dest) then
              dest=cvar_alloc_elem(wcd,source,elem)
           else
@@ -4237,7 +4236,9 @@ contains
           endif
        endif
     case(v_is_group)
-       if(op==op_elem_ref) then
+       if(cvar_v1(wcd,source)==0) then
+          continue
+       elseif(op==op_elem_ref) then
           ! Element of a dref
           val=cvar_strip_alias(wcd,cvar_ptr(wcd,source,1))
           if(source==dest) then
@@ -4342,6 +4343,7 @@ contains
     type(pm_ptr),intent(in):: callnode,rv
     integer:: slot1,slot2,slota
     integer:: k1,k2,i,op
+    type(pm_ptr):: tv1,tv2
 
     slot1=cvar_strip_alias(wcd,aslot1)
     slot2=cvar_strip_alias(wcd,aslot2)
@@ -4377,15 +4379,30 @@ contains
           enddo
        else
           if(slot1==slot2) return
-          call wc_call(wcd,callnode,op_assign,789,3,0,ve)
-          call wc(wcd,-slot1)
-          call wc(wcd,slot2)
+          if(cvar_type(wcd,slot1)==cvar_type(wcd,slot2).or.k2==v_is_const.or.k2==v_is_ctime_const) then
+             call wc_call(wcd,callnode,op_assign,789,3,0,ve)
+             call wc(wcd,-slot1)
+             call wc(wcd,slot2)
+          else
+             tv1=pm_type_vect(wcd%context,cvar_type(wcd,slot1))
+             tv2=pm_type_vect(wcd%context,cvar_type(wcd,slot2))
+             if(pm_debug_checks) then
+                if(pm_tv_kind(tv1)/=pm_type_is_rec.or.pm_tv_kind(tv2)/=pm_type_is_rec) then
+                   call pm_panic('assign-slots')
+                endif
+             endif
+             do i=1,pm_tv_numargs(tv1)
+                call comp_assign_slots(wcd,callnode,cvar_alloc_elem(wcd,slot1,i),&
+                     cvar_alloc_elem(wcd,slot2,i),dup,rv,ve)
+             enddo
+          endif
        endif
     endif
   contains
     include 'fisnull.inc'
   end subroutine comp_assign_slots
 
+  
   !=======================================================================
   ! Code assignment (*slot1a)=>(*slot2a)
   !=======================================================================
@@ -4999,9 +5016,16 @@ contains
     integer,intent(in):: parent,elem
     integer:: n
     type(pm_ptr):: tv
+    integer:: typ
     tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
-    n=cvar_alloc_entry(wcd,merge(v_is_unit_elem,v_is_elem,pm_tv_numargs(tv)==1.and..false.),&
-         parent,elem,pm_tv_arg(tv,elem))
+    typ=pm_tv_arg(tv,elem)
+    write(*,*) 'alloc elem',trim(pm_type_as_string(wcd%context,typ))
+    if(iand(pm_type_flags(wcd%context,typ),pm_type_has_storage)/=0) then
+       n=cvar_alloc_entry(wcd,merge(v_is_unit_elem,v_is_elem,pm_tv_numargs(tv)==1.and..false.),&
+            parent,elem,typ)
+    else
+       n=cvar_alloc(wcd,typ,0)
+    endif
   end function cvar_alloc_elem
 
   !=======================================================================
@@ -5409,7 +5433,7 @@ contains
                   i+j-pm_jump_offset+3+n,')',n,str,line
              write(iunit,*) j,j-pm_jump_offset
           elseif(k>=op_if.and.k<=op_if_restart) then
-             write(iunit,'(i4,1x,a20,i6,1xi6,1h-,i6,11x,i4,1x,a15,i4)') &
+             write(iunit,'(i4,1x,a20,i6,1x,i6,1h-,i6,11x,i4,1x,a15,i4)') &
                   ii,op_names(k),j,code(i+4),code(i+5),n,str,line
              if(k==op_if_shared_node) goto 20
              n=n-3

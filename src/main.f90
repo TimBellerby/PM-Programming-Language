@@ -277,8 +277,8 @@ contains
           call dump_sigs(coder,pm_comp_file_unit)
        else
           call print_cblock_cnode(coder%context,pm_comp_file_unit,pm_null_obj,coder%sig_cache,&
-               coder%vstack(1),2)
-          call print_all_sigs(coder%context,pm_comp_file_unit,coder%sig_cache,coder%sig_cache)
+               pm_null_obj,coder%vstack(1),2)
+          call print_all_sigs(coder%context,pm_comp_file_unit,coder%sig_cache,coder%sig_cache,coder%poly_cache)
        endif
        close(pm_comp_file_unit)
     endif
@@ -325,8 +325,8 @@ contains
           call dump_res_sigs(coder,pm_comp_file_unit)
        else
           call print_cblock_cnode(coder%context,pm_comp_file_unit,cnode_arg(coder%vstack(1),2),coder%sig_cache,&
-               cnode_arg(coder%vstack(1),1),2)
-          call print_all_sigs(coder%context,pm_comp_file_unit,coder%sig_cache,coder%proc_cache)
+               coder%proc_cache,cnode_arg(coder%vstack(1),1),2)
+          call print_all_sigs(coder%context,pm_comp_file_unit,coder%sig_cache,coder%proc_cache,coder%poly_cache)
        endif
        close(pm_comp_file_unit)
     endif
