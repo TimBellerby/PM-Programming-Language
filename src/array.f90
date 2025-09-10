@@ -4701,7 +4701,7 @@ contains
     character(len=*),intent(out):: str
     character(len=15):: mess,fmt
     mess=' '
-    write(fmt,'("(G25.",i2,")")') max(1,min(abs(m)-6,10))
+    write(fmt,'("(G15.",i2,")")') max(1,min(abs(m)-6,10))
     write(mess,fmt=fmt) v%data%r(v%offset+n)
     str=adjustl(mess)
   end subroutine fmt_r_wid

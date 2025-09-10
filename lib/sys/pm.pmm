@@ -114,6 +114,7 @@ PM__intrinsic ++(string,string)->(string) : "concat"
 PM__intrinsic PM__substr(string,int,int)->(string): "substr"
 PM__intrinsic >=(string,string)->(bool) : "string_ge"
 PM__intrinsic >(string,string)->(bool) : "string_gt"
+PM__intrinsic size(string)->(int): "string_len"
 
 proc ++(x:string,y)=$++.(x,string(y))
 proc ++(x,y)=$++.(string(x),string(y))
@@ -431,7 +432,7 @@ PM__intrinsic min(sreal,sreal)->(sreal) : "min_r"
 PM__intrinsic -(sreal)->(sreal) : "uminus_r"
 PM__intrinsic string(sreal)->(string) : "string_r"
 PM__intrinsic _fmt(sreal,int,int)->(string) : "fmt_dp_r"
-PM__intrinsic _fmt(sreal,int)->(string) : "fmt_dp_r"
+PM__intrinsic _fmt(sreal,int)->(string) : "fmt_r"
 PM__intrinsic strunc(sreal)->(sint) : "int_r"
 PM__intrinsic trunc(sreal)->(int) : "long_r"
 PM__intrinsic ltrunc(sreal)->(lint) : "offset_r"
@@ -479,7 +480,7 @@ PM__intrinsic min(real,real)->(real) : "min_d"
 PM__intrinsic -(real)->(real) : "uminus_d"
 PM__intrinsic string(real)->(string) : "string_d"
 PM__intrinsic _fmt(real,int,int)->(string) : "fmt_dp_d"
-PM__intrinsic _fmt(real,int)->(string) : "fmt_dp_d"
+PM__intrinsic _fmt(real,int)->(string) : "fmt_d"
 PM__intrinsic strunc(real)->(sint) : "int_d"
 PM__intrinsic trunc(real)->(int) : "long_d"
 PM__intrinsic ltrunc(real)->(lint) : "offset_d"
@@ -1114,7 +1115,7 @@ type step_base is real_num
 type range(t:range_base,hi:range_base) is rec {_lo:t,_hi:hi,_n:int}
 proc ..(x:range_base,y:range_base)=rec range {
     _lo=xx,_hi=yy,_n=max(0,int(yy-xx)+1)} where xx,yy=balance(x,y)
-proc ..(x:literal(int),y:literal(int))=literal(rec range{_lo=xx,_hi=yy,_n=max(0,yy-xx)+1}) where xx=fix(x),yy=fix(y)
+//proc ..(x:literal(int),y:literal(int))=literal(rec range{_lo=xx,_hi=yy,_n=max(0,yy-xx)+1}) where xx=fix(x),yy=fix(y)
 proc low(x:range)=x._lo
 proc high(x:range)=x._hi
 proc step(x:range)=convert(1,x._lo)

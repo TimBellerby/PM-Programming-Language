@@ -115,8 +115,9 @@ module pm_vmdefs
   integer,parameter:: op_string_ge = op_misc + 31
   integer,parameter:: op_string_gt = op_misc + 32
   integer,parameter:: op_string_fmt = op_misc + 33
+  integer,parameter:: op_string_len = op_misc + 34
 
-  integer,parameter:: op_misc2=op_string_fmt
+  integer,parameter:: op_misc2=op_string_len
 
   integer,parameter:: op_array_get_elem = op_misc2 + 1
   integer,parameter:: op_array_set_elem = op_misc2 + 2
@@ -848,6 +849,7 @@ module pm_vmdefs
   data op_flags(op_string_ge)       /0/
   data op_flags(op_string_gt)       /0/
   data op_flags(op_string_fmt)      /0/
+  data op_flags(op_string_len)      /0/
 
   data op_flags(op_array_get_elem)  /0/
   data op_flags(op_array_set_elem)  /0/
@@ -1563,6 +1565,7 @@ contains
     op_names(op_string_ge)='string_ge'
     op_names(op_string_gt)='string_gt'
     op_names(op_string_fmt)='string_fmt'
+    op_names(op_string_len)='string_len'
 
     op_names(op_array_get_elem)='array_get_elem'
     op_names(op_array_set_elem)='array_set_elem'

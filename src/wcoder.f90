@@ -2399,6 +2399,8 @@ contains
        call close_vars(wcd,cblock,rv,ve,first_pc,num_named,p)
     endif
 
+    call restore_proc_state
+    
     ! Close down parameters releasing vars
     if(.not.pm_is_compiling) then
        do i=nret+1,nargs
@@ -2411,7 +2413,6 @@ contains
        enddo
     endif
 
-    call restore_proc_state
 
     if(pm_is_compiling.and.ve1==shared_op_flag) then
        call comp_finish_block(wcd,pc)
@@ -3840,7 +3841,7 @@ contains
        endif
     endif
     k=k+pm_stack_locals-1
-    if(pm_debug_level>3) write(*,*) 'Alloc var:',k
+    if(debug_wcode) write(*,*) 'ALLOC VAR>',k
   end function alloc_var
 
   !====================================================================
@@ -4011,7 +4012,7 @@ contains
     ok=.false.
     if(cnode_get_kind(arg)==cnode_is_var) then
        if(cnode_flags_clear(arg,var_flags,&
-            ior(var_is_multi_access,var_is_changed))) then
+            var_is_multi_access+var_is_changed+var_is_param)) then
           ok=.true.
        endif
     endif
@@ -4025,8 +4026,8 @@ contains
     logical:: ok
     ok=.false.
     if(cnode_get_kind(arg)==cnode_is_var) then
-      if(.not.cnode_flags_clear(arg,var_flags,&
-            ior(ior(var_is_multi_access,var_is_changed),var_is_param))) then
+       if(.not.cnode_flags_clear(arg,var_flags,&
+            var_is_multi_access+var_is_changed+var_is_param)) then
          ok=.true.
       endif
     endif
@@ -4204,7 +4205,7 @@ contains
     write(*,*) '====>',elem
     call dump_cvar(wcd,6,asource)
     call dump_cvar(wcd,6,dest)
-    write(*,*) '<====='
+    write(*,*) '<=====',pm_type_as_string(wcd%context,cvar_type(wcd,asource))
     source=cvar_strip_alias(wcd,asource)
     dest=cvar_strip_alias(wcd,dest)
 !!$    write(*,*) '+====>'

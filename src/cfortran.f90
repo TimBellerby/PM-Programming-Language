@@ -179,6 +179,7 @@ module pm_backend
   integer,parameter:: arg_wrapped=8
   integer,parameter:: arg_chan=16
   integer,parameter:: arg_no_lit=32
+  integer,parameter:: arg_raw_string=64
  
   ! Type of pack routine (for g_add_packable)
   integer,parameter:: pack_scalar=0
@@ -2934,7 +2935,34 @@ contains
     case(op_print)
        call out_simple_scalar(g,'CALL PM__PRINT($1)',l)
     case(op_concat)
-       call out_simple_scalar(g,'$1=PM__CONCAT_STR($2,$3)',l)
+       call out_simple_scalar(g,'$1%P=$$2//$$3',l)
+    case(op_substr)
+       call out_simple_scalar(g,'$1%P=$$2(($3)+1:($4)+1)',l)
+    case(op_string_len)
+       call out_simple_scalar(g,'$1=LEN($$2)',l) 
+    case(op_string_gt)
+       call out_simple_scalar(g,'$1=LGT($$2,$$3)',l)
+    case(op_string_ge)
+       call out_simple_scalar(g,'$1=LGE($$2,$$3)',l)
+    case(op_string_fmt)
+       call out_simple_scalar(g,'$1=PM__FMT_STRING($2,$3)',l)
+    case(op_fmt_i)
+       call out_simple_scalar(g,'$1=PM__FMT_INT($2,$3)',l)
+    case(op_fmt_ln)
+       call out_simple_scalar(g,'$1=PM__FMT_LONG($2,$3)',l)
+    case(op_fmt_offset)
+       call out_simple_scalar(g,'$1=PM__FMT_OFFSET($2,$3)',l)
+    case(op_fmt_i64)
+       call out_simple_scalar(g,'$1=PM__FMT_INT64($2,$3)',l)
+    case(op_fmt_r)
+       call out_simple_scalar(g,'$1=PM__FMT_REAL($2,$3)',l)
+    case(op_fmt_dp_r)
+       call out_simple_scalar(g,'$1=PM__FMT_REAL_DP($2,$3,$4)',l)
+    case(op_fmt_d)
+       call out_simple_scalar(g,'$1=PM__FMT_DOUBLE($2,$3)',l)
+    case(op_fmt_dp_d)
+       call out_simple_scalar(g,'$1=PM__FMT_DOUBLE_DP($2,$3,$4)',l)
+       
     case(op_check)
        call out_simple_scalar(g,'IF(.NOT.$2) CALL PM__ABORT($1)',l)
     
@@ -5185,7 +5213,7 @@ contains
                       call out_arg(g,g_ptr(g,grid_dim,j),0)
                       call out_char(g,',')
                    else
-                      call out_const(g,pm_type_val(g%context,pm_tv_arg(tv,j)))
+                      call out_const(g,pm_type_val(g%context,pm_tv_arg(tv,j)),0)
                       call out_char(g,',')
                    endif
                 enddo
@@ -6126,7 +6154,7 @@ contains
        else
           val=pm_type_val(g%context,dim)
           call out_str(g,',DIMENSION(')
-          call out_const(g,val)
+          call out_const(g,val,0)
           call out_line(g,')::P')
        endif
        call out_str(g,'END TYPE PM__TV')
@@ -6297,6 +6325,10 @@ contains
              j=j+1
              c=str(j:j)
              call out_arg(g,g%codes(l+comp_op_arg0+iachar(c)-iachar('0')),arg_no_index)
+          case('$')
+             j=j+1
+             c=str(j:j)
+             call out_arg(g,g%codes(l+comp_op_arg0+iachar(c)-iachar('0')),arg_raw_string)
           case('0','1','2','3','4','5','6','7','8','9')
              call out_arg(g,g%codes(l+comp_op_arg0+iachar(c)-iachar('0')),0)
           case('(')
@@ -6505,11 +6537,11 @@ contains
        call out_arg(g,g_v1(g,var),ior(opts,arg_chan))
     case(v_is_const)
        if(iand(opts,arg_no_lit)==0) then
-          call out_const(g,g%fn%data%ptr(g%fn%offset+2+g_v1(g,var)))
+          call out_const(g,g%fn%data%ptr(g%fn%offset+2+g_v1(g,var)),opts)
        endif
     case(v_is_ctime_const)
        if(iand(opts,arg_no_lit)==0) then
-          call out_const(g,g%fn%data%ptr(g%fn%offset+2+g_v1(g,var)))
+          call out_const(g,g%fn%data%ptr(g%fn%offset+2+g_v1(g,var)),opts)
        endif
     case(v_is_cove)
        call out_arg(g,g_v2(g,var),opts)
@@ -6517,9 +6549,9 @@ contains
        call out_arg(g,g_v1(g,var),opts)
     case default
        call out_arg_name(g,var,opts)
-       if(iand(opts,arg_chan)/=0) then
+       if(iand(opts,arg_chan+arg_raw_string)/=0) then
           call out_str(g,'%P')
-          call out_loop_index(g,var,opts)
+          if(iand(opts,arg_chan)/=0) call out_loop_index(g,var,opts)
        elseif(.not.g_flags_set(g,var,v_is_chan)) then
           call out_loop_index(g,var,opts)
        endif
@@ -6592,9 +6624,10 @@ contains
   !====================================================
   ! Output constant value associated with variable v
   !====================================================
-  subroutine out_const(g,v)
+  subroutine out_const(g,v,opts)
     type(gen_state):: g
     type(pm_ptr),intent(in):: v
+    integer,intent(in):: opts
     character(len=ftn_max_line):: buffer
     integer:: vk,i,n
     buffer=' '
@@ -6641,15 +6674,25 @@ contains
     case(pm_string)
        if(g%n+20>ftn_max_line) call out_line_break(g)
        n=pm_fast_esize(v)
-       g%linebuffer(g%n+1:g%n+12)='PM__STRVAL("'
-       g%n=g%n+12
+       if(iand(opts,arg_raw_string)/=0) then
+          g%linebuffer(g%n+1:g%n+1)='"'
+          g%n=g%n+1
+       else
+          g%linebuffer(g%n+1:g%n+12)='PM__STRVAL("'
+          g%n=g%n+12
+       endif
        do i=0,n
           if(g%n>ftn_max_line-5) call out_line_break(g)
           g%n=g%n+1
           g%linebuffer(g%n:g%n)=v%data%s(v%offset+i)
        enddo
-       g%linebuffer(g%n+1:g%n+2)='")'
-       g%n=g%n+2
+       if(iand(opts,arg_raw_string)/=0) then
+          g%linebuffer(g%n+1:g%n+1)='"'
+          g%n=g%n+1
+       else
+          g%linebuffer(g%n+1:g%n+2)='")'
+          g%n=g%n+2
+       endif
        return
     case(0:pm_null)
        return
