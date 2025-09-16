@@ -1470,42 +1470,88 @@ PM__endif
 
 */
 
-PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any)->(*) : "array"
-PM__intrinsic<<needs_type>> _varray(x:any,y:any,z:any)->(*) : "var_array"
+type shape(n:dimension_number,d) is rec{_extent:extent(n),_distr:d}
+proc shape(x,d)=rec shape{_extent=x,_distr=d}
+proc shape(x)=shape(x,null)
+proc string(x:shape)="shape("++x._extent++","++x._distr++")"
+proc #'(x:shape)=x._extent
 
 PM__if_compiling
-PM__intrinsic _array_mshape(x:any^any)->(*) : "get_dom"
-PM__intrinsic _get_aelem(x:any^any,y:int)->(*) : "array_get_elem"
-PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
-proc _point2list(m:_mshape,t:tuple(int,1))=PM__list(t.1-low(mx.1)) where mx=m._extent
-proc _point2list(m:_mshape,t:tuple(int,2))=PM__list(t.1-low(mx.1),t.2-low(mx.2)) where mx=m._extent
-proc _point2list(m:_mshape,t:tuple(int,3))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3)) where mx=m._extent
-proc _point2list(m:_mshape,t:tuple(int,4))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3),t.4-low(mx.4)) where mx=m._extent
-proc _point2list(m:_mshape,t:tuple(int,5))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3),t.4-low(mx.4),t.5-low(mx.5)) where mx=m._extent
-proc _point2list(m:_mshape,t:tuple(int,6))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3),t.4-low(mx.4),t.5-low(mx.5),t.6-low(mx.6)) where mx=m._extent
-proc _point2list(m:_mshape,t:tuple(int,7))=PM__list(t.1-low(mx.1),t.2-low(mx.2),t.3-low(mx.3),t.4-low(mx.4),t.5-low(mx.5),t.6-low(mx.6),t.7-low(mx.7)) where mx=m._extent
-proc array(x,d:extent)=_array(x,_mshape(d),dims(d))
-proc #'(x:any^any)=_array_mshape(x)._extent
-proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2list(_array_mshape(a),t))
-proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2list(_array_mshape(a),t),v)
-proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2list(_array_mshape(a),t),v)
+PM__intrinsic<<needs_type>> _array(x:any,y:any,...:any)->(*) : "array"
+PM__intrinsic<<needs_type>> _varray(x:any,y:any)->(*) : "var_array"
+PM__intrinsic _get_aelem(x:any^any,y:any)->(*) : "array_get_elem"
+PM__intrinsic PM__setaelem(&x:any^any,y:any,z:any): "array_set_elem"
+
+proc _point2list(t:tuple(int,1))=PM__list(t.1) 
+proc _point2list(t:tuple(int,2))=PM__list(t.1,t.2) 
+proc _point2list(t:tuple(int,3))=PM__list(t.1,t.2,t.3)
+proc _point2list(t:tuple(int,4))=PM__list(t.1,t.2,t.3,t.4) 
+proc _point2list(t:tuple(int,5))=PM__list(t.1,t.2,t.3,t.4,t.5) 
+proc _point2list(t:tuple(int,6))=PM__list(t.1,t.2,t.3,t.4,t.5,t.6) 
+proc _point2list(t:tuple(int,7))=PM__list(t.1,t.2,t.3,t.4,t.5,t.6,t.7)
+
+proc array(x,d:extent(1))=_array(x,d,d.1._lo,d.1._hi)
+proc array(x,d:extent(2))=_array(x,d,d.1._lo,d.1._hi,d.2._lo,d.2._hi)
+proc array(x,d:extent(3))=_array(x,d,d.1._lo,d.1._hi,d.2._lo,d.2._hi,d.3._lo,d.3._hi)
+proc array(x,d:extent(4))=_array(x,d,d.1._lo,d.1._hi,d.2._lo,d.2._hi,d.3._lo,d.3._hi,d.4._lo,d.4._hi)
+proc array(x,d:extent(5))=_array(x,d,d.1._lo,d.1._hi,d.2._lo,d.2._hi,d.3._lo,d.3._hi,d.4._lo,d.4._hi,d.5._lo,d.5._hi)
+proc array(x,d:extent(6))=_array(x,d,d.1._lo,d.1._hi,d.2._lo,d.2._hi,d.3._lo,d.3._hi,d.4._lo,d.4._hi,d.5._lo,d.5._hi,d.6._lo,d.6._hi)
+proc array(x,d:extent(7))=_array(x,d,d.1._lo,d.1._hi,d.2._lo,d.2._hi,d.3._lo,d.3._hi,d.4._lo,d.4._hi,d.5._lo,d.5._hi,d.6._lo,d.6._hi,d.7._lo,d.7._hi)
+
+PM__intrinsic _lbound1(any^any)->(int): "lower_bound"(1)
+PM__intrinsic _lbound2(any^any)->(int): "lower_bound"(2)
+PM__intrinsic _lbound3(any^any)->(int): "lower_bound"(3)
+PM__intrinsic _lbound4(any^any)->(int): "lower_bound"(4)
+PM__intrinsic _lbound5(any^any)->(int): "lower_bound"(5)
+PM__intrinsic _lbound6(any^any)->(int): "lower_bound"(6)
+PM__intrinsic _lbound7(any^any)->(int): "lower_bound"(7)
+
+PM__intrinsic _ubound1(any^any)->(int): "upper_bound"(1)
+PM__intrinsic _ubound2(any^any)->(int): "upper_bound"(2)
+PM__intrinsic _ubound3(any^any)->(int): "upper_bound"(3)
+PM__intrinsic _ubound4(any^any)->(int): "upper_bound"(4)
+PM__intrinsic _ubound5(any^any)->(int): "upper_bound"(5)
+PM__intrinsic _ubound6(any^any)->(int): "upper_bound"(6)
+PM__intrinsic _ubound7(any^any)->(int): "upper_bound"(7)
+
+proc #'(x:any^extent(1))=shape([_lbound1(x).._ubound1(x)])
+proc #'(x:any^extent(2))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x)])
+proc #'(x:any^extent(3))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x)])
+proc #'(x:any^extent(4))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x)])
+proc #'(x:any^extent(5))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x)])
+proc #'(x:any^extent(6))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x),_lbound6(x).._ubound6(x)])
+proc #'(x:any^extent(7))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x),_lbound6(x).._ubound6(x),_lbound7(x).._ubound7(x)])
+
+proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,t)//_point2list(t))
+proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v)//_point2list(t),v)
+proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v) //_point2list(t),v)
 proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,t)
 proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v)
 proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v)
+proc _make_subref(a:any^any,t:tuple(int))=_make_subref(a,_point2list(t))
+PM__intrinsic _make_subref(a:any^any,i:PM__list)->(*) : "make_rf"
+
 PM__else
+
+PM__intrinsic<<needs_type>> _array(x:any,y:any,z:any)->(*) : "array"
+PM__intrinsic<<needs_type>> _varray(x:any,y:any,z:any)->(*) : "var_array"
 PM__intrinsic _array_mshape(x:any^any)->(*) : "get_dom"
 PM__intrinsic _get_aelem(x:any^any,y:int)->(*) : "array_get_elem"
 PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 PM__intrinsic PM__setmaelem(&x:any^any,y:int,z:any): "array_set_multi_elem"
 proc array(x,d:extent)=_array(x,_mshape(d),size(d))
-proc #'(x:any^any)=_array_mshape(x)._extent
+proc #'(x:any^any)=shape(_array_mshape(x)._extent,null)
 proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
 proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
 proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(_array_mshape(PM__import(a)),t),v)
 proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(#(a),t))
 proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(#(a),t),v)
 proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(PM__import(#a),t),v)
+proc _make_subref(a:any^any,t:tuple(int))=_make_subref(a,_point2index(_array_mshape(a),t))
+PM__intrinsic _make_subref(a:any^any,i:int)->(*) : "make_rf"
 PM__endif
+
+PM__intrinsic size(x:any^any)->(int) : "get_size"
 
 /*
 PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
@@ -1528,8 +1574,7 @@ PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 
 */
 
-proc _make_subref(a:any^any,t:tuple(int))=_make_subref(a,_point2index(_array_mshape(a),t))
-PM__intrinsic _make_subref(a:any^any,i:int)->(*) : "make_rf"
+
 
 type _mshape(ndim:dimension_number,contig:literal(bool)) is rec {_extent:extent(ndim),_m:tuple(int,ndim),_n:int,_o:int,_c:contig}
 proc _mshape(g:extent(1))=rec _mshape{_extent=g,_m=[1],_n=size(g.1),_o=o,_c=true} where o=-_point2index(dims(g),low(g))

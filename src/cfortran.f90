@@ -359,7 +359,7 @@ contains
     g%cstack(g%depth)=bset_new(g,0)
     if(size(g%codes)>0)call record_vars_for_block(g,start)
 
-    call g_print_out(g,69,no+1,.true.)
+    !call g_print_out(g,69,no+1,.true.)
         
     ! Phase I - analyse variable use to determine variable lifetimes
     ! and which variables need to be
@@ -2381,7 +2381,7 @@ contains
     n=iand(g%codes(l+comp_op_nargs),comp_op_nargs_mask)
     a=l+comp_op_arg0
 
-    if(debug_g.or..true.) write(*,*) 'GEN OP>',op_names(opcode),opcode2,n,'>',g%codes(a:a+n-1)
+    if(debug_g) write(*,*) 'GEN OP>',op_names(opcode),opcode2,n,'>',g%codes(a:a+n-1)
 
     if(pm_opts%ftn_comment_ops) then
        call out_str(g,'! '//trim(op_names(opcode)))
@@ -2632,15 +2632,7 @@ contains
        g%lalt=i
        call gen_block(g,g%codes(a+1))
        g%lalt=-1
-    case(op_get_size)
-       call gen_loop(g,l,.true.)
-       if(g_kind(g,g%codes(a+2))==v_is_group) then
-          call out_simple_part(g,'$1=SIZE(',l)
-          call out_arg(g,g_ptr(g,g%codes(a+2),1),0)
-          call out_line(g,'%P)')
-       else
-          call out_simple(g,'$1=SIZE($2%E1%P)',l)
-       endif
+ 
     case(op_dref,op_init_var,op_must_compute)
        ! This does not generate code
        ! - just present for Phase I
@@ -2789,7 +2781,7 @@ contains
        call gen_stacked_ve(g,l,g%codes(a),g%codes(a+1))
        call gen_loop(g,l,.true.)
     case(op_wshare)
-       call out_simple_scalar(g,'$1=PM__WSHARE($2%E1%P,$3,$4,$5)',l)
+       call out_simple_scalar(g,'$1=PM__WSHARE($2%P,$3,$4,$5)',l)
     case(op_sys_node)
        call out_simple_scalar(g,'$1=PM__SYS_NODE',l)
     case(op_sys_nnode)
@@ -2867,35 +2859,35 @@ contains
     case(op_intersect_aseq)
        if(opcode2==0) then
           call out_simple_scalar(g,&
-               'CALL PM__INTERSECT_ASEQ($2%E1%P,$3,$4%E1%P,$5,$6%E1%P,$1)',l)
+               'CALL PM__INTERSECT_ASEQ($2%P,$3,$4%P,$5,$6%P,$1)',l)
        elseif(opcode2==1) then
           call out_simple_scalar(g,&
-               'CALL PM__OVERLAP_ASEQ($2%E1%P,$3,$4%E1%P,$5,$6%E1%P,$1)',l)
+               'CALL PM__OVERLAP_ASEQ($2%P,$3,$4%P,$5,$6%P,$1)',l)
        else
           call out_simple_scalar(g,&
-               'CALL PM__OVERLAP_ASEQ2($2%E1%P,$3,$4%E1%P,$5,$6%E1%P,$7%E1%P,$1)',l)
+               'CALL PM__OVERLAP_ASEQ2($2%P,$3,$4%P,$5,$6%P,$7%P,$1)',l)
        endif
     case(op_intersect_bseq)
        if(opcode2==0) then
           call out_simple_scalar(g,&
-               'CALL PM__INTERSECT_BSEQ($3,$4,$5,$6,$7,$8,$9,$(10),$(11),$(12),$2%E1%P,$1)',l)
+               'CALL PM__INTERSECT_BSEQ($3,$4,$5,$6,$7,$8,$9,$(10),$(11),$(12),$2%P,$1)',l)
        elseif(opcode2==1) then
           call out_simple_scalar(g,&
-               'CALL PM__OVERLAP_BSEQ($3,$4,$5,$6,$7,$8,$9,$(10),$(11),$(12),$2%E1%P,$1)',l)
+               'CALL PM__OVERLAP_BSEQ($3,$4,$5,$6,$7,$8,$9,$(10),$(11),$(12),$2%P,$1)',l)
        else
           call out_simple_scalar(g,&
-            'CALL PM__OVERLAP_BSEQ2($4,$5,$6,$7,$8,$9,$(10),$(11),$(12),$(13),$2%E1%P,$3%E1%P,$1)',l)
+            'CALL PM__OVERLAP_BSEQ2($4,$5,$6,$7,$8,$9,$(10),$(11),$(12),$(13),$2%P,$3%P,$1)',l)
        endif
     case(op_expand_aseq)
-       call out_simple_scalar(g,'PM__EXPAND_ASEQ($3%E1%P,$4,$5,$6,$2%E1%P,$1)',l)
+       call out_simple_scalar(g,'PM__EXPAND_ASEQ($3%P,$4,$5,$6,$2%P,$1)',l)
     case(op_includes_aseq)
-       call out_simple_scalar(g,'$1=PM__ASEQ_INCLUDES($2%E1%P,$3,$4%E1%P,$5)',l)
+       call out_simple_scalar(g,'$1=PM__ASEQ_INCLUDES($2%P,$3,$4%P,$5)',l)
     case(op_index_aseq)
-       call out_simple_scalar(g,'$1=PM__ASEQ_INDEX($2%E1%P,$3,$4)',l)
+       call out_simple_scalar(g,'$1=PM__ASEQ_INDEX($2%P,$3,$4)',l)
     case(op_in_aseq)
-       call out_simple_scalar(g,'INDEX=PM__ASEQ_INDEX($2%E1%P,$3,$4)',l)
+       call out_simple_scalar(g,'INDEX=PM__ASEQ_INDEX($2%P,$3,$4)',l)
        call out_simple_scalar(g,'$1=INDEX>=0.and.INDEX<$3',l)
-       call out_simple_scalar(g,'IF($1) $1=$2%E1%P(INDEX+1)==$4',l)
+       call out_simple_scalar(g,'IF($1) $1=$2%P(INDEX+1)==$4',l)
     case(op_assign)
        if(.not.(g_vars_are_merged(g,g%codes(a+1),g%codes(a+2)).or.&
             g_var_is_dead(g,g%codes(a+1)))) then
@@ -2916,7 +2908,7 @@ contains
        if(pm_opts%ftn_annotate) then
           call out_comment_line(g,'! INIT FARRAY')
        endif
-       call out_simple_scalar(g,'$1%E1%P=$2',l)
+       call out_simple_scalar(g,'$1%P=$2',l)
     case(op_assign_farray)
        if(pm_opts%ftn_annotate) then
           call out_comment_line(g,'! ASSIGN FARRAY')
@@ -2967,10 +2959,28 @@ contains
        call out_simple_scalar(g,'IF(.NOT.$2) CALL PM__ABORT($1)',l)
     
     case(op_array,op_var_array)
-       ! V n x
-       call out_simple_scalar(g,'IF(ALLOCATED($1%E1%P)) DEALLOCATE($1%E1%P)',l)
-       call out_simple(g,'ALLOCATE($1%E1%P($4),SOURCE=$2)',l)
-       call out_simple(g,'$1%E2=$3',l)
+       call out_simple_scalar(g,'IF(ALLOCATED($1%P)) DEALLOCATE($1%P)',l)
+       call out_simple_part(g,'ALLOCATE($1%P(',l)
+       do i=4,n-1,2
+          call out_arg(g,g%codes(a+i),0)
+          call out_char(g,':')
+          call out_arg(g,g%codes(a+i+1),0)
+          if(i/=n-2) call out_char(g,',')
+       enddo
+       call out_simple(g,'),SOURCE=$2)',l)
+    case(op_get_size)
+       call gen_loop(g,l,.true.)
+       if(g_kind(g,g%codes(a+2))==v_is_group) then
+          call out_simple_part(g,'$1=SIZE(',l)
+          call out_arg(g,g_ptr(g,g%codes(a+2),1),0)
+          call out_line(g,'%P)')
+       else
+          call out_simple(g,'$1=SIZE($2%P)',l)
+       endif
+    case(op_upper_bound)
+       call out_simple_scalar(g,'$1=UBOUND($2%P,$N,PM__LN)',l,n=opcode2)
+    case(op_lower_bound)
+       call out_simple_scalar(g,'$1=LBOUND($2%P,$N,PM__LN)',l,n=opcode2)
     case(op_fill)
        call gen_loop(g,l,.false.)
        call out_simple(g,'DO IJ=$N+1,$3',l,n=opcode2)
@@ -3543,7 +3553,7 @@ contains
                       call out_simple(g,'I$N_$M=$I(I$N__$M)',&
                            n=i,m=g%depth,x=g_ptr(g,array,1))
                    else
-                      call out_simple(g,'I$N_$M=$I%E1%P(I$N__$M)',&
+                      call out_simple(g,'I$N_$M=$I%P(I$N__$M)',&
                            n=i,m=g%depth,x=array)
                    endif
                    nloops=nloops+1
@@ -3575,9 +3585,9 @@ contains
                 nloops=nloops+1
              endif
           else
-             call out_simple(g,'DO I$N__$M=1,SIZE($I%E1%P)',&
+             call out_simple(g,'DO I$N__$M=1,SIZE($I%P)',&
                   n=i,m=g%depth,x=vdim)
-             call out_simple(g,'I$N_$M=$I%E1%P(I$N__$M)',&
+             call out_simple(g,'I$N_$M=$I%P(I$N__$M)',&
                   n=i,m=g%depth,x=vdim)
              nloops=nloops+1
           endif
@@ -3642,7 +3652,7 @@ contains
              endif
           else
              ! Array
-             call out_simple_part(g,'DO I$N___$M=1,SIZE($I%E1%P),',&
+             call out_simple_part(g,'DO I$N___$M=1,SIZE($I%P),',&
                   n=i,m=g%depth,x=vdim)
              call out_simple(g,',$I%E$N',x=vblock,n=i)
              nloops=nloops+1
@@ -4599,7 +4609,7 @@ contains
     !write(*,*) 'SENDING OUT COMM',mode,g%depth,g_depth(g,v)
     call out_arg(g,v,merge(0,arg_no_index,mode==mode_array))
     if(mode==mode_array) then
-       call out_str(g,'%E1%P')
+       call out_str(g,'%P')
     elseif(mode==mode_array_vect) then
        call out_str(g,'%P')
     endif
@@ -5196,7 +5206,7 @@ contains
                    call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A,1_PM__LN,JTYPE_N)',&
                         x=g_ptr(g,offsets,1))
                 elseif(pm_type_kind(g%context,g_type(g,offsets))==pm_type_is_array) then
-                   call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A%E1%P,1_PM__LN,JTYPE_N)',&
+                   call out_simple(g,'CALL PM__GET_MPI_DISP_TYPE(JTYPE,$A%P,1_PM__LN,JTYPE_N)',&
                         x=offsets)
                 else
                    call pm_panic('grid dim array is not an array')
@@ -5565,10 +5575,10 @@ contains
       case(pm_type_is_array)
          write(ibuffer,'(i5)') depth+1
          ibuffer=adjustl(ibuffer)
-         call out_line(g,'NP'//trim(ibuffer)//'=SIZE('//varname//'%E1%P)')
+         call out_line(g,'NP'//trim(ibuffer)//'=SIZE('//varname//'%P)')
          call outpack(int(pm_long),'NP'//trim(ibuffer),depth)
          call out_line(g,'DO IP'//trim(ibuffer)//'=1,NP'//trim(ibuffer))
-         call outpack(pm_tv_arg(tv,1),varname//'%E1%P(IP'//trim(ibuffer)//')',depth+1)
+         call outpack(pm_tv_arg(tv,1),varname//'%P(IP'//trim(ibuffer)//')',depth+1)
          call out_line(g,'ENDDO')
          call outpack(pm_tv_arg(tv,2),varname//'%E2',depth)
       case(pm_type_is_rec,pm_type_is_dref)
@@ -5692,10 +5702,10 @@ contains
          write(ibuffer,'(i5)') depth+1
          ibuffer=adjustl(ibuffer)
          call outunpack(int(pm_long),'NP'//trim(ibuffer),depth)
-         call out_line(g,'IF(ALLOCATED('//varname//'%E1%P)) DEALLOCATE('//varname//'%E1%P)')
-         call out_line(g,'ALLOCATE('//varname//'%E1%P(NP'//trim(ibuffer)//'))')
+         call out_line(g,'IF(ALLOCATED('//varname//'%P)) DEALLOCATE('//varname//'%P)')
+         call out_line(g,'ALLOCATE('//varname//'%P(NP'//trim(ibuffer)//'))')
          call out_line(g,'DO IP'//trim(ibuffer)//'=1,NP'//trim(ibuffer))
-         call outunpack(pm_tv_arg(tv,1),varname//'%E1%P(IP'//trim(ibuffer)//')',depth+1)
+         call outunpack(pm_tv_arg(tv,1),varname//'%P(IP'//trim(ibuffer)//')',depth+1)
          call out_line(g,'ENDDO')
          call outunpack(pm_tv_arg(tv,2),varname//'%E2',depth)
       case(pm_type_is_rec,pm_type_is_dref)
@@ -5868,7 +5878,7 @@ contains
           ibuffer=adjustl(ibuffer)
           call get_vect_size(varname)
           call out_simple(g,'DO IP$N=1,NP$N',n=depth+1)
-          call outcount(g,pm_tv_arg(tv,1),varname//'%E1%P(IP'//trim(ibuffer)//')',depth+1)
+          call outcount(g,pm_tv_arg(tv,1),varname//'%P(IP'//trim(ibuffer)//')',depth+1)
           call out_line(g,'ENDDO')
        else
           call get_vect_size(varname)
@@ -5913,7 +5923,7 @@ contains
     
     subroutine get_vect_size(var)
       character(len=*):: var
-      call out_simple(g,'NP$N=SIZE('//var//'%E1%P)',n=depth+1)
+      call out_simple(g,'NP$N=SIZE('//var//'%P)',n=depth+1)
     end subroutine get_vect_size
   end subroutine outcount
 
@@ -6033,30 +6043,7 @@ contains
        write(*,*) 'VAR>>',i,oindex,' ',trim(pm_type_as_string(g%context,g%vardata(i)%tno))
     endif
 
-!!$    if(g_kind(g,oindex)==v_is_basic) call out_simple(g,'!'//&
-!!$         trim(pm_name_as_string(g%context,g_v1(g,oindex))))
-    
-!!$    call out_simple_part(g,'! idx=$N / depth=$M '//&
-!!$         trim(pm_type_as_string(g%context,g%vardata(i)%tno)),&
-!!$         n=g%vardata(i)%oindex,m=g%vardata(i)%depth)
-!!$    call out_simple_part(g,'/ flags=$N state=$M',n=g%vardata(i)%flags,m=g%vardata(i)%state)
-!!$    call out_simple_part(g,'/ start=$N finish=$M',n=g%vardata(i)%start,m=g%vardata(i)%finish)
-!!$    call out_simple(g,'/ end_assign=$N',n=merge(1,0,g%vardata(i)%finish_on_assign))
-    
-    if(iand(flags,v_is_chan)/=0) then
-       call out_str(g,'TYPE(PM__TV')
-       call out_type_idx(g,g%vardata(i)%tno)
-       call out_str(g,'_7)')
-       isvect=.false.
-    elseif(iand(flags,v_is_array_par_vect)/=0) then
-       call out_str(g,'TYPE(PM__TV')
-       call out_type_idx(g,g%vardata(i)%tno)
-       call out_char(g,'_')
-       call out_type_idx(g,g_v1(g,oindex))
-       call out_char(g,')')
-    else
-       call out_type(g,g%vardata(i)%tno)
-    endif
+    call out_type(g,g%vardata(i)%tno)
 
     if(iand(flags,v_is_ref+v_is_param)==v_is_ref+v_is_param) then
        call out_str(g,',INTENT(INOUT)')
@@ -6121,7 +6108,7 @@ contains
     keys=pm_set_keys(g%context,typeset)
     do i=0,pm_set_size(g%context,typeset)-1
        key=keys%data%ptr(keys%offset+i)
-       call out_type_def(g,key%data%i(key%offset),key%data%i(key%offset+1))
+       call out_type_def(g,key%data%i(key%offset))
        call out_new_line(g)
     enddo
   contains
@@ -6134,35 +6121,14 @@ contains
   ! - dim==pm_long  : allocatable vector
   ! - dim==...      : fixed length vector
   !========================================
-  subroutine out_type_def(g,tno,dim)
+  subroutine out_type_def(g,tno)
     type(gen_state):: g
-    integer,intent(in):: tno,dim
+    integer,intent(in):: tno
     type(pm_ptr):: tv,val
-    integer:: i,n,k 
+    integer:: i,n,k,etyp 
     if(tno==0) return
     if(iand(pm_type_flags(g%context,tno),&
          pm_type_has_storage)==0) return
-    if(dim>0) then
-       call out_comment_line(g,trim(pm_type_as_string(g%context,tno)))
-       call out_str(g,'TYPE PM__TV')
-       call out_idx(g,tno)
-       call out_char_idx(g,'_',dim)
-       call out_new_line(g)
-       call out_type(g,tno)
-       if(dim==pm_long) then
-          call out_line(g,',DIMENSION(:),ALLOCATABLE::P')
-       else
-          val=pm_type_val(g%context,dim)
-          call out_str(g,',DIMENSION(')
-          call out_const(g,val,0)
-          call out_line(g,')::P')
-       endif
-       call out_str(g,'END TYPE PM__TV')
-       call out_idx(g,tno)
-       call out_char_idx(g,'_',dim)
-       call out_new_line(g)
-       return
-    endif
     call out_char(g,'!')
     call out_comment_line(g,trim(pm_type_as_string(g%context,tno)))
     call out_str(g,'TYPE PM__T')
@@ -6173,18 +6139,23 @@ contains
     n=pm_tv_numargs(tv)
     k=pm_tv_kind(tv)
     if(k==pm_type_is_array) then
-       call out_str(g,'TYPE(PM__TV')
-       if(iand(pm_type_flags(g%context,pm_tv_arg(tv,1)),&
-            pm_type_has_storage)/=0) then
-          call out_type_idx(g,pm_tv_arg(tv,1))
-          call out_char(g,'_')
-          call out_type_idx(g,pm_tv_arg(tv,3))
-          call out_line(g,')::E1')
-       endif
-       if(iand(pm_type_flags(g%context,pm_tv_arg(tv,2)),&
-            pm_type_has_storage)/=0) then
-          call out_type(g,pm_tv_arg(tv,2))
-          call out_line(g,'::E2')
+       etyp=pm_tv_arg(tv,1)
+       if(pm_type_is_soa_rec(g%context,etyp)) then
+          tv=pm_type_vect(g%context,etyp)
+          do i=1,pm_tv_numargs(tv)
+             if(iand(pm_type_flags(g%context,pm_tv_arg(tv,i)),&
+                  pm_type_has_storage)/=0) then
+                call out_type(g,pm_type_soa_elem(g%context,tno,i))
+                call out_str(g,'::E')
+                call out_idx(g,i)
+                call out_new_line(g)
+             endif
+          enddo
+       else
+          call out_type(g,pm_tv_arg(tv,1))
+          call out_line(g,',DIMENSION(:'//&
+               repeat(',:',pm_arr_type_ndims(g%context,tno)-1)//&
+               '),ALLOCATABLE::P')
        endif
     elseif(k==pm_type_is_vect) then
        continue
@@ -6506,20 +6477,16 @@ contains
        enddo
     case(v_is_sub)
        call out_arg(g,g_v1(g,var),opts)
-       call out_str(g,'%E1%P((')
+       call out_str(g,'%P(')
        s=g_v2(g,var)
        if(g_kind(g,s)==v_is_group) then
           n=g_v1(g,s)
           do i=1,g_v1(g,s)
-             call out_char(g,'(')
              call out_arg(g,g_ptr(g,s,i),opts)
-             call out_str(g,')+1')
              if(i/=n) call out_comma(g)
           enddo
        else
-          call out_char(g,'(')
           call out_arg(g,g_v2(g,var),opts)
-          call out_str(g,')+1')
        endif
        call out_char(g,')')
     case(v_is_vsub)

@@ -2467,7 +2467,7 @@ contains
     integer,intent(in):: op,op2,nargs,totargs,nret,ve,ve2,extra_ve
     integer,dimension(totargs):: conv
     logical:: finished
-    integer:: slot,slot2,slot3,i,n
+    integer:: slot,slot2,slot3,i,j,n
     integer,dimension(totargs):: argslot
     type(pm_ptr):: p
 
@@ -2511,6 +2511,13 @@ contains
        call comp_assign_slots(wcd,callnode,&
             argslot(1),argslot(2),.false.,rv,ve)
        return
+    case(op_array,op_var_array)
+       slot2=cvar_strip_alias(wcd,argslot(2))
+       if(cvar_kind(wcd,slot2)==v_is_group) then
+          call comp_op_alloc_group(wcd,callnode,op,&
+               argslot(1),slot2,argslot(3:totargs-1),ve)
+          return
+       endif
     case(op_redim)
        slot=argslot(1)
        slot2=argslot(2)
@@ -2540,6 +2547,15 @@ contains
             cvar_v1(wcd,slot2),&
             argslot(3),cvar_type(wcd,slot)))
        call wc_call(wcd,callnode,op_break_loop,0,2,0,ve)
+       call wc(wcd,slot)
+       return
+    case(op_get_size,op_lower_bound,op_upper_bound)
+       call wc_call(wcd,callnode,op,op2,3,1,ve)
+       call wc(wcd,-argslot(1))
+       slot=comp_find_non_group(wcd,argslot(2))
+       if(pm_debug_checks) then
+          if(slot<0) call pm_panic('Transform size/lbound/ubound')
+       endif
        call wc(wcd,slot)
        return
     case(op_get_dom)
@@ -4274,30 +4290,53 @@ contains
     end select
   end subroutine comp_get_elem
 
+  !=======================================================================
+  ! Allocate an SOA array - create separate call to allocate each element
+  !=======================================================================
+  recursive subroutine comp_op_alloc_group(wcd,callnode,op,slot1,slot2,slots,ve)
+    type(wcoder),intent(inout):: wcd
+    type(pm_ptr),intent(in):: callnode
+    integer,intent(in):: op,slot1,slot2,slots(:),ve
+    integer:: i,j,slot1i,slot2i
+    if(pm_debug_checks) then
+       if(cvar_kind(wcd,slot1)/=v_is_group) call pm_panic('comp_op_alloc_group')
+    endif
+    do i=1,cvar_v1(wcd,slot2)
+       slot1i=cvar_ptr(wcd,slot1,i)
+       slot2i=cvar_ptr(wcd,slot2,i)
+       if(cvar_kind(wcd,slot2i)==v_is_group) then
+          call comp_op_alloc_group(wcd,callnode,op,slot1i,slot2i,slots,ve)
+       else
+          write(*,*)'@>>>',slots
+          call wc_call(wcd,callnode,op,0,3+size(slots),1,ve)
+          call wc(wcd,-slot1i)
+          call wc(wcd,slot2i)
+          do j=1,size(slots)
+             call wc(wcd,slots(j))
+          enddo
+       endif
+    enddo
+  end subroutine comp_op_alloc_group
 
   !=======================================================================
-  ! Set variable to be a subscript reference
+  ! Return first (left recursive) non-group element in a group variable
   !=======================================================================
-  subroutine comp_get_subs(wcd,n,aparent,asubs)
+  recursive function comp_find_non_group(wcd,avar) result(array)
     type(wcoder),intent(inout):: wcd
-    integer,intent(in):: aparent,asubs
-    integer:: n,parent,subs
-    type(pm_ptr):: tv
-!!$    write(*,*) 'GETSUBS'
-!!$    call dump_cvar(wcd,6,aparent)
-    parent=cvar_strip_alias(wcd,aparent)
-    subs=cvar_strip_alias(wcd,asubs)
-    tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
-    if(cvar_kind(wcd,parent)==v_is_group) then
-       call cvar_set_info(wcd,n,v_is_vsub,&
-            cvar_ptr(wcd,parent,1),subs,pm_tv_arg(tv,1))
+    integer,intent(in):: avar
+    integer:: array
+    integer:: var,i
+    var=cvar_strip_alias(wcd,avar)
+    array=-1
+    if(cvar_kind(wcd,var)==v_is_group) then
+       do i=1,cvar_v1(wcd,var)
+          array=comp_find_non_group(wcd,cvar_ptr(wcd,var,i))
+          if(array>=0) return
+       enddo
     else
-       call cvar_set_info(wcd,n,v_is_sub,&
-            parent,subs,pm_tv_arg(tv,1))
+       array=var
     endif
-!!$    write(*,*) '***'
-!!$    call dump_cvar(wcd,6,n)
-  end subroutine comp_get_subs
+  end function comp_find_non_group
 
   !=======================================================================
   ! Return subscript reference as new variable
@@ -4306,11 +4345,66 @@ contains
     type(wcoder),intent(inout):: wcd
     integer,intent(in):: parent,subs
     integer:: n
-    type(pm_ptr):: tv
-    tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
-    n=cvar_alloc_slots(wcd,3)
+    integer:: tno
+    tno=pm_type_arg(wcd%context,cvar_type(wcd,parent),1)
+    n=cvar_alloc(wcd,tno,0)
     call comp_get_subs(wcd,n,parent,subs)
   end function comp_subs
+  
+  !=======================================================================
+  ! Set variable to be a subscript reference
+  !=======================================================================
+  recursive subroutine comp_get_subs(wcd,n,aparent,asubs)
+    type(wcoder),intent(inout):: wcd
+    integer,intent(in):: aparent,asubs
+    integer:: n,parent,subs,nsubs,i,ptype,ndim
+    type(pm_ptr):: tv
+    write(*,*) 'GETSUBS'
+    call dump_cvar(wcd,6,aparent)
+    write(*,*) 'WITH'
+    call dump_cvar(wcd,6,asubs)
+    parent=cvar_strip_alias(wcd,aparent)
+    subs=cvar_strip_alias(wcd,asubs)
+    ptype=cvar_type(wcd,parent)
+    tv=pm_type_vect(wcd%context,ptype)
+
+    if(cvar_kind(wcd,n)==v_is_group) then
+       if(cvar_kind(wcd,parent)==v_is_group) then
+          do i=1,cvar_v1(wcd,parent)
+             call comp_get_subs(wcd,cvar_ptr(wcd,n,i),cvar_ptr(wcd,parent,i),subs)
+          enddo
+       else
+          do i=1,cvar_v1(wcd,parent)
+             call comp_get_subs(wcd,cvar_ptr(wcd,n,i),cvar_alloc_elem(wcd,parent,i),subs)
+          enddo
+       endif
+    else
+       if(cvar_kind(wcd,parent)==v_is_group) then
+          call pm_panic('comp_get_subs - basic = group [subs]')
+       else
+          if(cvar_kind(wcd,subs)/=v_is_group) then
+             write(*,*) 'ptype=',pm_type_as_string(wcd%context,ptype)
+             ndim=pm_arr_type_ndims(wcd%context,ptype)
+             if(ndim>1) then
+                nsubs=cvar_alloc_slots(wcd,3+ndim)
+                call cvar_set_info(wcd,nsubs,v_is_group,ndim,v_is_list,cvar_type(wcd,subs))
+                do i=1,ndim
+                   call cvar_set_ptr(wcd,nsubs,i,cvar_alloc_elem(wcd,subs,i))
+                enddo
+             else
+                nsubs=cvar_alloc_elem(wcd,subs,1)
+             endif
+             subs=nsubs
+          endif
+          call cvar_set_info(wcd,n,v_is_sub,&
+               parent,subs,cvar_type(wcd,n))
+       endif
+    endif
+!!$    write(*,*) '***'
+!!$    call dump_cvar(wcd,6,n)
+  end subroutine comp_get_subs
+
+ 
   
   !=======================================================================
   ! Code assignment arg1:=arg2
@@ -4348,6 +4442,12 @@ contains
 
     slot1=cvar_strip_alias(wcd,aslot1)
     slot2=cvar_strip_alias(wcd,aslot2)
+
+    write(*,*) '++++++'
+    call dump_cvar(wcd,6,slot1)
+    write(*,*) '++'
+    call dump_cvar(wcd,6,slot2)
+    write(*,*) '++++++'
     
     k1=cvar_kind(wcd,slot1)
     k2=cvar_kind(wcd,slot2)
@@ -4389,6 +4489,8 @@ contains
              tv2=pm_type_vect(wcd%context,cvar_type(wcd,slot2))
              if(pm_debug_checks) then
                 if(pm_tv_kind(tv1)/=pm_type_is_rec.or.pm_tv_kind(tv2)/=pm_type_is_rec) then
+                   write(*,*) '>>',trim(pm_type_as_string(wcd%context,cvar_type(wcd,slot1)))
+                   write(*,*) '>>',trim(pm_type_as_string(wcd%context,cvar_type(wcd,slot2)))
                    call pm_panic('assign-slots')
                 endif
              endif
@@ -4547,13 +4649,20 @@ contains
        n=cvar_v1(wcd,slot1)
        if(k2==v_is_group) then
           do i=1,n
-             call comp_alias_slots(wcd,cvar_ptr(wcd,slot1,i),&
-                  cvar_ptr(wcd,slot2,i))
+             slot=cvar_ptr(wcd,slot1,i)
+             if(slot==0) then
+                call cvar_set_ptr(wcd,slot1,i,cvar_ptr(wcd,slot2,i))
+             else
+                call comp_alias_slots(wcd,slot,&
+                     cvar_ptr(wcd,slot2,i))
+             endif
           enddo
        else
           do i=1,n
              slot=cvar_ptr(wcd,slot1,i)
-             if(cvar_kind(wcd,slot)/=v_is_ctime_const) then
+             if(slot==0) then
+                
+             elseif(cvar_kind(wcd,slot)/=v_is_ctime_const) then
                 call comp_get_elem(wcd,op_elem,slot,&
                      slot2,i)
              endif
@@ -4643,8 +4752,8 @@ contains
     integer,intent(in),optional:: aname
     integer:: n
     integer:: i,k,m,tk,slot,vec,dom,tno
-    type(pm_ptr):: tset,ts,tv,val
-    integer:: v1,v2,nflags,name
+    type(pm_ptr):: tset,ts,tv,tv2,val
+    integer:: v1,v2,nflags,name,name2,typ2,typ3
     if(present(aname)) then
        name=aname
     else
@@ -4685,25 +4794,20 @@ contains
              call add_to_typeset(wcd,typ)
           endif
        case(pm_type_is_array)
-          if(iand(flags,v_is_param+v_is_result)/=0.and.&
-               iand(flags,v_is_chan)==0) then
-             nflags=ior(flags,v_is_array_par_dom)
-             if(pm_tv_name(tv)/=sym_var) nflags=iand(nflags,not(v_is_ref))
-             tno=pm_tv_arg(tv,1)
-             if(iand(pm_type_flags(wcd%context,tno),pm_type_has_storage)/=0) then
-                vec=cvar_alloc_entry(wcd,v_is_basic,pm_tv_arg(tv,3),&
-                     ior(flags,v_is_array_par_vect),tno)
-             else
-                vec=cvar_alloc(wcd,tno,flags,aname)
-             endif
-             tno=pm_tv_arg(tv,2)
-             if(iand(pm_type_flags(wcd%context,tno),pm_type_has_storage)/=0) then
-                dom=cvar_alloc_entry(wcd,v_is_basic,name,&
-                     nflags,tno)
-             else
-                dom=cvar_alloc(wcd,tno,flags,aname)
-             endif
-             n=cvar_alloc_array_view(wcd,vec,dom,typ)
+          tv2=pm_type_vect(wcd%context,pm_tv_arg(tv,1))
+          if(iand(pm_tv_flags(tv2),pm_type_is_soa)/=0) then
+             m=pm_tv_numargs(tv2)
+             n=cvar_alloc_slots(wcd,3+m)
+             v1=m
+             v2=v_is_array
+             typ2=pm_tv_arg(tv,3)
+             name2=pm_tv_name(tv)
+             do i=1,m
+                typ3=pm_new_arr_type(wcd%context,name2,pm_tv_arg(tv2,i),typ2,typ2)
+                wcd%vinfo(n+i+2)=ptr(cvar_alloc(wcd,typ3,flags,name))
+                call add_to_typeset(wcd,typ3)
+             enddo
+             call cvar_set_info(wcd,n,v_is_group,v1,v2,typ)
           else
              n=cvar_alloc_entry(wcd,v_is_basic,name,ior(flags,v_is_farray),typ)
           endif
@@ -4762,7 +4866,7 @@ contains
              n=cvar_alloc_entry(wcd,v_is_chan_vect,&
                   cvar_alloc(wcd,pm_tv_arg(tv,1),nflags,name),&
                   0,pm_tv_arg(tv,1))
-             call add_to_typeset(wcd,pm_tv_arg(tv,1),int(pm_long))
+             call add_to_typeset(wcd,pm_tv_arg(tv,1))
           else
              n=cvar_alloc(wcd,pm_tv_arg(tv,1),nflags,name)
           endif
@@ -4810,35 +4914,66 @@ contains
   ! Add a type to the list of active types used by the source generator
   ! Adding -typeno records allocatable vector of typeno
   !=======================================================================
-  recursive subroutine add_to_typeset(wcd,typ,dim)
+  recursive subroutine add_to_typeset(wcd,typ,embedded)
     type(wcoder),intent(inout):: wcd
     integer,intent(in):: typ
-    integer,intent(in),optional:: dim
+    logical,intent(in),optional:: embedded
     type(pm_ptr):: tset
-    integer:: tno,key(2),m
-    integer:: i
+    integer:: i,tno,key(2),m,tk
     type(pm_ptr):: tv
     tno=pm_type_strip_to_basic(wcd%context,typ)
     tset=wcd%typeset
-    if(tno>0.and.tno<=pm_string.and..not.present(dim)) return
+    if(tno>0.and.tno<=pm_string) return
     if(.not.pm_type_needs_storage(wcd%context,abs(tno))) return
     if(pm_type_kind(wcd%context,tno)==pm_type_is_poly) tno=pm_pointer
     key(1)=tno
-    if(present(dim)) then
-       key(2)=dim
-    else
-       key(2)=0
-    endif
-    if(pm_ivect_lookup(wcd%context,tset,key,2)<=0) then
+    if(pm_ivect_lookup(wcd%context,tset,key,1)<=0) then
        tv=pm_type_vect(wcd%context,abs(tno))
-       if(pm_tv_kind(tv)==pm_type_is_array) then
-          call add_to_typeset(wcd,pm_tv_arg(tv,1),pm_tv_arg(tv,3))
+       tk=pm_tv_kind(tv)
+       if(tk==pm_type_is_array) then
+          if(soa_types(tno,pm_tv_arg(tv,1),.true.)) then
+             m=pm_iset_add(wcd%context,tset,key,1)
+             return
+          endif
+       endif
+       if(tk==pm_type_is_rec.and..not.present(embedded)) then
+          if(iand(pm_tv_flags(tv),pm_type_is_soa)/=0) then
+             do i=1,pm_tv_numargs(tv)
+                call add_to_typeset(wcd,pm_tv_arg(tv,i))
+             enddo
+             return
+          endif
        endif
        do i=1,pm_tv_numargs(tv)
-          call add_to_typeset(wcd,pm_tv_arg(tv,i))
+          call add_to_typeset(wcd,pm_tv_arg(tv,i),.true.)
        enddo
-       m=pm_iset_add(wcd%context,tset,key,2)
+       m=pm_iset_add(wcd%context,tset,key,1)
     endif
+  contains
+    recursive function soa_types(atyp,etyp,top) result(is_soa)
+      integer,intent(in):: atyp,etyp
+      logical,intent(in):: top
+      logical:: is_soa
+      type(pm_ptr):: tv
+      integer:: i,tno
+      logical:: junk
+      tv=pm_type_vect(wcd%context,etyp)
+      if(pm_tv_kind(tv)/=pm_type_is_rec) then
+         is_soa=.false.
+         return
+      endif
+      is_soa=iand(pm_tv_flags(tv),pm_type_is_soa)/=0
+      if(is_soa) then
+         do i=1,pm_tv_numargs(tv)
+            junk=soa_types(atyp,pm_tv_arg(tv,i),.false.)
+         enddo
+      elseif(.not.top) then
+         tv=pm_type_vect(wcd%context,atyp)
+         tno=pm_tv_arg(tv,3)
+         call add_to_typeset(wcd,pm_new_arr_type(wcd%context,pm_tv_name(tv),&
+              etyp,tno,tno))
+      endif
+    end function soa_types
   end subroutine add_to_typeset
 
   !=======================================================================
@@ -5017,13 +5152,21 @@ contains
     integer,intent(in):: parent,elem
     integer:: n
     type(pm_ptr):: tv
-    integer:: typ
-    tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
-    typ=pm_tv_arg(tv,elem)
-    write(*,*) 'alloc elem',trim(pm_type_as_string(wcd%context,typ))
+    integer:: typ,tk
+    typ=cvar_type(wcd,parent)
+    tk=pm_type_kind(wcd%context,typ)
+    
+    if(tk==pm_type_is_array) then
+       typ=pm_type_soa_elem(wcd%context,typ,elem)
+    elseif(tk==pm_type_is_rec.or.tk==pm_type_is_tuple) then
+       typ=pm_type_arg(wcd%context,typ,elem)
+    else
+       write(*,*) 'alloc elem',trim(pm_type_as_string(wcd%context,typ))
+       call pm_panic('alloc elem')
+    endif
+  
     if(iand(pm_type_flags(wcd%context,typ),pm_type_has_storage)/=0) then
-       n=cvar_alloc_entry(wcd,merge(v_is_unit_elem,v_is_elem,pm_tv_numargs(tv)==1.and..false.),&
-            parent,elem,typ)
+       n=cvar_alloc_entry(wcd,v_is_elem,parent,elem,typ)
     else
        n=cvar_alloc(wcd,typ,0)
     endif
@@ -5060,16 +5203,24 @@ contains
     type(wcoder),intent(inout):: wcd
     integer,intent(in):: n,parent,elem
     type(pm_ptr):: tv
+    integer:: typ
     if(pm_debug_checks) then
        if(cvar_kind(wcd,n)/=v_is_basic) then
           call pm_panic('cvar_set_elem')
        endif
     endif
-    tv=pm_type_vect(wcd%context,cvar_type(wcd,parent))
+
+    typ=cvar_type(wcd,parent)
+    tv=pm_type_vect(wcd%context,typ)
+    if(pm_tv_kind(tv)==pm_type_is_array) then
+       typ=pm_type_soa_elem(wcd%context,typ,elem)
+    else
+       typ=pm_tv_arg(tv,elem)
+    endif
 !!$    write(*,*) cvar_type(wcd,parent),'>>',elem,';',trim(pm_type_as_string(wcd%context,cvar_type(wcd,parent))),&
 !!$         ';',trim(pm_type_as_string(wcd%context,cvar_type(wcd,n)))
     call cvar_set_info(wcd,n,merge(v_is_unit_elem,v_is_elem,pm_tv_numargs(tv)==1.and..false.),&
-         parent,elem,pm_tv_arg(tv,elem))
+         parent,elem,typ)
   end subroutine cvar_set_elem
 
   !=======================================================================
@@ -5540,6 +5691,8 @@ contains
     if(.not.pm_is_compiling) return
     depth=1
     if(present(adepth)) depth=adepth
+    write(*,*) spaces(1:depth),'             ','::',&
+         trim(pm_type_as_string(wcd%context,cvar_type(wcd,n)))
     do nn=n,n+2
        v=wcd%vinfo(nn)
        write(iunit,*) spaces(1:depth),nn,v_names(iand(v,cvar_flag_mask)),v/cvar_flag_mult
@@ -5599,12 +5752,13 @@ contains
     character(len=20):: spaces='                    '
     type(pm_ptr)::val
     if(.not.pm_is_compiling) return
+        depth=1
+    if(.true.) depth=adepth
     if(n<=0.or.n==32767) then
        write(iunit,*) spaces(1:depth),n,'****'
        return
     endif
-    depth=1
-    if(.true.) depth=adepth
+
 !!$    do nn=n,n+2
 !!$       v=vinfo(nn)
 !!$       write(iunit,*) spaces(1:depth),nn,v_names(iand(v,cvar_flag_mask)),v/cvar_flag_mult

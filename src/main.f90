@@ -84,14 +84,14 @@ program pm
   
   ! Run wordcodes or use them to generate source
   if(pm_is_compiling) then
-     if(pm_debug_level>1.or..true.) write(*,*) 'OPTIMISING...'
+     !if(pm_debug_level>1) write(*,*) 'OPTIMISING...'
      !call optimise_prog(context,code_cache,poly_cache)
-     if(pm_opts%out_debug_files) then
-       open(unit=pm_comp_file_unit,file='optimiser.out')
-       context%funcs=code_cache
-       call dump_wc(context,pm_comp_file_unit)
-       close(pm_comp_file_unit)
-    endif
+     !if(pm_opts%out_debug_files) then
+     !  open(unit=pm_comp_file_unit,file='optimiser.out')
+     !  context%funcs=code_cache
+     !  call dump_wc(context,6) !pm_comp_file_unit)
+     !  close(pm_comp_file_unit)
+     !endif
  
      if(pm_debug_level>1.or..true.) write(*,*) 'CREATING SOURCE...'
      open(unit=9,file='PMOUT.F90')
@@ -310,7 +310,8 @@ contains
        !pm_opts%show_elems=.true.
        !pm_opts%show_variants=.true.
        do i=1,pm_dict_size(context,context%tcache)
-           write(4,*) iand(pm_type_flags(context,i),pm_type_has_storage)/=0,iand(pm_type_flags(context,i),pm_type_has_fix)/=0,trim(pm_type_as_string(context,i))
+           write(4,*) iand(pm_type_flags(context,i),pm_type_has_storage)/=0,iand(pm_type_flags(context,i),pm_type_has_fix)/=0,&
+               iand(pm_type_flags(context,i),pm_type_is_soa),trim(pm_type_as_string(context,i))
        enddo
        pm_opts%show_members=save_members
        pm_opts%show_elems=save_elems

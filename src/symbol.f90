@@ -292,9 +292,12 @@ module pm_symbol
   integer,parameter:: sym_real = num_sym + 29
   integer,parameter:: sym_logical = num_sym + 30
   integer,parameter:: sym_string_type = num_sym + 31
+
+  ! Attributes for types
+  integer,parameter:: sym_soa = num_sym + 32
   
   ! Symbols used as node types (actual name not really used)
-  integer,parameter:: node0 = num_sym + 31
+  integer,parameter:: node0 = num_sym + 32
   integer,parameter:: sym_iter = node0 + 1
   integer,parameter:: sym_list = node0 + 2
   integer,parameter:: sym_builtin = node0 + 3
@@ -778,6 +781,8 @@ module pm_symbol
   data sym_names(sym_real)             /'real'/
   data sym_names(sym_logical)          /'bool'/
   data sym_names(sym_string_type)      /'string'/
+
+  data sym_names(sym_soa)              /'soa'/
   
   ! Symbols that are node names only
   data sym_names(sym_iter)             /'<iter>'/

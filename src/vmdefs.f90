@@ -708,7 +708,9 @@ module pm_vmdefs
   integer,parameter:: op_wrap=op_start_comp+23
   integer,parameter:: op_sync=op_start_comp+24
   integer,parameter:: op_init_var=op_start_comp+25
-  integer,parameter:: op_stop_comp=op_init_var
+  integer,parameter:: op_lower_bound=op_start_comp+26
+  integer,parameter:: op_upper_bound=op_start_comp+27
+  integer,parameter:: op_stop_comp=op_upper_bound
 
   integer,parameter:: num_op=op_stop_comp
 
@@ -1403,6 +1405,8 @@ module pm_vmdefs
   data op_flags(op_wrap)             /0/
   data op_flags(op_sync)             /0/
   data op_flags(op_init_var)         /0/
+  data op_flags(op_upper_bound)      /0/
+  data op_flags(op_lower_bound)      /0/
 
   character(len=20),dimension(:),allocatable:: op_names
 
@@ -2128,6 +2132,8 @@ contains
     op_names(op_wrap)='wrap'
     op_names(op_sync)='sync'
     op_names(op_init_var)='init_var'
+    op_names(op_upper_bound)='upper_bound'
+    op_names(op_lower_bound)='lower_bound'
 
     op_names(op_add_fold)='add_fold'
     op_names(op_sub_fold)='sub_fold'

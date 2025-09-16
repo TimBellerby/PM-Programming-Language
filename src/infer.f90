@@ -831,7 +831,7 @@ contains
     integer,intent(out):: new_atype
     integer:: rtype,mode,atype1
     integer,dimension(1):: key
-    integer:: k,t1,n,opcode
+    integer:: k,t1,t2,n,opcode
     type(pm_ptr):: tv,v
     logical:: isstatic,iscomm,ok,added
 
@@ -945,20 +945,27 @@ contains
              rtype=pm_tv_arg(tv,n)
           endif
        endif
-    case(op_array,op_make_array,op_pack)
-       rtype=pm_new_arr_type(coder%context,sym_const,&
-            pm_type_for_var(coder%context,atype1,sym_private),&
-            pm_type_arg(coder%context,atype,3),int(pm_long))
-       !write(*,*) 'make array',pm_type_as_string(coder%context,atype)
-    case(op_var_array)
-       rtype=pm_new_arr_type(coder%context,sym_var,&
-            pm_type_for_var(coder%context,atype1,sym_private),&
-            pm_type_for_var(coder%context,pm_type_arg(coder%context,atype,3),sym_private),int(pm_long))
-    case(op_redim)
-       tv=pm_type_vect(coder%context,atype1)
-       rtype=pm_new_arr_type(coder%context,pm_tv_name(tv),&
-            pm_tv_arg(tv,1),&
-            pm_type_arg(coder%context,atype,3),int(pm_long))
+    case(op_array,op_make_array,op_var_array)
+       t1=pm_type_arg(coder%context,atype,3)
+       if(pm_is_compiling) then
+          t2=t1
+       else
+          t2=pm_type_arg(coder%context,t1,1)
+       endif
+       if(opcode==op_var_array) then
+          rtype=pm_new_arr_type(coder%context,sym_var,&
+               pm_type_for_var(coder%context,atype1,sym_private),&
+               pm_type_for_var(coder%context,pm_type_arg(coder%context,atype,3),sym_private),t2)
+       else
+          rtype=pm_new_arr_type(coder%context,sym_const,&
+               pm_type_for_var(coder%context,atype1,sym_private),&
+               t1,t2)
+       endif
+!!$    case(op_redim)
+!!$       tv=pm_type_vect(coder%context,atype1)
+!!$       rtype=pm_new_arr_type(coder%context,pm_tv_name(tv),&
+!!$            pm_tv_arg(tv,1),&
+!!$            pm_type_arg(coder%context,atype,3),int(pm_long))
     case(op_make_type_val)
        rtype=pm_new_type_type(coder%context,atype1)
     case(op_import_dref)

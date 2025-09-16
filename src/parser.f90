@@ -5788,9 +5788,13 @@ contains
     vbase=parser%vtop
     flags=0
     hasvar=.false.
-    if(parser%sym==sym_caret) then
+    if(parser%sym==sym_open_attr) then
        call scan(parser)
-       flags=pm_type_is_soa
+       if(parser%sym==sym_soa) then
+          flags=pm_type_is_soa
+          call scan(parser)
+       endif
+       if(expect(parser,sym_close_attr)) return
     endif
     if(parser%sym==sym_open_brace) then
        call scan(parser)

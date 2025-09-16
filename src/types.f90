@@ -57,8 +57,8 @@ module pm_types
 
   ! Bitwise-or of flags which are not taints (only one so far)
   integer,parameter:: pm_type_flags_untainting = &
-       pm_type_is_list + pm_type_is_when + pm_type_is_yield + &
-       pm_type_is_soa + pm_type_is_aos + pm_type_is_seq
+       ior( pm_type_is_list + pm_type_is_when + pm_type_is_yield, &
+       pm_type_is_soa + pm_type_is_aos + pm_type_is_seq )
 
   ! Type kind + default flags
   integer,parameter:: pm_type_new_user=1
@@ -341,6 +341,7 @@ contains
        call pm_panic('bad kind')
     endif
 
+ 
     ! Calculate combined flags and also total number of leaves
     tflags=0
     nleaves=0
@@ -357,6 +358,7 @@ contains
     if(k==0) k=pm_idict_add(context,context%tcache,&
          arr,size(arr),tval)
     tno=k
+         
   contains
     include 'ftiny.inc'
   end function pm_new_type
@@ -445,8 +447,44 @@ contains
     tno=pm_new_type(context,args)
   end function pm_new_arr_type
 
+  !====================================
+  ! Number of dimensions of array type
+  !====================================
+  function pm_arr_type_ndims(context,tno) result(ndim)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    integer:: ndim
+    ndim=pm_type_numargs(context,pm_type_arg(context,tno,3))-1
+  end function pm_arr_type_ndims
+
+  !=======================================
+  ! Type of element #elem of an SOA array
+  !======================================
+  function pm_type_soa_elem(context,typ,elem) result(tno)
+    type(pm_context),pointer:: context
+    integer,intent(in):: typ,elem
+    integer:: tno
+    type(pm_ptr):: tv
+    tv=pm_type_vect(context,typ)
+    tno=pm_new_arr_type(context,pm_tv_name(tv),&
+            pm_type_arg(context,pm_tv_arg(tv,1),elem),&
+            pm_tv_arg(tv,3),pm_tv_arg(tv,3))
+  end function pm_type_soa_elem
+
+  function pm_type_is_soa_rec(context,typ) result(ok)
+    type(pm_context),pointer:: context
+    integer,intent(in):: typ
+    logical:: ok
+    ok=.false.
+    if(pm_type_kind(context,typ)==pm_type_is_rec) then
+       if(iand(pm_type_flags(context,typ),pm_type_is_soa)/=0) then
+          ok=.true.
+       endif
+    endif
+  end function pm_type_is_soa_rec
+  
   !=========================
-  ! Create type a or b
+  ! Create type (a or b)
   !=========================
   function pm_type_union(context,a,b) result(tno)
     type(pm_context),pointer:: context
@@ -1651,7 +1689,7 @@ contains
           else
              ok=pm_test_type_includes(context,pm_tv_arg(t,1),pm_tv_arg(u,1),&
                   mode,params,base,user,ubase).and.&
-                  pm_test_type_includes(context,pm_tv_arg(t,2),pm_tv_arg(u,2),&
+                  pm_test_type_includes(context,pm_tv_arg(t,3),pm_tv_arg(u,3),&
                   mode,params,base,user,ubase)
           endif
        endif
@@ -2055,6 +2093,10 @@ contains
           ok=.true.
           return
        elseif(pm_type_contains_elem(context,p,pm_tv_arg(u,2),&
+            mode,params,base,user,ubase)) then
+          ok=.true.
+          return
+       elseif(pm_type_contains_elem(context,p,pm_tv_arg(u,3),&
             mode,params,base,user,ubase)) then
           ok=.true.
           return
@@ -2783,13 +2825,15 @@ contains
        tno2=pm_new_arr_type(context,pm_tv_name(tv),&
             pm_type_replace(context,pm_tv_arg(tv,1),oldtyp,newtyp),&
             pm_tv_arg(tv,2),pm_tv_arg(tv,3))
-       !!! Dref should be only be overall type (arg(1)?)
-    case(pm_type_is_rec,pm_type_is_tuple,pm_type_is_dref)
+    case(pm_type_is_dref)
+       call remake_dref(pm_tv_numargs(tv))
+    case(pm_type_is_rec,pm_type_is_tuple)
        call remake(pm_tv_numargs(tv))
     case default
        tno2=tno
     end select
   contains
+    
     recursive subroutine remake(n)
       integer,intent(in):: n
       integer,dimension(n+2):: a
@@ -2809,6 +2853,27 @@ contains
          tno2=tno
       endif
     end subroutine remake
+
+    recursive subroutine remake_dref(n)
+      integer,intent(in):: n
+      integer,dimension(n+2):: a
+      integer:: i,etyp
+      logical:: changed
+      a(1)=pm_tv_flags(tv)
+      a(2)=pm_tv_name(tv)
+      etyp=pm_tv_arg(tv,1)
+      a(3)=pm_type_replace(context,etyp,oldtyp,newtyp)
+      changed=a(3)/=etyp
+      if(changed) then
+         do i=2,n
+            a(i+2)=pm_tv_arg(tv,i)
+         enddo
+         tno2=pm_new_type(context,a)
+      else
+         tno2=tno
+      endif
+    end subroutine remake_dref
+    
   end function pm_type_replace
 
   !================================================================
@@ -3499,7 +3564,7 @@ contains
        endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
        if(add_char(',')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,2),str,n,infix)
+       call pm_type_to_string(context,pm_tv_arg(tv,3),str,n,infix)
        if(add_char(')')) return
     case(pm_type_is_poly)
        if(add_char('*')) return
