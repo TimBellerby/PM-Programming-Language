@@ -846,7 +846,7 @@ contains
           write(*,*) 'WCODE CALL>',sym_names(sig)
        else
           write(*,*) 'WCODE CALL> sig=',-sig,'resolv=',&
-               rvv(int(cnode_get_num(callnode,call_index)))
+               rvv(int(cnode_get_num(callnode,call_index))),'nargs=',nargs,'nret=',nret
        endif
     endif
     select case(sig) 
@@ -1453,7 +1453,7 @@ contains
        endif
        call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
     case(sym_private,sym_set_mode,sym_const,sym_var,sym_dotdotdot,sym_open_brace,sym_amp,&
-         sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign,sym_pm_assign)
+         sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign,sym_pm_assign,sym_check_par_state)
        continue ! Nothing to do
     case(sym_null)
        if(.not.pm_is_compiling) then
@@ -2718,11 +2718,11 @@ contains
        select case(sym)
        case(sym_if,sym_for,sym_do,sym_loop)
           continue
-       case(sym_while,sym_until,sym_each)
+       case(sym_sync_while)
           call combine_loops(wcd,i,finish,step,wcd%costack(cs,i)%p,out_ve,&
                loop_rv,loop_ve)
           return
-       case(sym_colon,sym_sync)
+       case(sym_colon)
           call combine_labels(wcd,sym,i,finish,step,wcd%costack(cs,i)%p,out_ve,&
                loop_rv,loop_ve)
           return
@@ -2748,12 +2748,12 @@ contains
     type(pm_ptr),intent(in):: first_p,loop_rv
     integer,intent(in):: loop_ve,out_ve
     type(pm_ptr):: p,n,args,rv
-    type(pm_ptr):: name,name2
+    integer:: name,name2
     integer:: j,sig2,base,ve,cs
 
     cs=wcd%cs
     
-    name=cnode_arg(cnode_arg(cnode_get(first_p,call_args),1),1)
+    name=cnode_num_arg(cnode_arg(cnode_get(first_p,call_args),1),1)
     call check_label(wcd,first_p,name)
     args=cnode_get(first_p,call_args)
     rv=wcd%costack(cs,start)%rv
@@ -2765,22 +2765,22 @@ contains
        select case(sig2)
        case(sym_if,sym_for,sym_do,sym_loop)
           cycle
-       case(sym_colon,sym_sync)
+       case(sym_colon)
           args=cnode_get(p,call_args)
           base=wcd%costack(cs,j)%base
           rv=wcd%costack(cs,j)%rv
           ve=wcd%costack(cs,j)%ve
-          name2=cnode_arg(cnode_arg(args,1),1)
-          if(name%offset/=name2%offset) then
+          name2=cnode_num_arg(cnode_arg(args,1),1)
+          if(name/=name2) then
              call mismatch(wcd,first_p,p,&
-                  '"sync" labels do not match: '//&
-                  trim(pm_name_as_string(wcd%context,int(name%offset)))//' / '//&
-                  trim(pm_name_as_string(wcd%context,int(name2%offset))))
+                  'Labels do not match: '//&
+                  trim(pm_name_as_string(wcd%context,name))//' / '//&
+                  trim(pm_name_as_string(wcd%context,name)))
           endif
           call wcode_comm_block(wcd,cnode_arg(args,2),out_ve,rv,ve)
        case(sym_sync_while)
           call mismatch(wcd,first_p,p,&
-               '"sync" statement matched to "sync while"')
+               'Labelled statement matched to "sync while"')
        end select
     enddo
     
@@ -2810,7 +2810,7 @@ contains
     rv=wcd%costack(cs,costart)%rv
     ispar=loop_is_par(wcd,first_p,rv)
     name=cnode_arg(cnode_arg(cnode_get(first_p,call_args),1),1)
-    call check_label(wcd,first_p,name)
+    call check_label(wcd,first_p,int(name%offset))
     if(pm_is_compiling) then
        mask=alloc_var(wcd,int(pm_logical))
     endif
@@ -3012,7 +3012,7 @@ contains
     rv=wcd%costack(cs,costart)%rv
     ispar=loop_is_par(wcd,first_p,rv)
     name=cnode_arg(cnode_arg(cnode_get(first_p,call_args),1),1)
-    call check_label(wcd,first_p,name)
+    call check_label(wcd,first_p,int(name%offset))
     if(pm_is_compiling) then
        mask=alloc_var(wcd,int(pm_logical))
     endif
@@ -3203,30 +3203,29 @@ contains
   !====================================================================
   subroutine check_label(wcd,callnode,label)
     type(wcoder),intent(inout):: wcd
-    type(pm_ptr),intent(in):: callnode,label
+    type(pm_ptr),intent(in):: callnode
+    integer,intent(in):: label
     integer:: i
     if(debug_wcode) then
        write(*,*) 'CHECK LABEL>',&
-            trim(pm_name_as_string(wcd%context,int(label%offset))),&
-            label%offset,wcd%lbbase,wcd%lbtop
+            trim(pm_name_as_string(wcd%context,label)),&
+            label,wcd%lbbase,wcd%lbtop
     endif
-    if(pm_fast_isnull(label)) return
-    if(label%offset==0) return
+    if(label==0) return
     do i=wcd%lbbase+1,wcd%lbtop
        if(debug_wcode) then
           write(*,*) 'CHECK>>',&
                trim(pm_name_as_string(wcd%context,wcd%labels(i))),&
-               wcd%labels(i),label%offset
+               wcd%labels(i),label
        endif
-       if(label%offset==wcd%labels(i)) then
-          write(*,*) 'checked bad'
+       if(label==wcd%labels(i)) then
           call wcode_error(wcd,callnode,&
                'Label cannot be used twice within the same (or nested) parallel statement: '//&
-               trim(pm_name_as_string(wcd%context,int(label%offset))))
+               trim(pm_name_as_string(wcd%context,label)))
        endif
     enddo
     wcd%lbtop=wcd%lbtop+1
-    wcd%labels(wcd%lbtop)=label%offset
+    wcd%labels(wcd%lbtop)=label
   contains
     include 'fisnull.inc'
   end subroutine check_label
@@ -4404,7 +4403,25 @@ contains
 !!$    call dump_cvar(wcd,6,n)
   end subroutine comp_get_subs
 
- 
+  !=======================================================================
+  ! Return cvar as a grouped cvar
+  !=======================================================================
+  function comp_as_group(wcd,arg) result(var)
+    type(wcoder),intent(inout):: wcd
+    integer,intent(in):: arg
+    integer:: var
+    integer:: n,i,typ
+    if(cvar_kind(wcd,arg)/=v_is_group) then
+       typ=cvar_type(wcd,arg)
+       n=pm_type_numargs(wcd%context,typ)
+       var=cvar_alloc_slots(wcd,n+3)
+       do i=1,n
+          call cvar_set_ptr(wcd,var,i,cvar_alloc_elem(wcd,arg,i))
+       enddo
+    else
+       var=n
+    endif
+  end function comp_as_group
   
   !=======================================================================
   ! Code assignment arg1:=arg2

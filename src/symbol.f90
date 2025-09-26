@@ -60,7 +60,7 @@ module pm_symbol
   integer,parameter:: sym_query = 16
   integer,parameter:: sym_arrow = 17
   integer,parameter:: sym_pct = 18
-  integer,parameter:: sym_pling = 19
+  integer,parameter:: sym_tilde = 19
   integer,parameter:: sym_dash = 20
   integer,parameter:: sym_caret = 21
   integer,parameter:: sym_dcaret = 22
@@ -100,10 +100,10 @@ module pm_symbol
   integer,parameter:: sym_bar = sym2 + 12
   integer,parameter:: sym_hash= sym2 + 13
   integer,parameter:: sym_amp = sym2 + 14
-  integer,parameter:: sym_tilde = sym2 + 15
+  integer,parameter:: sym_pling = sym2 + 15
 
   ! These keywords and symbols are binary operators
-  integer,parameter:: first_key = sym_tilde
+  integer,parameter:: first_key = sym_pling
   integer,parameter:: sym_in = first_key + 1
   integer,parameter:: sym_not_in = first_key + 2
   integer,parameter:: sym_and = first_key + 3
@@ -135,22 +135,25 @@ module pm_symbol
   integer,parameter:: sym_fix = last_operator + 10
   integer,parameter:: sym_new = last_operator + 11
   integer,parameter:: sym_when = last_operator + 12
-  integer,parameter:: last_expr = sym_when
+  integer,parameter:: sym_bounds = last_operator + 13
+  integer,parameter:: last_expr = sym_bounds
   integer,parameter:: last_word = last_expr
 
   ! Modes
   integer,parameter:: sym_individual  =  last_word + 1
-  integer,parameter:: first_mode = sym_individual
+ 
   integer,parameter:: sym_connected   =  last_word + 2
   integer,parameter:: sym_local       =  last_word + 3
   integer,parameter:: sym_global      =  last_word + 4
   integer,parameter:: sym_complete    =  last_word + 5
 
+ 
   integer,parameter:: sym_private     =  last_word + 6
+  integer,parameter:: first_mode = sym_private
   integer,parameter:: sym_chan        =  last_word + 7
   integer,parameter:: sym_nhd         =  last_word + 8
   integer,parameter:: sym_indexed     =  last_word + 9
-  integer,parameter:: sym_joint       =  last_word + 10
+  integer,parameter:: sym_mixed       =  last_word + 10
   integer,parameter:: sym_uniform     =  last_word + 11
   integer,parameter:: sym_invar       =  last_word + 12
   integer,parameter:: sym_shared      =  last_word + 13
@@ -352,9 +355,10 @@ module pm_symbol
   integer,parameter:: sym_reference = node0 + 52
   integer,parameter:: sym_repl_line = node0 + 53
   integer,parameter:: sym_call = node0 + 54
+  integer,parameter:: sym_check_par_state = node0 + 55
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 55
+  integer,parameter:: hook = node0 + 56
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -410,7 +414,7 @@ module pm_symbol
   integer,parameter:: sym_pm_at = hook + 52
   integer,parameter:: sym_pm_pling = hook + 53
   integer,parameter:: sym_lcl_stmt = hook + 54
-  integer,parameter:: sym_dechan = hook + 55
+  integer,parameter:: sym_localise = hook + 55
   integer,parameter:: sym_check_iter = hook + 56
   integer,parameter:: sym_check_iter_amp = hook + 57
   integer,parameter:: sym_check_iter_star = hook + 58
@@ -423,7 +427,8 @@ module pm_symbol
   integer,parameter:: sym_print = hook + 65
   integer,parameter:: sym_fix_tuple = hook + 66
   integer,parameter:: sym_unbounded = hook + 67
-  integer,parameter:: hook1 = hook + 67
+  integer,parameter:: sym_idx_uminus = hook + 68
+  integer,parameter:: hook1 = hook + 68
   
   integer,parameter:: sym_d1= hook1 + 1
   integer,parameter:: sym_d2= hook1 + 2
@@ -486,13 +491,19 @@ module pm_symbol
   integer,parameter:: sym_shared_to_local = hook4 + 3
   integer,parameter:: sym_clone = hook4 + 4
   integer,parameter:: sym_contains = hook4 + 5
-  integer,parameter:: sym_mask = hook4 + 6
-  integer,parameter:: sym_here = hook4 + 7
-  integer,parameter:: sym_here_in_tile = hook4 + 8
+
+  integer,parameter:: sym_topology = hook4 + 6
+  integer,parameter:: sym_outer = hook4 + 7
+  integer,parameter:: sym_region = hook4 + 8
   integer,parameter:: sym_subregion = hook4 + 9
-  integer,parameter:: sym_region = hook4 + 10
-  integer,parameter:: sym_outer = hook4 + 11
-  integer,parameter:: sym_topology = hook4 + 12
+  integer,parameter:: sym_here_in_tile = hook4 + 10
+  integer,parameter:: sym_mask = hook4 + 11
+  integer,parameter:: sym_here = hook4 + 12
+
+  integer,parameter:: first_state_par_name = sym_topology
+  integer,parameter:: last_state_par_name = sym_mask
+  integer,parameter:: num_comm_args=last_state_par_name-first_state_par_name+1
+  
   integer,parameter:: sym_distr_tag = hook4 + 13
   integer,parameter:: sym_tag = hook4 + 14
   integer,parameter:: sym_varray= hook4 + 15
@@ -645,6 +656,7 @@ module pm_symbol
   data sym_names(sym_fix)              /'fix'/
   data sym_names(sym_new)              /'new'/
   data sym_names(sym_when)             /'when'/
+  data sym_names(sym_bounds)           /'bounds'/
 
   data sym_names(sym_individual)       /'indiv'/
   data sym_names(sym_connected)        /'cntd'/
@@ -656,7 +668,7 @@ module pm_symbol
   data sym_names(sym_chan)             /'chan'/
   data sym_names(sym_nhd)              /'nhd'/
   data sym_names(sym_indexed)          /'idx'/
-  data sym_names(sym_joint)            /'jnt'/
+  data sym_names(sym_mixed)            /'mixd'/
   data sym_names(sym_uniform)          /'unif'/
   data sym_names(sym_invar)            /'invar'/
   data sym_names(sym_shared)           /'shrd'/
@@ -705,7 +717,7 @@ module pm_symbol
   data sym_names(sym_foreach_invar)    /'foreach invar'/
   data sym_names(sym_any_invar)        /'any invar'/
   data sym_names(sym_all)              /'all'/
-  data sym_names(sym_sync_while)       /'sync(while)'/
+  data sym_names(sym_sync_while)       /'sync while'/
   data sym_names(sym_repeat)           /'repeat'/
   
   data sym_names(sym_pm_send)          /'PM__send'/
@@ -823,7 +835,7 @@ module pm_symbol
   data sym_names(sym_change_mode)      /'<change_mode>'/
   data sym_names(sym_dot_amp)          /'<dot-amp>'/
   data sym_names(sym_type_val)         /'<type-val>'/
-  data sym_names(sym_var_set_mode)     /'<var-set-mode>'/
+  data sym_names(sym_var_set_mode)     /'PM__set_mode'/
   data sym_names(sym_if_expr)          /'PM__if'/
   data sym_names(sym_switch_expr)      /'PM__switch'/
   data sym_names(sym_cast)             /'PM__cast'/
@@ -841,6 +853,7 @@ module pm_symbol
   data sym_names(sym_reference)        /'<reference>'/
   data sym_names(sym_repl_line)        /'<repl-line>'/
   data sym_names(sym_call)             /'<call>'/
+  data sym_names(sym_check_par_state)  /'<check-par-state>'/
   
   ! Misc. symbols referenced by compiler
   
@@ -900,7 +913,7 @@ module pm_symbol
   data sym_names(sym_pm_pling)         /'PM__invar_stmt'/
   data sym_names(sym_lcl_stmt)         /'PM__shrd_stmt'/
 
-  data sym_names(sym_dechan)           /'PM__dechan'/
+  data sym_names(sym_localise)         /'PM__localise'/
   data sym_names(sym_check_iter)       /'PM__check_iter'/
   data sym_names(sym_check_iter_amp)   /'PM__check_iter_amp'/
   data sym_names(sym_check_iter_star)  /'PM__check_iter_star'/
@@ -914,6 +927,7 @@ module pm_symbol
   data sym_names(sym_print)            /'print'/
   data sym_names(sym_fix_tuple)        /'PM__fix_tuple'/
   data sym_names(sym_unbounded)        /'UNBOUNDED'/
+  data sym_names(sym_idx_uminus)       /'PM__idx_uminus'/
   
   data sym_names(sym_d1)               /'PM__d1'/
   data sym_names(sym_d2)               /'PM__d2'/

@@ -51,9 +51,9 @@ module pm_types
   integer,parameter:: pm_type_is_seq=          2**17
   integer,parameter:: pm_type_leaves=          2**18
 
-  integer,parameter:: pm_type_is_when=16384
-  integer,parameter:: pm_type_is_yield=32768
-  integer,parameter:: pm_type_is_list=65536
+  integer,parameter:: pm_type_is_when=  16384
+  integer,parameter:: pm_type_is_yield= 32768
+  integer,parameter:: pm_type_is_list=  65536
 
   ! Bitwise-or of flags which are not taints (only one so far)
   integer,parameter:: pm_type_flags_untainting = &
@@ -1208,10 +1208,10 @@ contains
        cmin=min(cmin,mode)
        cmax=max(cmax,mode)
     enddo
-    if(cmin>=sym_joint) then
+    if(cmin>=sym_mixed) then
        mixed_mode=cmin
-    elseif(cmax>=sym_joint) then
-       mixed_mode=sym_joint
+    elseif(cmax>=sym_mixed) then
+       mixed_mode=sym_mixed
     else
        mixed_mode=sym_private
     endif
@@ -1223,27 +1223,19 @@ contains
   function pm_mode_includes(mode1,mode2) result(ok)
     integer,intent(in):: mode1,mode2
     logical:: ok
-    if(mode1<sym_private.or.mode1==sym_uniform) then
-       select case(mode1)
-       case(sym_local)
-          ok=mode2==sym_individual.or.&
-               mode2>=sym_private.and.mode2<=sym_invar
-       case(sym_global)
-          ok=mode2>=sym_invar
-       case(sym_complete)
-          ok=mode2>=sym_chan.and.mode2/=sym_uniform.and.mode2/=sym_joint
-       case(sym_connected)
-          ok=mode2>sym_private.or.mode2==sym_global&
-               .or.mode2==sym_complete
-       case(sym_individual) 
-          ok=mode2>=sym_private.and.mode2<sym_uniform
-       case(sym_uniform) 
-          ok=mode2==sym_uniform.or.mode2==sym_invar
-       case default
-          call pm_panic('pm_mode_includes')
-       end select
+    if(mode1<0) then
+       if(mode2<0) then
+          ok=iand(-mode1,-mode2)==-mode2
+       else
+          ok=iand(-mode1,ishft(1,mode2-first_mode))/=0
+       endif
+    else
+       if(mode2<0) then
+          ok=iand(ishft(1,mode1-first_mode),-mode2)==-mode2
+       else
+          ok=mode1==mode2
+       endif
     endif
-    ok=mode1==mode2
   end function pm_mode_includes
 
   !==========================================
@@ -2564,6 +2556,7 @@ contains
     type(pm_ptr):: tv,tv2
     integer:: i,tno
     integer,dimension(3):: arr
+    write(*,*) 'CVPROC>',trim(pm_type_as_string(context,ptyp)),' to ',trim(pm_type_as_string(context,argtyp))
     tv=pm_type_vect(context,ptyp)
     tv2=pm_type_vect(context,argtyp)
     if(pm_tv_kind(tv)/=pm_type_is_proc.or.&
@@ -2645,7 +2638,6 @@ contains
     integer:: offset,ptype,mode,nametype,tno
     type(pm_ptr):: tv,nameval,names
     integer:: tk,i,name
-
     nametype=pm_type_strip_mode(context,name_type,mode)
     tno=pm_type_strip_mode(context,value_type,mode)
     tk=pm_type_kind(context,nametype)
@@ -2673,16 +2665,13 @@ contains
        else
           offset=0
        endif
-       if(offset>0) etype=pm_type_add_mode(context,etype,mode)
+       if(offset>0) call add_mode
        return
     endif
     name=pm_type_name(context,nametype)
-    if(tno<0) then
+    if(tno<=0) then
        offset=0
        return
-    endif
-    if(tno==0) then
-       offset=0
     endif
     tv=pm_type_vect(context,tno)
     tk=pm_tv_kind(tv)
@@ -2710,7 +2699,17 @@ contains
        offset=0
        return
     end select
-    if(offset>0) etype=pm_type_add_mode(context,etype,mode)
+    if(offset>0) call add_mode
+  contains
+    
+    ! Add mode making sure that a non-distributed element of a shared value is invar
+    subroutine add_mode
+      if(mode==sym_shared) then
+         if(iand(pm_type_flags(context,etype),pm_type_has_distributed)==0) mode=sym_invar
+      endif
+      etype=pm_type_add_mode(context,etype,mode)
+    end subroutine add_mode
+    
   end function pm_type_find_elem
 
   !================================================================
@@ -3328,7 +3327,7 @@ contains
     character(len=1),parameter:: close_brace = '}'
     character(len=1),parameter:: open_square = '['
     character(len=1),parameter:: close_square = ']'
-    integer:: i,j,istart,tno,tk2
+    integer:: i,j,m,istart,tno,tk2
     type(pm_ptr):: amps
     logical:: ok,isfix
     if(n>len(str)-10) return
@@ -3429,27 +3428,31 @@ contains
           return
        endif
        if(pm_tv_name(tv)/=0) then
-   
+
           amps=pm_name_val(context,pm_tv_name(tv))
           if(pm_fast_vkind(amps)==pm_int) then
-          j=0
-          do while(amps%data%i(amps%offset+j)<istart)
-             if(j<pm_fast_esize(amps)) j=j+1
-          enddo
-          do i=istart,narg-1
-             if(amps%data%i(amps%offset+j)==i) then
-                if(j<pm_fast_esize(amps)) j=j+1
+             j=0
+             do while(amps%data%i(amps%offset+j)<istart)
+                if(j<pm_fast_esize(amps)) then
+                   j=j+1
+                else
+                   exit
+                endif
+             enddo
+             do i=istart,narg-1
+                if(amps%data%i(amps%offset+j)==i) then
+                   if(j<pm_fast_esize(amps)) j=j+1
+                   if(add_char('&')) return
+                endif
+                call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
+                if(add_char(',')) return
+             enddo
+             if(amps%data%i(amps%offset+j)==narg) then
                 if(add_char('&')) return
              endif
-             call pm_type_to_string(context,pm_tv_arg(tv,i),str,n,infix)
-             if(add_char(',')) return
-          enddo
-          if(amps%data%i(amps%offset+j)==narg) then
-             if(add_char('&')) return
-          endif
-          call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n,infix)
+             call pm_type_to_string(context,pm_tv_arg(tv,narg),str,n,infix)
           else
-            if(add_char('???'//trim(pm_int_as_string(pm_tv_name(tv))))) return
+             if(add_char('???'//trim(pm_int_as_string(pm_tv_name(tv))))) return
           endif
        else
           do i=istart,narg-1
@@ -3695,9 +3698,11 @@ contains
        endif
     case(pm_type_is_proc_sig)
        name=pm_tv_name(tv)
-       if(name/=sym_proc) then
+       if(name==sym_yield) then
+          istart=num_comm_args+merge(4,3,iand(pm_tv_flags(tv),pm_type_is_yield)/=0)
+       elseif(name/=sym_proc) then
           if(add_char(trim(pm_name_as_string(context,name)))) return
-          istart=7
+          istart=num_comm_args+1
        else
           istart=2
        endif
@@ -3711,14 +3716,17 @@ contains
                 exit
              endif
           enddo
+       elseif(istart>pm_type_numargs(context,pm_tv_arg(tv,1))) then
+          if(add_char('!!!'//trim(pm_int_as_string(istart))//'>'//&
+               trim(pm_int_as_string(pm_type_numargs(context,pm_tv_arg(tv,1)))))) return
+          istart=1
        endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,tuple_start=istart)
        if(add_char('->')) return
        call pm_type_to_string(context,pm_tv_arg(tv,2),str,n,infix)
        if(iand(pm_tv_flags(tv),pm_type_is_yield)/=0) then
-          if(add_char('yield(')) return
-          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
-          if(add_char(')')) return
+          if(add_char(' yield ')) return
+          call pm_type_to_string(context,pm_type_arg(context,pm_type_arg(context,pm_tv_arg(tv,1),num_comm_args+1),1),str,n,infix)
        endif
     case(pm_type_is_undef_result)
        name=pm_tv_name(tv)
@@ -3740,9 +3748,45 @@ contains
        endif
     case(pm_type_is_par_kind)
        name=pm_tv_name(tv)
-       if(add_char(trim(sym_names(name)))) return
-       if(add_char(' ')) return
-       call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
+       if(name>0) then
+          if(add_char(trim(sym_names(name)))) return
+          if(add_char(' ')) return
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
+       else
+          name=-name
+          j=0
+          m=last_mode-first_mode
+          do i=0,n
+             if(iand(name,ishft(1,i))/=0) j=j+1
+          enddo
+          if(j>4) then
+             if(add_char('~(')) return
+             j=0
+             do i=0,m
+                if(iand(name,ishft(1,i))==0) then
+                   if(j>0) then
+                      if(add_char('|')) return
+                   endif
+                   if(add_char(trim(sym_names(first_mode+i)))) return
+                   j=j+1
+                endif
+             enddo
+             if(add_char(') ')) return
+          else
+             j=0
+             do i=0,m
+                if(iand(name,ishft(1,i))/=0) then
+                   if(j>0) then
+                      if(add_char('|')) return
+                   endif
+                   if(add_char(trim(sym_names(first_mode+i)))) return
+                   j=j+1
+                endif
+             enddo
+             if(add_char(' ')) return
+          endif
+          call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
+       endif
     case(pm_type_is_params)
        if(pm_opts%show_details) then
           if(add_char('[[=')) return
@@ -3810,7 +3854,7 @@ contains
     include 'fisnull.inc'
     include 'ftiny.inc'
     include 'fesize.inc'
-    
+
     function add_char(c) result(term)
       character(len=*),intent(in):: c
       logical:: term

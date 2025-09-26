@@ -41,10 +41,10 @@ PM__intrinsic min(literal(int),literal(int))->(literal(int)) : "min_fold"
 PM__intrinsic -(literal(int))->(literal(int)) : "uminus_fold"
 PM__intrinsic string(literal(int))->(literal(string)) : "string_fold"
 PM__intrinsic abs(literal(int))->(literal(int)) : "abs_fold"
-PM__intrinsic ~(literal(int))->(literal(int)) : "bnot_fold"
+PM__intrinsic !(literal(int))->(literal(int)) : "bnot_fold"
 PM__intrinsic &(literal(int),literal(int))->(literal(int)) : "band_fold"
 PM__intrinsic |(literal(int),literal(int))->(literal(int)) : "bor_fold"
-PM__intrinsic ~(literal(int),literal(int))->(literal(int)) : "bxor_fold"
+PM__intrinsic !(literal(int),literal(int))->(literal(int)) : "bxor_fold"
 PM__intrinsic shift(literal(int),literal(int))->(literal(int)) : "bshift_fold"
 PM__intrinsic pdiff(literal(int),literal(int))->(literal(int)) : "pdiff_fold"
 PM__intrinsic sign(literal(int),literal(int))->(literal(int)) : "sign_fold"
@@ -74,10 +74,10 @@ PM__intrinsic min(fix(int),fix(int))->(fix(int)) : "min_fold"
 PM__intrinsic -(fix(int))->(fix(int)) : "uminus_fold"
 PM__intrinsic string(fix(int))->(fix(string)) : "string_fold"
 PM__intrinsic abs(fix(int))->(fix(int)) : "abs_fold"
-PM__intrinsic ~(fix(int))->(fix(int)) : "bnot_fold"
+PM__intrinsic !(fix(int))->(fix(int)) : "bnot_fold"
 PM__intrinsic &(fix(int),fix(int))->(fix(int)) : "band_fold"
 PM__intrinsic |(fix(int),fix(int))->(fix(int)) : "bor_fold"
-PM__intrinsic ~(fix(int),fix(int))->(fix(int)) : "bxor_fold"
+PM__intrinsic !(fix(int),fix(int))->(fix(int)) : "bxor_fold"
 PM__intrinsic shift(fix(int),fix(int))->(fix(int)) : "bshift_fold"
 PM__intrinsic pdiff(fix(int),fix(int))->(fix(int)) : "pdiff_fold"
 PM__intrinsic sign(fix(int),fix(int))->(fix(int)) : "sign_fold"
@@ -147,7 +147,7 @@ PM__intrinsic abs(sint)->(sint) : "abs_i"
 PM__intrinsic bit_not(sint)->(sint) : "bnot_i"
 PM__intrinsic &(sint,sint)->(sint) : "band_i"
 PM__intrinsic |(sint,sint)->(sint) : "bor_i"
-PM__intrinsic ~(sint,sint)->(sint) : "bxor_i"
+PM__intrinsic !(sint,sint)->(sint) : "bxor_i"
 PM__intrinsic shift(sint,sint)->(sint) : "bshift_i"
 PM__intrinsic pdiff(sint,sint)->(sint) : "pdiff_i"
 PM__intrinsic sign(sint,sint)->(sint) : "sign_i"
@@ -182,10 +182,10 @@ PM__intrinsic sreal(int)->(sreal) : "real_ln"
 PM__intrinsic real(int)->(real) : "double_ln"
 proc int(x:int)=x
 PM__intrinsic abs(int)->(int) : "abs_ln"
-PM__intrinsic ~(int)->(int) : "bnot_ln"
+PM__intrinsic !(int)->(int) : "bnot_ln"
 PM__intrinsic &(int,int)->(int) : "band_ln"
 PM__intrinsic |(int,int)->(int) : "bor_ln"
-PM__intrinsic ~(int,int)->(int) : "bxor_ln"
+PM__intrinsic !(int,int)->(int) : "bxor_ln"
 PM__intrinsic shift(int,int)->(int) : "bshift_ln"
 PM__intrinsic pdiff(int,int)->(int) : "pdiff_ln"
 PM__intrinsic sign(int,int)->(int) : "sign_ln"
@@ -227,10 +227,10 @@ PM__intrinsic sreal(lint)->(sreal) : "real_offset"
 PM__intrinsic real(lint)->(real) : "double_offset"
 proc lint(x:lint)=x
 PM__intrinsic abs(lint)->(lint) : "abs_offset"
-PM__intrinsic ~(lint)->(lint) : "bnot_offset"
+PM__intrinsic !(lint)->(lint) : "bnot_offset"
 PM__intrinsic &(lint,lint)->(lint) : "band_offset"
 PM__intrinsic |(lint,lint)->(lint) : "bor_offset"
-PM__intrinsic ~(lint,lint)->(lint) : "bxor_offset"
+PM__intrinsic !(lint,lint)->(lint) : "bxor_offset"
 PM__intrinsic shift(lint,lint)->(lint) : "bshift_offset"
 PM__intrinsic pdiff(lint,lint)->(lint) : "pdiff_offset"
 PM__intrinsic sign(lint,lint)->(lint) : "sign_offset"
@@ -270,10 +270,10 @@ PM__intrinsic sreal(int8)->(sreal) : "real_i8"
 PM__intrinsic real(int8)->(real) : "double_i8"
 proc int8(x:int8)=x
 PM__intrinsic abs(int8)->(int8) : "abs_i8"
-PM__intrinsic ~(int8)->(int8) : "bnot_i8"
+PM__intrinsic !(int8)->(int8) : "bnot_i8"
 PM__intrinsic &(int8,int8)->(int8) : "band_i8"
 PM__intrinsic |(int8,int8)->(int8) : "bor_i8"
-PM__intrinsic ~(int8,int8)->(int8) : "bxor_i8"
+PM__intrinsic !(int8,int8)->(int8) : "bxor_i8"
 PM__intrinsic shift(int8,int8)->(int8) : "bshift_i8"
 PM__intrinsic pdiff(int8,int8)->(int8) : "pdiff_i8"
 PM__intrinsic sign(int8,int8)->(int8) : "sign_i8"
@@ -313,10 +313,10 @@ PM__intrinsic sreal(int16)->(sreal) : "real_i16"
 PM__intrinsic real(int16)->(real) : "double_i16"
 proc int16(x:int16)=x
 PM__intrinsic abs(int16)->(int16) : "abs_i16"
-PM__intrinsic ~(int16)->(int16) : "bnot_i16"
+PM__intrinsic !(int16)->(int16) : "bnot_i16"
 PM__intrinsic &(int16,int16)->(int16) : "band_i16"
 PM__intrinsic |(int16,int16)->(int16) : "bor_i16"
-PM__intrinsic ~(int16,int16)->(int16) : "bxor_i16"
+PM__intrinsic !(int16,int16)->(int16) : "bxor_i16"
 PM__intrinsic shift(int16,int16)->(int16) : "bshift_i16"
 PM__intrinsic pdiff(int16,int16)->(int16) : "pdiff_i16"
 PM__intrinsic sign(int16,int16)->(int16) : "sign_i16"
@@ -356,10 +356,10 @@ PM__intrinsic sreal(int32)->(sreal) : "real_i32"
 PM__intrinsic real(int32)->(real) : "double_i32"
 proc int32(x:int32)=x
 PM__intrinsic abs(int32)->(int32) : "abs_i32"
-PM__intrinsic ~(int32)->(int32) : "bnot_i32"
+PM__intrinsic !(int32)->(int32) : "bnot_i32"
 PM__intrinsic &(int32,int32)->(int32) : "band_i32"
 PM__intrinsic |(int32,int32)->(int32) : "bor_i32"
-PM__intrinsic ~(int32,int32)->(int32) : "bxor_i32"
+PM__intrinsic !(int32,int32)->(int32) : "bxor_i32"
 PM__intrinsic shift(int32,int32)->(int32) : "bshift_i32"
 PM__intrinsic pdiff(int32,int32)->(int32) : "pdiff_i32"
 PM__intrinsic sign(int32,int32)->(int32) : "sign_i32"
@@ -401,10 +401,10 @@ PM__intrinsic sreal(int64)->(sreal) : "real_i64"
 PM__intrinsic real(int64)->(real) : "double_i64"
 proc int64(x:int64)=x
 PM__intrinsic abs(int64)->(int64) : "abs_i64"
-PM__intrinsic ~(int64)->(int64) : "bnot_i64"
+PM__intrinsic !(int64)->(int64) : "bnot_i64"
 PM__intrinsic &(int64,int64)->(int64) : "band_i64"
 PM__intrinsic |(int64,int64)->(int64) : "bor_i64"
-PM__intrinsic ~(int64,int64)->(int64) : "bxor_i64"
+PM__intrinsic !(int64,int64)->(int64) : "bxor_i64"
 PM__intrinsic shift(int64,int64)->(int64) : "bshift_i64"
 PM__intrinsic pdiff(int64,int64)->(int64) : "pdiff_i64"
 PM__intrinsic sign(int64,int64)->(int64) : "sign_i64"
@@ -679,17 +679,11 @@ proc /(x:num,y:num)=xx/yy where xx,yy=balance(x,y)
 proc **(x:num,y:num)=xx**yy where xx,yy=balance(x,y)
 proc &(x:num,y:num)=xx&yy where xx,yy=balance(x,y)
 proc |(x:num,y:num)=xx|yy where xx,yy=balance(x,y)
-proc ~(x:num,y:num)=xx ~ yy where xx,yy=balance(x,y)
+proc !(x:num,y:num)=xx ! yy where xx,yy=balance(x,y)
 proc shift(x:num,y:num)=xx shift yy where xx,yy=balance(x,y)
 proc max(x:num,y:num)=max(xx,yy) where xx,yy=balance(x,y)
 proc min(x:num,y:num)=min(xx,yy) where xx,yy=balance(x,y)
 
-// Indexed arithmetic
-proc +'(x,y)=$+.(x,y)
-proc -'(x,y)=$-.(x,y)
-proc *'(x,y)=$*.(x,y)
-proc /'(x,y)=$/.(x,y)
-proc -'(x)=$-.(x)
 
 //  bool type
 PM__intrinsic PM__assign_var(&bool,bool): "assign_l"
@@ -1121,7 +1115,7 @@ proc high(x:range)=x._hi
 proc step(x:range)=convert(1,x._lo)
 proc width(x:range)=literal(1)
 proc norm(x:range)=x
-proc #'(x:range(int))=[0..x._n-1]
+proc #(x:range(int))=[0..x._n-1]
 proc dims(x:range(int))=[x._n]
 proc size(x:range(int))=x._n
 proc +(x:range,y:range_base)=rec range {
@@ -1154,15 +1148,15 @@ proc element(x:range(any_int),y:range(int))=element(x,y._lo)..element(x,y._hi)
 proc element(x:range(any_int),y:seq(int))=element(x,y._lo)..element(x,y._hi) by y._st
 proc element(x:range(any_int),y:null)=x
 proc element(x:range(any_int),y:any_seq)=y+x._lo
-proc #'(y:range(any_int),x:int)=int(x-y._lo)
-proc #'(y:range(any_int),x:range(int))=int(x._lo-y._lo)..int(x._hi-y._lo)
-proc #'(y:range(any_int),x:seq(int))=_intseq(int(x._lo-y._lo),int(x._hi-y._lo), x._st)
-proc #'(y:range(any_int),x:range_below(int))=0..int(x._t-y._lo)
-proc #'(y:range(any_int),x:range_above(int))=int(x._t-y._lo)..size(y)-1
-proc #'(y:range(any_int),x:seq_below(int))=_intseq(0,int(x._t-y._lo),x._st)
-proc #'(y:range(any_int),x:seq_above(int))=_intseq(int(x._t-y._lo),size(y)-1,int(x._st))
-proc #'(y:range(any_int),x:seq_step(int))=_intseq(0,size(y),int(x._st))
-proc #'(y:range(any_int),x:null)=0..size(y)
+proc #(y:range(any_int),x:int)=int(x-y._lo)
+proc #(y:range(any_int),x:range(int))=int(x._lo-y._lo)..int(x._hi-y._lo)
+proc #(y:range(any_int),x:seq(int))=_intseq(int(x._lo-y._lo),int(x._hi-y._lo), x._st)
+proc #(y:range(any_int),x:range_below(int))=0..int(x._t-y._lo)
+proc #(y:range(any_int),x:range_above(int))=int(x._t-y._lo)..size(y)-1
+proc #(y:range(any_int),x:seq_below(int))=_intseq(0,int(x._t-y._lo),x._st)
+proc #(y:range(any_int),x:seq_above(int))=_intseq(int(x._t-y._lo),size(y)-1,int(x._st))
+proc #(y:range(any_int),x:seq_step(int))=_intseq(0,size(y),int(x._st))
+proc #(y:range(any_int),x:null)=0..size(y)
 proc intersect(x:range(any_int),y:range(any_int))=max(y._lo,x._lo)..min(y._hi,x._hi)
 proc overlap(x:range(any_int),y:range(any_int))=max(y._lo,x._lo)-x._lo..min(y._hi,x._hi)-x._lo
 proc expand(x:range,y:range)=x._lo+y._lo..x._hi+y._hi
@@ -1187,7 +1181,7 @@ proc size(x:seq)=x._n
 proc width(x:seq)=literal(1)
 proc norm(x:seq)=min(lo,hi)..max(lo,hi) by abs(x._st)where hi=lo+(x._n-1)*x._st where lo=x._lo
 proc align(x:seq)=literal(0)
-proc #'(x:seq)=[0..x._n-1]
+proc #(x:seq)=[0..x._n-1]
 proc dims(x:seq)=[x._n]
 proc +(x:seq,y:range_base)=rec seq {
   _lo=x._lo+y,_hi=x._hi+y,_st=x._st,_n=x._n
@@ -1214,15 +1208,15 @@ proc real(x:seq)=rec seq {
 proc in(x:int,y:seq(int))=y._lo<=x and x<=y._hi and (x-y._lo) mod y._st==0
 proc inc(x:seq(int),y:seq(int))=y._lo in x and y._hi in x and (y._n==1 or y._lo+y._st in x)
 proc inc(x:seq(int),y:range(int))=x inc low(y)..high(y) by 1
-proc #'(y:seq,x:range_base)=int((x-y._lo)/y._st)
-proc #'(y:seq,x:range)=y#x._lo..y#x._hi
-proc #'(y:seq,x:seq)=_intseq(lo,hi,int(x._st)) where lo=y#x._lo,hi=y#x._hi  
-proc #'(y:seq,x:range_below)=0..y#x._t
-proc #'(y:seq,x:range_above)=y#x._t..size(y)-1
-proc #'(y:seq,x:seq_below)=_intseq(0,y#x._t,int((x._st+y._st/2)/y._st))
-proc #'(y:seq,x:seq_above)=_intseq(y#x._t,size(y)-1,int((x._st+y._st/2)/y._st))
-proc #'(y:seq,x:seq_step)=_intseq(0,size(y),int((x._st+y._st/2)/y._st))
-proc #'(y:seq,x:null)=0..size(y)-1
+proc #(y:seq,x:range_base)=int((x-y._lo)/y._st)
+proc #(y:seq,x:range)=y#x._lo..y#x._hi
+proc #(y:seq,x:seq)=_intseq(lo,hi,int(x._st)) where lo=y#x._lo,hi=y#x._hi  
+proc #(y:seq,x:range_below)=0..y#x._t
+proc #(y:seq,x:range_above)=y#x._t..size(y)-1
+proc #(y:seq,x:seq_below)=_intseq(0,y#x._t,int((x._st+y._st/2)/y._st))
+proc #(y:seq,x:seq_above)=_intseq(y#x._t,size(y)-1,int((x._st+y._st/2)/y._st))
+proc #(y:seq,x:seq_step)=_intseq(0,size(y),int((x._st+y._st/2)/y._st))
+proc #(y:seq,x:null)=0..size(y)-1
 proc string(x:seq)=x._lo++".."++x._hi++" by "++x._st
 proc element(x:seq,y:int)=x._lo+convert(y,x._lo)*x._st
 proc element(x:seq,y:range(int))=_seq(element(x,y._lo),element(x,y._hi),x._st)
@@ -1261,7 +1255,7 @@ proc step(x:block_seq)=x._st
 proc width(x:block_seq)=x._b
 proc norm(x:block_seq)=x
 proc align(x:block_seq)=x._align
-proc #'(x:block_seq)=[0..x._n-1]
+proc #(x:block_seq)=[0..x._n-1]
 proc dims(x:block_seq)=x._n
 proc size(x:block_seq)=x._n
 proc +(x:block_seq,y:int)=rec block_seq {
@@ -1272,8 +1266,8 @@ proc -(x:block_seq,y:int)=rec block_seq {
 }
 proc _arb(x:block_seq)=x._lo
 proc in(x:int,y:block_seq)=x>=y._lo and x<=y._hi and (x-y._lo+y._align) mod y._st<y._b
-proc #'(y:block_seq,x:int)=nb*y._b+xx-nb*y._st where nb=xx/y._st where xx=x-y._lo+y._align 
-proc #'(y:block_seq,x:any_seq)=overlap(map_seq(y),map_seq(x))
+proc #(y:block_seq,x:int)=nb*y._b+xx-nb*y._st where nb=xx/y._st where xx=x-y._lo+y._align 
+proc #(y:block_seq,x:any_seq)=overlap(map_seq(y),map_seq(x))
 proc element(x:block_seq,y:int)=x._lo+y+((y+x._align)/x._b)*(x._st-x._b)
 proc intersect(x:block_seq,y:range(any_int)){
   var lo=max(x._lo,y._lo)
@@ -1330,7 +1324,7 @@ proc _mono(x) {
 */
 }
 proc map_seq(x:map_seq)=x
-proc #'(x:map_seq)=#'(x.array)
+proc #(x:map_seq)=#(x.array)
 proc dims(x:map_seq)=size(x.array)
 proc size(x:map_seq)=size(x.array)
 proc +(x:map_seq,y:range_base)=rec map_seq{
@@ -1401,7 +1395,7 @@ proc inc(x:map_seq,y:seq or block_seq)=x inc map_seq(y)
 proc inc(x:block_seq,y:block_seq)=map_seq(x) inc map_seq(y)
 proc inc(x:seq or block_seq,y:map_seq)=map_seq(x) inc y
 proc in(y:any_int,x:map_seq)=_in_aseq(x.array,size(x.array),int(y))
-proc #'(x:map_seq,y:any_int)=_index_aseq(x.array,size(x.array),int(y))
+proc #(x:map_seq,y:any_int)=_index_aseq(x.array,size(x.array),int(y))
 proc empty(x:map_seq) {
   a=array(0,[1..0])
   return rec map_seq {
@@ -1429,7 +1423,7 @@ type grid(ndim:dimension_number) is tuple(_gdim,ndim) except tuple(int,ndim)
 PM__intrinsic _shp(x:int)->(PM__tinyint) : "miss_arg"
 proc _shp(x)=0..size(x)-1
 proc _sliceit(...)=tuple(...)
-proc #'(x:grid)=map_apply($_shp,$_sliceit,x)
+proc #(x:grid)=map_apply($_shp,$_sliceit,x)
 PM__intrinsic _size(x:int)->(PM__tinyint) : "miss_arg"
 proc _size(x)=size(x)
 proc extent(x:grid)=map_apply($_shp,$_sliceit,x)
@@ -1452,13 +1446,14 @@ proc _gel(x:empty_head,xx,y,yy)=error_type():compile_error("Rank mismatch")
 //  ARRAYS
 //  **************************************
 
-/*
 //  Array types
-type array(e,d:shape) is varray(e,d),farray(e,d)
-type varray(e,d:shape) is e^var d,array_template(e,d,fix(true))
-type farray(e,d:shape) is e^let d,e^invar d,e^fix d,array_template(e,d,fix(false))
-type farray(e,d:mshape) is ...,
-    array_slice(e^let any),array_slice(e^var any),array_slice(e^invar any),array_slice(e^fix any)
+type array(e,d:extent) is varray(e,d),farray(e,d)
+type varray(e,d:extent) is e^var d
+type farray(e,d:extent) is e^let d
+//type farray(e,d:mshape) is ...,
+//    array_slice(e^let any),array_slice(e^var any),array_slice(e^invar any),array_slice(e^fix any)
+
+/*
 
 //  Array operations
 proc _arb(x:any^mshape)=_get_aelem(x,0)
@@ -1474,7 +1469,7 @@ type shape(n:dimension_number,d) is rec{_extent:extent(n),_distr:d}
 proc shape(x,d)=rec shape{_extent=x,_distr=d}
 proc shape(x)=shape(x,null)
 proc string(x:shape)="shape("++x._extent++","++x._distr++")"
-proc #'(x:shape)=x._extent
+proc #(x:shape)=x._extent
 
 PM__if_compiling
 PM__intrinsic<<needs_type>> _array(x:any,y:any,...:any)->(*) : "array"
@@ -1514,17 +1509,17 @@ PM__intrinsic _ubound5(any^any)->(int): "upper_bound"(5)
 PM__intrinsic _ubound6(any^any)->(int): "upper_bound"(6)
 PM__intrinsic _ubound7(any^any)->(int): "upper_bound"(7)
 
-proc #'(x:any^extent(1))=shape([_lbound1(x).._ubound1(x)])
-proc #'(x:any^extent(2))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x)])
-proc #'(x:any^extent(3))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x)])
-proc #'(x:any^extent(4))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x)])
-proc #'(x:any^extent(5))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x)])
-proc #'(x:any^extent(6))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x),_lbound6(x).._ubound6(x)])
-proc #'(x:any^extent(7))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x),_lbound6(x).._ubound6(x),_lbound7(x).._ubound7(x)])
+proc #(x:any^extent(1))=shape([_lbound1(x).._ubound1(x)])
+proc #(x:any^extent(2))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x)])
+proc #(x:any^extent(3))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x)])
+proc #(x:any^extent(4))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x)])
+proc #(x:any^extent(5))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x)])
+proc #(x:any^extent(6))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x),_lbound6(x).._ubound6(x)])
+proc #(x:any^extent(7))=shape([_lbound1(x).._ubound1(x),_lbound2(x).._ubound2(x),_lbound3(x).._ubound3(x),_lbound4(x).._ubound4(x),_lbound5(x).._ubound5(x),_lbound6(x).._ubound6(x),_lbound7(x).._ubound7(x)])
 
-proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,t)//_point2list(t))
-proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v)//_point2list(t),v)
-proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v) //_point2list(t),v)
+proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,t) check "Rank of index does not match the rank of the array"=>rank(t)==rank(a)
+proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v) check "Rank of index does not match the rank of the array"=>rank(t)==rank(a)
+proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v) check "Rank of index does not match the rank of the array"=>rank(t)==rank(a)
 proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,t)
 proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v)
 proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,t,v)
@@ -1540,7 +1535,7 @@ PM__intrinsic _get_aelem(x:any^any,y:int)->(*) : "array_get_elem"
 PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 PM__intrinsic PM__setmaelem(&x:any^any,y:int,z:any): "array_set_multi_elem"
 proc array(x,d:extent)=_array(x,_mshape(d),size(d))
-proc #'(x:any^any)=shape(_array_mshape(x)._extent,null)
+proc #(x:any^any)=shape(_array_mshape(x)._extent,null)
 proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
 proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
 proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(_array_mshape(PM__import(a)),t),v)
@@ -1553,13 +1548,21 @@ PM__endif
 
 PM__intrinsic size(x:any^any)->(int) : "get_size"
 
+proc rank(x:any^extent(1))=1
+proc rank(x:any^extent(2))=2
+proc rank(x:any^extent(3))=3
+proc rank(x:any^extent(4))=4
+proc rank(x:any^extent(5))=5
+proc rank(x:any^extent(6))=6
+proc rank(x:any^extent(7))=7
+
 /*
 PM__intrinsic<<needs_type>> _redim(x:any^any,y:any)->(=x) : "redim"
 PM__intrinsic<<needs_type>> PM__dim_noinit(x:any,y:any,z:any)->(=x) : "array_noinit"
 proc #%(x:invar any^any)=_array_shape(x <<PM__ignore>>)
 proc #%(x)=_get_shape(x)
 proc _get_shape(x)=#x
-proc #'(x:any^any)=_array_shape(x)
+proc #(x:any^any)=_array_shape(x)
 PM__intrinsic _array_shape(x:any^any)->(=x) : "get_dom"
 proc dims(x:any^mshape)=dims(#x)
 PM__intrinsic PM__extractelm(x:any^any)->(=x) : "extractelm"
@@ -1655,13 +1658,13 @@ proc /(x:num^any,y:num)={
 // LOOPS AND PARALLEL STATEMENTS
 // ***************************************************
 
-proc PM__for_stmt'(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<inline>> {
+proc PM__for_stmt(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<inline>> {
     PM__for size(shape) {
       let here_in_tile=PM__generate(shape,size(shape)) 
       PM__context PM__topology,PM__outer,PM__region,PM__schedule,here_in_tile,PM__mask {
         PM__ref inouts=PM__import(PM__inouts)
         var inout_a=PM__get_elem(PM__import(PM__inout_a),here_in_tile)
-        PM__block_proc.'(&inouts,
+        PM__block_proc.(&inouts,
            PM__import(PM__ins),
            &inout_a,
            PM__get_elem(PM__import(PM__in_a),here_in_tile),
@@ -1672,11 +1675,11 @@ proc PM__for_stmt'(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <
    }
 }
 
-proc PM__foreach_stmt'(&PM__inout_a,PM__in_a,shape:extent(1)) yield(&any,any) <<inline>> {
+proc PM__foreach_stmt(&PM__inout_a,PM__in_a,shape:extent(1)) yield(&any,any) <<inline>> {
     var index=low(shape.1)
     while index<=high(shape.1) {
         var inout_a=PM__get_elem(PM__inout_a,[index])  
-        PM__block_proc.'(&PM__inouts,
+        PM__block_proc.(&PM__inouts,
            PM__ins,
            &inout_a,
            PM__get_elem(PM__in_a,[index]) <<inline>>)
@@ -1685,13 +1688,13 @@ proc PM__foreach_stmt'(&PM__inout_a,PM__in_a,shape:extent(1)) yield(&any,any) <<
     }
 }
 
-proc PM__foreach_stmt'(&PM__inout_a,PM__in_a,shape:extent(2)) yield(&any,any) <<inline>> {
+proc PM__foreach_stmt(&PM__inout_a,PM__in_a,shape:extent(2)) yield(&any,any) <<inline>> {
     var index2=low(shape.2)
     while index2<=high(shape.2) {
       var index1=low(shape.1)
       while index1<=high(shape.1) {
         var inout_a=PM__get_elem(PM__inout_a,[index1,index2])  
-        PM__block_proc.'(&PM__inouts,
+        PM__block_proc.(&PM__inouts,
            PM__ins,
            &inout_a,
            PM__get_elem(PM__in_a,[index1,index2]) <<inline>>)
@@ -1702,11 +1705,11 @@ proc PM__foreach_stmt'(&PM__inout_a,PM__in_a,shape:extent(2)) yield(&any,any) <<
     }
 }
 
-proc PM__par_stmt'(num) yield() <<inline>> {  yield() }
-proc PM__check_task'(num)=true
+proc PM__par_stmt(num) yield() <<inline>> {  yield() }
+proc PM__check_task(num)=true
 
-proc PM__chan_stmt'() yield() { yield() }
-proc PM__over_stmt'(x) yield() { yield() }
+proc PM__chan_stmt() yield() { yield() }
+proc PM__over_stmt(x) yield() { yield() }
 
 proc PM__check_iter(x){}
 proc PM__check_iter_amp(x){}
@@ -1741,6 +1744,97 @@ proc _elts(x:tuple4d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts(
 proc _elts(x:tuple5d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts(x.3,s2,tot),_elts(x.4,s3,tot),_elts(x.5,s3*_n(x.4), tot)) where s3=s2*_n(x.3) where s2=s1*_n(x.2) where s1=siz*_n(x.1)
 proc _elts(x:tuple6d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts(x.3,s2,tot),_elts(x.4,s3,tot),_elts(x.5,s4,tot),_elts(x.6,s4*_n(x.5), tot)) where s4=s3*_n(x.4) where s3=s2*_n(x.3) where s2=s1*_n(x.2) where s1=siz*_n(x.1)
 proc _elts(x:tuple7d,siz,tot)=tuple(_elts( x.1,siz,tot),_elts(x.2,s1,tot),_elts(x.3,s2,tot),_elts(x.4,s3,tot),_elts(x.5,s4,tot),_elts(x.6,s5,tot),_elts(x.7,s5*_n(x.6), tot)) where s5=s4*_n(x.5) where s4=s3*_n(x.4) where s3=s2*_n(x.3) where s2=s1*_n(x.2) where s1=siz*_n(x.1)
+
+
+//  **************************************************
+//  INDEXED VALUES
+//  **************************************************
+
+type indexed_dim(d:int,m:int,c:int,n:int) is rec {_m:m=fix(1),_c:c=fix(0),_d:d=fix(1),_n:n}
+type indexed(t:int) is tuple(indexed_dim or int) except tuple(int)
+proc PM__makeidxdim(x:null,y)=rec indexed_dim {
+  _n=y
+}
+proc PM__makeidxdim(x:null)=rec indexed_dim {
+  _n=null
+}
+proc PM__makeidxdim(x:range,y)=rec indexed_dim {
+  _c=x._lo,_n=y
+}
+proc PM__makeidxdim(x:strided_range,y)=rec indexed_dim {
+  _c=x._lo,_m=x._st,_n=y
+}
+proc PM__makeidxdim(x,y)=PM__makeidxdim(get_dim(x,y),y)
+proc PM__makeidxdim(x:tuple)=map($PM__makeidxdim,x,indices(x))
+proc PM__makeidxdim(x:seq)=[PM__makeidxdim(x,fix(1))]
+proc PM__makeidx(x:indexed_dim or indexed)=rec _indexed {
+  _t=_tup(x),_r=null
+}
+proc PM__makeidx(x:indexed_dim or indexed,y)=rec _indexed {
+  _t=_tup(x),_r=y
+}
+proc PM__makeidx(x,y)=x :test "Malformed indexed expression" => fix(false)
+proc PM__makeidx(x)=x :test "Malformed indexed expression" => fix(false)
+proc PM__idx_uminus(x,z)=-x
+proc -%(x)=-x
+proc +%(x,y)=$+(x,y)
+proc -%(x,y)=x-y
+proc *%(x,y)=x*y
+proc /%(x,y)=x/y
+proc PM__idx_uminus(x:indexed_dim,z)=rec indexed_dim {
+_m=x._m,_c=-x._c,_d=x._d,_n=x._n} 
+proc +(x:indexed_dim,yy:any_int,z)=rec indexed_dim {
+_m=x._m,_c=x._c+y*x._d,_d=x._d,_n=x._n} where y=int(yy)
+proc +(yy:any_int,x:indexed_dim,z)=rec indexed_dim {
+_m=x._m,_c=x._c+y*x._d,_d=x._d,_n=x._n} where y=int(yy)
+proc -(x:indexed_dim,yy:any_int,z)=rec indexed_dim {
+_m=x._m,_c=x._c-y*x._d,_d=x._d,_n=x._n} where y=int(yy)
+proc -(yy:any_int,x:indexed_dim,z)=rec indexed_dim {
+_m=-x._m,_c=-x._c+y*x._d,_d=x._d,_n=x._n} where y=int(yy)
+proc *(x:indexed_dim,yy:any_int,z)=rec indexed_dim {
+_m=x._m*y,_c=y*x._c,_d=x._d,_n=x._n} where y=int(yy)
+proc *(yy:any_int,x:indexed_dim,z)=rec indexed_dim {
+_m=x._m*y,_c=y*x._c,_d=x._d,_n=x._n} where y=int(yy)
+proc /(x:indexed_dim,yy:any_int,z)=rec indexed_dim {
+_m=x._m,_c=x._c,_d=x._d*y,_n=x._n} where y=int(yy)
+proc +(x:indexed_dim,y:indexed_dim,z)=rec indexed_dim {
+    _m=x._m*y._d+y._m*x._d,_c=x._c*y._d+y._c*x._d,_d=x._d*y._d,_n=x._n
+}
+proc -(x:indexed_dim,y:indexed_dim,z)=rec indexed_dim {
+  _m=x._m*y._d-y._m*x._d,_c=x._c*y._d-y._c*x._d,_d=x._d*y._d,_n=x._n
+}
+
+
+proc string(x:indexed_dim)="($here."++x._n++"*"++x._m++"+"++x._c++")/"++x._d
+proc string(x:indexed_dim(fix(1)))="$here."++x._n++"*"++x._m++"+"++x._c
+proc string(x:indexed_dim(fix(1),fix(1)))="$here."++x._n++"+"++x._c
+proc string(x:indexed_dim(fix(1),fix(1),fix(0)))="$here."++x._n
+
+/*
+proc _correct(x:indexed,y:extent)=map($-,x,low(y))
+proc _dmap(x:any_int,n:int)=x
+proc _dmap(x:any_int,n:grid_slice_dim)=single_point(x)
+proc _dmap(x:any_int,n:tuple(int))=x
+proc _dmap(x:any_int,n:tuple(grid_slice_dim))=single_point(x)
+proc _dmap(x:indexed_dim,n:int)=(n*x._m+x._c)/x._d
+proc _dmap(x:indexed_dim,n:tuple)=_dmap(x,get_dim(n,x._n))
+proc _dmap(x:indexed_dim,n:grid_slice_dim)=min(lo,hi)..max(lo,hi)where lo=_dmap(x,low(n)),hi=_dmap(x,high(n))
+proc _dmap(x:indexed_dim(fix(1),fix(1)),n:strided_range)=n._lo+x._c..n._hi+x._c by n._st 
+proc _dmap(x:indexed_dim(fix(1),fix(1)),n:block_seq)=block_seq(n._lo+x._c,n._hi+x._c,n._st,n._b,n._align)
+proc _dmap(x:tuple(indexed_dim or any_int),n:tuple(int) or grid_slice)=map_const($_dmap,x,n)
+proc _dmap(x:tuple(indexed_dim or any_int),n:tuple(int) or grid_slice,s:extent)=s#map_const($_dmap,x,n)
+type _round_up is unique
+type _round_down is unique
+proc _dunmap(x:indexed_dim,n:null)=null
+proc _dunmap(x:indexed_dim,n:int,r:_round_down)=(n*x._d-x._c)/x._m
+proc _dunmap(x:indexed_dim,n:int,r:_round_up)=(n*x._d+x._m-sign(1,x._m)-x._c)/x._m
+proc _dunmap(x:indexed_dim,n:tuple)=_dunmap(get_dim(n,x._n),x)
+proc _dunmap(x:indexed_dim,n:grid_slice_dim)=min(lo,hi)..max(lo,hi) where lo=_dunmap(x,low(n),_round_down),hi=_dunmap(x,high(n),_round_up)
+proc _dun(x:indexed_dim,m,n:extent)=replace(n,x._n,intersect(get_dim(n,x._n),_dunmap(x,m)))
+proc _dun(x:int,m,n:extent)=n
+proc _dunmap(x:indexed,m:grid_slice or tuple(int),n:extent)=_dun(x.1,m.1,nn) where nn=_dunmap(tail(x),tail(m),n)
+proc _dunmap(x:[indexed_dim or int],m:grid_slice or tuple(int),n:extent)=_dun(x.1,m.1,n)
+*/
 
 //  **************************************************
 //  SUPPORT FOR OTHER LANGUAGE FEATURES
@@ -1850,10 +1944,10 @@ proc PM__assign_var(&a:fix,b:fix) {
 
 PM__intrinsic PM__get_ref(x:PM__ref(any))->(*) : "get_rf"
 proc PM__get_ref(x)=x
-proc PM__get_ref'(x)=PM__get_ref(x)
-proc PM__get_ref'(x,j)=PM__get_ref(x,j)
-proc PM__get_ref'(x,j,...)=PM__get_ref(PM__get_ref(x,j),...)
+proc PM__get_ref%(x)=PM__get_ref(x)
+proc PM__get_ref(x,j)=PM__get_ref(x,j)
 proc PM__get_ref(x,j,...)=PM__get_ref(PM__get_ref(x,j),...)
+proc PM__get_ref%(x,j,...)=PM__get_ref(PM__get_ref(x,j),...)
 proc PM__get_ref(x:a_rec,j:element_accessor)=x^{j}
 proc PM__get_ref(x:any^any,j:tuple(int))=_get_array_element(x,j)
 proc PM__get_ref(x:any,j:PM__list(proc,any)) {
@@ -1872,7 +1966,6 @@ proc PM__get_ref(x:a_poly,j:PM__list(proc,any)) {
     return r
 }
 
-proc PM__lhs'(x,j)=PM__lhs(x,j)
 proc PM__lhs(x)=x
 proc PM__lhs(x,j:element_accessor)=x^&{j}
 proc PM__lhs(x,j,...)=PM__lhs(PM__lhs(x,j),...)
@@ -1893,17 +1986,18 @@ proc PM__subs(x:tuple)=x
 
 PM__intrinsic PM__clone(x:any)->(*) : "clone"
 PM__intrinsic PM__make_var(x:any)->(*) : "clone" priv
-PM__intrinsic PM__make_var'(x:priv)->(*) : "clone_var" priv
-PM__intrinsic PM__make_var'(x:any)->(*) : "clone" priv
-PM__intrinsic PM__make_const'(x:any)->(*) : "clone_var"
+PM__intrinsic PM__make_var%(x:priv)->(*) : "clone_var" priv
+PM__intrinsic PM__make_var%(x:any)->(*) : "clone" priv
+PM__intrinsic PM__make_const%(x:any)->(*) : "clone_var"
 PM__intrinsic PM__make_const(x:any)->(*) : "clone_var"
 proc PM__init_var(x:any,y:any)=PM__make_var(x,y)
 proc PM__init_const(x:any,y:any)=PM__make_const(x,y)
-proc PM__init_var'(x:any,y:any)=PM__make_var'(x,y)
-proc PM__init_const'(x:any,y:any)=PM__make_const'(x,y)
+proc PM__init_var%(x:any,y:any)=PM__make_var%(x,y)
+proc PM__init_const%(x:any,y:any)=PM__make_const%(x,y)
 proc PM__make_var(x,y)=PM__make_var(x as y)
 proc PM__make_const(x,y)=PM__make_const(x as y)
-PM__intrinsic PM__dechan'(x:any)->(*): "clone_var" 
+proc PM__localise%(x)=x
+//PM__intrinsic PM__localise%(x:any)->(*): "clone_var" 
 PM__intrinsic same_type(x:any,y:any)->(*) : "same_type_fold"
 PM__intrinsic same_rec(x:any,y:any)->(*) : "same_rec_fold"
 
@@ -1913,7 +2007,7 @@ proc ==(x:a_rec,y:a_rec) {
   _eq(x,y,&ok)
   return ok
 }
-proc /=(x:any,y:any) {
+proc /=(x:a_rec,y:a_rec) {
   test "Cannot apply ""/="" to different records"=> same_rec(x,y)
   var ok=true
   _eq(x,y,&ok)
@@ -1952,8 +2046,8 @@ PM__intrinsic error_type()->(*) : "error_type"
 
 //  Debugging
 PM__intrinsic<<is_impure,prints_out>> _dump(any,any): "new_dump"
-proc PM__dump'(x)<<no_inline>>:_dump("Value:",x)
-proc PM__dump'(y,x)<<no_inline>>:if y:_dump("Value:",x)
+proc PM__dump(x)<<no_inline>>:_dump("Value:",x)
+proc PM__dump(y,x)<<no_inline>>:if y:_dump("Value:",x)
 
 PM__intrinsic<<is_impure,prints_out>> old_dump(any): "dump"
 proc old_dumpit(a) {
@@ -1978,11 +2072,11 @@ proc PM__copy_out(&a,b):a=b
 proc PM__for_in(a)=a
 proc PM__for_var(a)=a
 
-proc PM__import_param'(x)=x
-proc PM__export_param'(x)=x
-proc PM__import_param'(&x,y){}
+proc PM__import_param%(x)=x
+proc PM__export_param%(x)=x
+proc PM__import_param%(&x,y){}
 
-proc PM__make_over'(a)=a
+proc PM__make_over%(a)=a
 
 PM__intrinsic<<needs_type>> PM__list_concat(x:PM__list,y:PM__list)->(*):"list_concat"
 PM__intrinsic<<needs_type>> PM__list_splice(x:PM__list,y:PM__list,i:literal(int),j:literal(int))->(*):"list_splice"

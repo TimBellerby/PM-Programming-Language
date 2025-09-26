@@ -243,6 +243,7 @@ contains
     logical,intent(in):: lib_path_set
     integer:: n,m,i,tot,pathlen
     logical:: ok
+    character(len=4):: prefix
     n=len_trim(inbuffer)
     if(n>len(pm_file_suffix)) then
        if(inbuffer(n-len(pm_file_suffix)+1:n)==pm_file_suffix) then
@@ -250,7 +251,8 @@ contains
           return
        endif
     endif
-    if(inbuffer(1:4)=='lib.'.and.lib_path_set) then
+    prefix=inbuffer
+    if(prefix=='lib.'.and.lib_path_set) then
        i=1
        do
           m=index(lib_path(i:),pm_lib_path_sep)

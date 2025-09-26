@@ -37,9 +37,6 @@ module pm_ast
   use pm_symbol
   use pm_vmdefs
   use pm_types
-
-  ! Langauge features
-  integer,parameter:: num_comm_args=6
  
   ! Offsets into module objects
   integer,parameter:: modl_name=1

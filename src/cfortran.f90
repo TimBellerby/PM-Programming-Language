@@ -359,7 +359,7 @@ contains
     g%cstack(g%depth)=bset_new(g,0)
     if(size(g%codes)>0)call record_vars_for_block(g,start)
 
-    !call g_print_out(g,69,no+1,.true.)
+    call g_print_out(g,69,no+1,.true.)
         
     ! Phase I - analyse variable use to determine variable lifetimes
     ! and which variables need to be

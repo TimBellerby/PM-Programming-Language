@@ -254,7 +254,7 @@ contains
     enddo
     k=pm_ivect_lookup(coder%context,coder%proc_cache,key,keysize)
 
-    if(debug_inference) then
+    if(debug_inference.or.debug_bprop) then
        write(*,*) 'INF PROC>',key(1),key(2),k,&
             trim(pm_name_as_string(coder%context,&
             cnode_get_name(procnode,pr_name))),&
@@ -496,6 +496,10 @@ contains
 
     ! Pass a break out
     if(coder%incomplete) then
+       if(debug_inference) then
+          write(*,*) 'INCOMPLETE>',trim(pm_name_as_string(coder%context,&
+            cnode_get_name(procnode,pr_name))),' ',k,coder%incomplete
+       endif
        call pop_stack_frame(coder)
        ! clear cache entry
        cached%offset=sp_sig_break
@@ -505,6 +509,7 @@ contains
           call code_num(coder,int(k))
        endif
        call restore_proc_state
+       coder%incomplete=.true.
        return
     endif
 
@@ -544,7 +549,7 @@ contains
           call drop_code(coder)
        endif
     endif
-       
+  
     ! Create record of type-annotated code
     call code_val(coder,procnode)
     if(added) then
@@ -561,6 +566,9 @@ contains
     call code_num(coder,new_atype)
 
     ! Back-prop pass - push use info vectors for args and keys
+    if(debug_bprop) write(*,*) 'BPROP>', trim(pm_name_as_string(coder%context,&
+         cnode_get_name(procnode,pr_name)))
+    
     if(added) then
        call bprop(coder,cnode_get(procnode,pr_cblock),&
             coder%stack(coder%base+1:coder%base+cnode_get_num(procnode,pr_max_index)),&
@@ -569,6 +577,7 @@ contains
        call bprop(coder,cnode_get(procnode,pr_cblock),&
             rvec%data%i(rvec%offset+1:rvec%offset+cnode_get_num(procnode,pr_max_index)),&
             .true.)
+
     endif
     if(proc_nkeys==0) call code_null(coder)
 
@@ -910,16 +919,7 @@ contains
        if(n/=0) then
           tv=pm_type_vect(coder%context,atype1)
           k=pm_tv_kind(tv)
-          if(k==pm_type_is_vect) then
-             t1=pm_tv_arg(tv,1)
-             tv=pm_type_vect(coder%context,t1)
-             rtype=pm_type_strip_mode(coder%context,pm_tv_arg(tv,n-1),mode)
-             if(mode<sym_invar.and.pm_tv_name(tv)/=sym_pling) then
-                rtype=pm_new_vect_type(coder%context,rtype)
-             endif
-          else
-             rtype=pm_tv_arg(tv,n-1)
-          endif
+          rtype=pm_tv_arg(tv,n-1)
        else
           tv=pm_type_vect(coder%context,atype)
           t1=pm_type_strip_mode(coder%context,pm_tv_arg(tv,3),mode)
@@ -1394,23 +1394,6 @@ contains
           coder%stack(get_slot(1))=pm_type_add_mode(coder%context,&
                pm_type_strip_mode(coder%context,&
                arg_type_with_mode(1),mode),mode2)
-          if(mode2>=sym_invar.and.mode<sym_invar) then
-             call inf_error_with_trace(coder,callnode,&
-                  'Cannot initialise "'//&
-                  trim(sym_names(mode2))//'" variable with "'//&
-                  trim(sym_names(mode))//'" value')
-          endif
-       case(sym_private)
-          coder%stack(get_slot(1))=pm_type_replace_mode(coder%context,&
-               arg_type_with_mode(1),sig)
-       case(sym_set_mode)
-          mode=cnode_num_arg(args,2)
-          coder%stack(get_slot(1))=pm_type_replace_mode(coder%context,&
-               arg_type_with_mode(1),mode)
-       case(sym_change_mode)
-          mode=cnode_num_arg(args,3)
-          coder%stack(get_slot(1))=pm_type_replace_mode(coder%context,&
-               arg_type_with_mode(2),mode)
        case(sym_invar)
           tno=pm_type_strip_mode(coder%context,arg_type_with_mode(1),mode)
           if(mode<sym_invar) then
@@ -1497,6 +1480,12 @@ contains
              endif
           endif
           coder%stack(get_slot(1))=tno
+       case(sym_check_par_state)
+          if(arg_type(2)==pm_null) then
+             call pm_strval(cnode_arg(cnode_arg(args,1),1),str)
+             call inf_error_with_trace(coder,callnode,&
+                  trim(str)//' cannot be executed in a block which has been invoked from a non-parallel context')
+          endif
        case(sym_dcaret)
           coder%stack(get_slot(1))=pm_type_add_mode(coder%context,&
                pm_new_vect_type(coder%context,arg_type(2)),sym_shared)
@@ -2262,37 +2251,7 @@ contains
        
        ! Rules for "&" arguments
 !!! -- Need better error positioning
-       if(amps/=0.and..not.ignore_rules) then
-          amplocs=pm_name_val(coder%context,amps)
-          do i=0,pm_fast_esize(amplocs)
-             tno2=pm_type_strip_mode(coder%context,&
-                  coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i)+nkey),mode2)
-             if(tno2>0) then
-                tv=pm_type_vect(coder%context,tno2)
-                if(pm_tv_kind(tv)==pm_type_is_dref) then
-                   do while(pm_tv_name(tv)>0)
-                      tno2=pm_tv_arg(tv,2)
-                      tv=pm_type_vect(coder%context,tno2)
-                   enddo
-                   if(pm_tv_kind(tv)==pm_type_is_dref.and.&
-                        pm_tv_name(tv)/=pm_dref_is_ref) then
-                      call call_error(&
-                           'Cannot pass a mixed-mode reference as an "&" argument - must use "&&"')
-                      coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i)+nkey)=pm_tv_arg(tv,1)
-                   endif
-                endif
-             endif
-             if(mode2/=sym_private.and.(mode2/=sym_chan.or.is_unlabelled)) then
-                if(mode2==sym_chan) then
-                   call call_error('Cannot change "chan" variable in an unlabelled conditional context')
-                else
-                   call call_error('Cannot change "'//trim(sym_names(mode2))//&
-                        '" "&" variable outside of a "sync" statement')
-                endif
-                bad_amp=.true.
-             endif
-          enddo
-       endif
+  
        
        ! As this is standard call strip argument modes before passing
        do i=1,nargs
@@ -2300,6 +2259,26 @@ contains
                pm_type_strip_mode(coder%context,coder%wstack(coder%wtop+i),mode2)
        enddo
     endif
+
+    if(amps/=0.and..not.ignore_rules) then
+       
+       amplocs=pm_name_val(coder%context,amps)
+       do i=0,pm_fast_esize(amplocs)
+          mode2=pm_type_get_mode(coder%context,&
+               coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i)))
+          if(mode2/=sym_private.and.((mode2/=sym_chan.and..not.is_comm).or.is_unlabelled)) then
+             if(mode2==sym_chan.or.is_comm) then
+                call call_error('Cannot modify a "'//trim(sym_names(mode2))//&
+                     '" value in an unlabelled conditional context')
+             else
+                call call_error('Cannot modify a "'//trim(sym_names(mode2))//&
+                     '" value using a conventional procedure call')
+             endif
+             bad_amp=.true.
+          endif
+       enddo
+    endif
+
     
     ! Move stack top to end of args (args were above stack top)
     coder%wtop=coder%wtop+nargs
@@ -2786,7 +2765,7 @@ contains
       if(iand(flags,proccall_is_method)/=0) then
          kind=sym_dot
       elseif(iand(flags,proccall_is_general)/=0) then
-         kind=sym_dash
+         kind=sym_yield
       elseif(iand(flags,proccall_is_comm)/=0) then
          kind=sym_pct
       else
@@ -2797,10 +2776,10 @@ contains
          call inf_error(coder,callnode,&
               'Call does not match procedure type ("'//&
               trim(pm_name_as_string(coder%context,pm_tv_name(tv)))//'" vs "'//&
-              trim(pm_name_as_string(coder%context,kind))//'"):'//&
+              trim(pm_name_as_string(coder%context,kind))//'"): '//&
               trim(pm_type_as_string(coder%context,tno)))
       endif
-
+ 
       if(iand(pm_tv_flags(tv),pm_type_is_yield)/=0.neqv.&
            cnode_flags_set(callnode,call_flags,proccall_is_block)) then
          call inf_error(coder,callnode,&
@@ -3839,7 +3818,7 @@ contains
     enddo
     p=cnode_get(cblock,cblock_last_call)
     do while(.not.pm_fast_isnull(p))
-       call bprop_call(coder,cblock,p,access_info,rvec)      
+       call bprop_call(coder,cblock,p,access_info,rvec)
        p=cnode_get(p,call_back_link)
     enddo
   contains
@@ -3904,7 +3883,10 @@ contains
           call bprop_if(count_updates(cnode_arg(args,4),1))
        case(sym_do)
           call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
-          
+       case(sym_pct)
+          call bprop_cblock(coder,cnode_arg(args,2),access_info,rvec)
+          call access(cnode_arg(args,1))
+          write(*,*) 'DONE PCT'
        case(sym_any,sym_any_invar)
           call bprop_multi_versions(cnode_arg(args,4),cnode_arg(args,2),cnode_arg(args,1))
           call access(cnode_arg(args,3))
@@ -4075,6 +4057,7 @@ contains
 
       sig=rvec(cnode_get_num(callnode,call_index))
       if(sig<=0) then
+         if(debug_bprop) write(*,*) 'BPspecial sig',sig
          call std_access(.false.,1)
          return
       endif
@@ -4142,7 +4125,8 @@ contains
       endif
       
       if(.not.is_accessed.and.iand(taints,proc_must_run)==0) then
-         if(debug_bprop) write(*,*) 'BP disable',is_accessed,iand(taints,proc_must_run)
+         if(debug_bprop) write(*,*) 'BP disable',is_accessed,iand(taints,proc_must_run),&
+              trim(sig_name_str(coder,cnode_get_num(callnode,call_sig)))
          call disable
          return
       endif
@@ -4232,7 +4216,10 @@ contains
             endif
          endif
       enddo
-      if(should_disable) call disable
+      if(should_disable) then
+         if(debug_bprop.and.sig>0) write(*,*) 'disable ',trim(sym_names(sig))
+         call disable
+      endif
     end subroutine std_access
 
     subroutine access(var)
@@ -4565,7 +4552,7 @@ contains
     character(len=2):: join,ampstr
     character(len=1):: procchr,dotchr
     integer:: n,k,nargs,nkeys
-    integer::ampidx,signame,signamebase
+    integer::ampidx,signame,signamebase,tno
     type(pm_ptr):: tv,key,val,amp,keyargs,keynames,name
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
@@ -4608,7 +4595,7 @@ contains
     if(cnode_flags_set(node,call_flags,proccall_is_comm)) then
        n=6
        if(cnode_flags_set(node,call_flags,proccall_is_general)) then
-          procchr=''''
+          procchr=' '
        else
           procchr='%'
        endif
@@ -4631,7 +4618,7 @@ contains
     if(pm_opts%show_hidden) n=0
     
     call more_error(coder%context,dotchr//trim(pm_name_as_string(coder%context,&
-            signame))//procchr//' (')
+            signame))//procchr//'(')
     k=0
     do i=n+1,nargs
        if(i<nargs.or.nkeys>0) then
@@ -4662,8 +4649,11 @@ contains
  
     if(cnode_flags_set(node,call_flags,proccall_is_block)) then
        call more_error(coder%context,' ) yield (')
+       tno=coder%wstack(base+nkeys+2+n-2)
+       if(pm_type_kind(coder%context,tno)==pm_type_is_par_kind) tno=pm_type_arg(coder%context,tno,1)
+       if(pm_type_kind(coder%context,tno)==pm_type_is_proc) tno=pm_type_arg(coder%context,tno,1)
        call more_error(coder%context,'     '//&
-            trim(pm_type_as_string(coder%context,coder%wstack(base+nkeys+2+n-2))))
+            trim(pm_type_as_string(coder%context,tno)))
        call more_error(coder%context,' )')
     else
        call more_error(coder%context,' )')
@@ -4750,7 +4740,7 @@ contains
     n=len_trim(str)+1
     if(cnode_flags_set(node,pr_flags,proccall_is_comm)) then
        if(cnode_flags_set(node,pr_flags,proccall_is_general)) then
-          str(n:n)=''''
+          str(n:n)=' '
        else
           str(n:n)='%'
        endif
@@ -4768,11 +4758,10 @@ contains
        str(n:n+2)='...'
     else
        if(cnode_flags_set(node,pr_flags,proccall_is_block)) then
-          str(n:)=')yield('
-          n=n+7
-          tno=pm_type_arg(coder%context,tno,istart)
+          str(n:)='yield '
+          n=n+6
+          tno=pm_type_arg(coder%context,pm_type_arg(coder%context,tno,istart-3),1)
           call pm_type_to_string(coder%context,tno,str,n)
-          str(n:n)=')'
        endif
     endif
 777 continue

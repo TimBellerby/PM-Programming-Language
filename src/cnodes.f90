@@ -142,10 +142,11 @@ module pm_cnodes
   integer,parameter:: var_is_key=512
   integer,parameter:: var_is_varg=1024
   integer,parameter:: var_is_par_var=2048
-  integer,parameter:: var_is_maybe_not_private=4096
+  integer,parameter:: var_is_maybe_idx=4096
   integer,parameter:: var_is_where=8192
   integer,parameter:: var_is_reference=16384
   integer,parameter:: var_is_key_ptr=32768
+  integer,parameter:: var_is_comm=65536
 
   ! Offsets into proc & builtin nodes
   integer,parameter:: pr_ptype=cnode_args+0
@@ -817,8 +818,10 @@ contains
                      '['//trim(pm_type_as_string(context,tno))//']',.false.,depth)
              endif
           endif
-          if(cnode_flags_set(cnode,var_flags,var_is_maybe_not_private)) then
+          if(cnode_flags_set(cnode,var_flags,var_is_comm)) then
              call append_to_line(iunit,str,i,'^',.false.,depth)
+          elseif(cnode_flags_set(cnode,var_flags,var_is_maybe_idx)) then
+             call append_to_line(iunit,str,i,'#',.false.,depth)
           endif
        case(cnode_is_const)
           p=cnode_arg(cnode,1)
