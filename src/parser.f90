@@ -987,7 +987,6 @@ contains
           if(parser%sym<=num_sym) then
              call parse_error(parser,'Expected "'//&
                   trim(sym_names(sym))//'" got "'//trim(sym_names(parser%sym))//'"')
-             call pm_panic('ccc')
           else
              call parse_error(parser,'Expected "'//&
                   trim(sym_names(sym))//'"')
@@ -1212,16 +1211,18 @@ contains
     call make_node(parser,sym_name,1)
     m=1
     if(iand(flags,proccall_is_comm)/=0) then
-       call push_sym_val(parser,sym_outer)
+       call push_sym_val(parser,sym_mask)
        call make_node(parser,sym_name,1)
        call push_sym_val(parser,sym_region)
        call make_node(parser,sym_name,1)
        call push_sym_val(parser,sym_subregion)
        call make_node(parser,sym_name,1)
-       call push_sym_val(parser,sym_here_in_tile)
-       call make_node(parser,sym_name,1)
-       call push_sym_val(parser,sym_mask)
-       call make_node(parser,sym_name,1)
+       if(.not.pm_is_compiling) then
+          call push_sym_val(parser,sym_here_in_tile)
+          call make_node(parser,sym_name,1)
+          call push_sym_val(parser,sym_here)
+          call make_node(parser,sym_name,1)
+       endif
        m=num_comm_args
     endif
 
@@ -4247,7 +4248,8 @@ contains
        endif
     case(sym_proc)
        call scan(parser)
-       if(parser%sym==sym_open.or.parser%sym==sym_pct) then
+       if(parser%sym==sym_open.or.parser%sym==sym_pct&
+            .or.parser%sym==sym_open_square) then
           if(proctyp(parser)) return
        else
           call push_sym_val(parser,sym_proc)
@@ -4352,24 +4354,25 @@ contains
 
   !====================================================================
   ! proc ( args... ) -> (type,type...)
-  !!!! Need to add par context descriptor
   !====================================================================
   recursive function proctyp(parser,yield) result(iserr)
     type(parse_state):: parser
     logical,intent(in),optional:: yield
     logical:: iserr
-    integer:: i,base,vbase,n,m,sym,npar
+    integer:: i,base,vbase,n,m,sym,npar,flags
     logical:: iscomm
     iserr=.true.
 
+    flags=0
     base=parser%top
 
     sym=parser%sym
-    if(sym==sym_pct.or.sym==sym_dot) then
-       iscomm=sym==sym_pct
+    if(sym==sym_pct) then
+       iscomm=.true.
        call push_sym_val(parser,sym)
        call scan(parser)
-       do i=1,num_comm_args
+       if(par_context_desc(parser,.true.,.false.,flags)) return
+       do i=4,num_comm_args
           call make_node(parser,sym_any,0)
        enddo
        m=num_comm_args
@@ -4385,10 +4388,10 @@ contains
        m=m+2
     else
        call push_sym_val(parser,sym_proc)
-       call make_node(parser,sym_any,0)
+       if(par_context_desc(parser,.false.,.false.,flags)) return
        m=1
     endif
-
+    
     if(expect(parser,sym_open)) return
 
     if(parser%sym/=sym_close) then
@@ -4439,6 +4442,7 @@ contains
        enddo
        parser%stack(base+i)=num_comm_args+2
        parser%top=parser%top+1
+       flags=ior(flags,pm_type_is_yield)
     else
        call push_null_val(parser)
     endif
@@ -4449,8 +4453,12 @@ contains
        call push_null_val(parser)
     endif
 
-    call make_node(parser,sym_proc,5)
+    call push_num_val(parser,flags)
+    
+    call make_node(parser,sym_proc,6)
     iserr=.false.
+  contains
+    include 'fisnull.inc'
   end function proctyp
 
   !======================================================
@@ -4522,7 +4530,7 @@ contains
   end function  opt_typ_list
 
 
-   !======================================================
+  !======================================================
   ! Comma separated list of types
   ! any of which may be omitted
   !======================================================
@@ -4555,91 +4563,63 @@ contains
   !======================================================
   ! Parameter list for procedure declaration
   !======================================================
-  recursive function param_list(parser,iscomm,dot_name,dot_type,close) result(iserr)
+  recursive function param_list(parser,iscomm,dot_name,dot_type,open_sym,close_sym,flags) result(iserr)
     type(parse_state),intent(inout):: parser
     logical,intent(in):: iscomm
     type(pm_ptr),intent(in):: dot_name,dot_type
-    integer,intent(in):: close
+    integer,intent(in):: open_sym,close_sym
+    integer,intent(inout):: flags
     logical:: iserr
     integer:: m,n,i,base,last,vbase,sym,msym,name,numloop
     type(pm_ptr):: temp,dom
     base=parser%top
     iserr=.true.
+
+    if(par_context_desc(parser,iscomm,.true.,flags)) return
+    if(expect(parser,open_sym)) return
     m=1
     n=0
-
-    ! All procedure calls implicitly pass topology
-    call push_sym_val(parser,sym_topology)
-    if(parser%sym==sym_topology) then
-       call scan(parser)
-       if(expect(parser,sym_colon)) return
-       if(typ(parser)) return
-       if(parser%sym/=close) then
-          if(expect(parser,sym_comma)) return
-       endif
-    else
-       call push_null_val(parser)
-    endif
-
+    
     ! For communicating procedures implicit "region" and "subregion" parameters
     if(iscomm) then
-       call push_sym_val(parser,sym_outer)
-       if(parser%sym==sym_outer) then
-          call scan(parser)
-          if(expect(parser,sym_colon)) return
-          if(typ(parser)) return
-          if(parser%sym/=close) then
-             if(expect(parser,sym_comma)) return
-          endif
-       else
-          call push_null_val(parser)
-       endif
-       call push_sym_val(parser,sym_region)
-       if(parser%sym==sym_region) then
-          call scan(parser)
-          if(expect(parser,sym_colon)) return
-          if(typ(parser)) return
-          if(parser%sym/=close) then
-             if(expect(parser,sym_comma)) return
-          endif
-       elseif(.not.pm_fast_isnull(dot_type)) then
-          call push_val(parser,dot_type)
-       else
-          call push_null_val(parser)
-       endif
+
        call push_sym_val(parser,sym_subregion)
        if(parser%sym==sym_subregion) then
           call scan(parser)
           if(expect(parser,sym_colon)) return
           if(typ(parser)) return
-          if(parser%sym/=close) then
+          if(parser%sym/=close_sym) then
              if(expect(parser,sym_comma)) return
           endif
        else
           call push_null_val(parser)
        endif
-       ! Assuming for the momenent that here_in_tile has same type as here
-       call push_sym_val(parser,sym_here_in_tile)
-       if(parser%sym==sym_here) then
-          call scan(parser)
-          if(expect(parser,sym_colon)) return
-          if(typ(parser)) return
-          if(parser%sym/=close) then
-             if(expect(parser,sym_comma)) return
+
+       if(.not.pm_is_compiling) then
+
+          call push_sym_val(parser,sym_here_in_tile)
+          if(parser%sym==sym_here_in_tile) then
+             call scan(parser)
+             if(expect(parser,sym_colon)) return
+             if(typ(parser)) return
+             if(parser%sym/=sym_close) then
+                if(expect(parser,sym_comma)) return
+             endif
+          else
+             call push_null_val(parser)
           endif
-       else
-          call push_null_val(parser)
-       endif
-       call push_sym_val(parser,sym_mask)
-       if(parser%sym==sym_mask) then
-          call scan(parser)
-          if(expect(parser,sym_colon)) return
-          if(typ(parser)) return
-          if(parser%sym/=close) then
-             if(expect(parser,sym_comma)) return
+          call push_sym_val(parser,sym_here)
+          if(parser%sym==sym_here) then
+             call scan(parser)
+             if(expect(parser,sym_colon)) return
+             if(typ(parser)) return
+             if(parser%sym/=close_sym) then
+                if(expect(parser,sym_comma)) return
+             endif
+          else
+             call push_null_val(parser)
           endif
-       else
-          call push_null_val(parser)
+          
        endif
        m=num_comm_args
     endif
@@ -4651,7 +4631,7 @@ contains
     endif
     
     ! Empty argument list
-    if(parser%sym==close) then
+    if(parser%sym==close_sym) then
        call make_node(parser,sym_list,m*2)
        call push_null_val(parser)
        call push_null_val(parser)
@@ -4767,7 +4747,7 @@ contains
        call push_null_val(parser)
     endif
     
-    if(expect(parser,close)) return
+    if(expect(parser,close_sym)) return
  
     iserr=.false.
     return
@@ -4835,43 +4815,91 @@ contains
     end subroutine set_flags
   end function proc_attr
 
-  !======================================================
-  ! Parallel context descriptor  [ [un]cond type , type ]
-  !======================================================
-  function par_context_desc(parser,dtyp,flags) result(iserr)
+  !======================================================================
+  ! Parallel context descriptor  [ [type =>] [ [un]cond:] type , type ]
+  !======================================================================
+  function par_context_desc(parser,iscomm,need_names,flags) result(iserr)
     type(parse_state),intent(inout):: parser
-    type(pm_ptr),intent(inout):: dtyp
+    logical,intent(in):: iscomm,need_names
     integer,intent(inout):: flags
     logical:: iserr
+    logical:: no_dtyp
     iserr=.true.
+    no_dtyp=.false.
     if(parser%sym==sym_open_square) then
        call scan(parser)
-       if(parser%sym==sym_cond.or.parser%sym==sym_uncond) then
-          flags=ior(flags,merge(proc_is_cond,proc_is_uncond,parser%sym==sym_cond))
+       if(.not.iscomm) then
+          if(need_names) call push_sym_val(parser,sym_topology)
+          if(typ(parser)) return
+          call push_sym_val(parser,sym_topo)
+          call make_node(parser,sym_type,2)
+          if(expect(parser,sym_cond)) return
+          if(expect(parser,sym_close_square)) return
+          iserr=.false.
+          return
+       endif
+       if(need_names) call push_sym_val(parser,sym_topology)
+       if(parser%sym/=sym_cond_attr.and.parser%sym/=sym_uncond.and.&
+            parser%sym/=sym_comma.and.parser%sym/=sym_close_square) then
+          if(typ(parser)) return
+          if(parser%sym==sym_cond) then
+             call push_sym_val(parser,sym_topo)
+             call make_node(parser,sym_type,2)
+             call scan(parser)
+          else
+             call make_node(parser,sym_any,0)
+             if(need_names) call push_sym_val(parser,sym_mask)
+             call make_node(parser,sym_any,0)
+             goto 10
+          endif
+       else
+          call make_node(parser,sym_any,0)
+       endif
+       if(need_names) call push_sym_val(parser,sym_mask)
+       if(parser%sym==sym_cond_attr.or.parser%sym==sym_uncond) then
+          if(parser%sym==sym_cond_attr) then
+             call make_node(parser,sym_true,0)
+             call make_node(parser,sym_literal,0)
+             flags=ior(flags,proc_is_cond)
+          else
+             call push_sym_val(parser,sym_null)
+             call make_node(parser,sym_type,1)
+             flags=ior(flags,proc_is_uncond)
+          endif
           call scan(parser)
           if(parser%sym/=sym_close_square) then
              if(expect(parser,sym_colon)) return
           endif
+       else
+          call make_node(parser,sym_any,0)
        endif
-       if(parser%sym/=sym_close_square) then
-          if(parser%sym/=sym_comma) then
-             if(typ(parser)) return
-          else
-             call push_null_val(parser)
-          endif
-          if(parser%sym==sym_comma) then
-             call scan(parser)
-             if(typ(parser)) return
-             call push_sym_val(parser,sym_shape)
-             call make_node(parser,sym_type,3)
-             dtyp=pop_val(parser)
-          else
-             call push_sym_val(parser,sym_shape)
-             call make_node(parser,sym_type,2)
-             dtyp=pop_val(parser)
-          endif
+       if(need_names) call push_sym_val(parser,sym_region)
+       if(parser%sym/=sym_comma.and.parser%sym/=sym_close_square) then
+          if(typ(parser)) return
+       else
+          call make_node(parser,sym_any,0)
+          no_dtyp=.true.
+       endif
+10     continue
+       if(parser%sym==sym_comma) then
+          call scan(parser)
+          if(typ(parser)) return
+          call push_sym_val(parser,sym_shape)
+          call make_node(parser,sym_type,3)
+       elseif(.not.no_dtyp) then
+          call push_sym_val(parser,sym_shape)
+          call make_node(parser,sym_type,2)
        endif
        if(expect(parser,sym_close_square)) return
+    else
+       if(need_names) call push_sym_val(parser,sym_topology)
+       call make_node(parser,sym_any,0)
+       if(iscomm) then
+          if(need_names) call push_sym_val(parser,sym_mask)
+          call make_node(parser,sym_any,0)
+          if(need_names) call push_sym_val(parser,sym_region)
+          call make_node(parser,sym_any,0)
+       endif
     endif
     iserr=.false.
   end function par_context_desc
@@ -4888,7 +4916,7 @@ contains
     type(pm_reg),pointer:: reg
     integer:: name,callname,this,thispar
     integer:: nret,base,flags,sbase,scount,m,nreduce,sym
-    integer:: line,pos,nerrors,open,close
+    integer:: line,pos,nerrors,open_sym,close_sym
     logical:: ampargs,iscall,iscomm,isref,isshared,islocal,ischan,have_rtn
     nerrors=parser%error_count
     reg=>pm_register(parser%context,'proc',ptr,dom,dparams,rtypes,dot_name,dot_type)
@@ -4900,9 +4928,10 @@ contains
     scount=parser%error_count
     dom=pm_null_obj
     dparams=pm_null_obj
+    
     thispar=-1
-    open=sym_open
-    close=sym_close
+    open_sym=sym_open
+    close_sym=sym_close
 
     ! Line and position of procedure start
     call get_sym_pos(parser,line,pos)
@@ -4929,8 +4958,8 @@ contains
        if(expect(parser,sym_close)) goto 999
        if(parser%sym==sym_open_square) then
           name=sym_sub
-          open=sym_open_square
-          close=sym_close_square
+          open_sym=sym_open_square
+          close_sym=sym_close_square
        else
           if(expect(parser,sym_dot)) goto 999
           if(expect_name(parser)) goto 999
@@ -4960,15 +4989,7 @@ contains
           flags=ior(flags,proccall_is_comm)
           iscomm=.true.
        endif
-       if(iscomm) then
-          if(par_context_desc(parser,dot_type,flags)) goto 999
-       endif
     endif
-
-    ! Start of parameters
-    if(expect(parser,open)) goto 999
-
-10  continue
 
     ! Create fully qualified (module!name) procedure name
     call make_qualified_name(parser,name)
@@ -4984,7 +5005,7 @@ contains
     ! Push some more entries in the procedure node (some get values later)
     call push_val(parser,parser%modl)
     call push_num_val(parser,-12345)      ! flags
-    if(param_list(parser,iscomm,dot_name,dot_type,close)) goto 999
+    if(param_list(parser,iscomm,dot_name,dot_type,open_sym,close_sym,flags)) goto 999
 
     params=parser%vstack(parser%vtop-2)
     call push_num_val(parser,-777)        ! coded returns
@@ -5023,9 +5044,6 @@ contains
           flags=ior(flags,proc_run_local)
           call scan(parser)
        elseif(parser%sym==sym_complete) then
-          if(iand(flags,proc_is_uncond)/=0) then
-             call parse_error(parser,'Cannot combine "cplt" and "uncond"')
-          endif
           flags=ior(flags,proc_run_complete)
           call scan(parser)
        endif
@@ -5283,9 +5301,9 @@ contains
        call push_null_val(parser)
     endif
     if(iscomm) then
-       call push_sym_val(parser,sym_outer)
+       call push_sym_val(parser,sym_mask)
        m=m+1
-       if(parser%sym==sym_outer) then
+       if(parser%sym==sym_mask) then
           call scan(parser)
           if(expect(parser,sym_colon)) return
           if(typ(parser)) return
@@ -5310,23 +5328,26 @@ contains
        else
           call push_null_val(parser)
        endif
-       call push_sym_val(parser,sym_here_in_tile)
-       m=m+1
-       if(parser%sym==sym_here_in_tile) then
-          call scan(parser)
-          if(expect(parser,sym_colon)) return
-          if(typ(parser)) return
-       else
-          call push_null_val(parser)
-       endif
-       call push_sym_val(parser,sym_mask)
-       m=m+1
-       if(parser%sym==sym_mask) then
-          call scan(parser)
-          if(expect(parser,sym_colon)) return
-          if(typ(parser)) return
-       else
-          call push_null_val(parser)
+
+       if(.not.pm_is_compiling) then
+          call push_sym_val(parser,sym_here_in_tile)
+          m=m+1
+          if(parser%sym==sym_here_in_tile) then
+             call scan(parser)
+             if(expect(parser,sym_colon)) return
+             if(typ(parser)) return
+          else
+             call push_null_val(parser)
+          endif
+          call push_sym_val(parser,sym_here)
+          m=m+1
+          if(parser%sym==sym_here) then
+             call scan(parser)
+             if(expect(parser,sym_colon)) return
+             if(typ(parser)) return
+          else
+             call push_null_val(parser)
+          endif
        endif
     endif
     if(parser%sym==sym_close) then

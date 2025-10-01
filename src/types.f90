@@ -49,15 +49,18 @@ module pm_types
   integer,parameter:: pm_type_is_soa=          2**15
   integer,parameter:: pm_type_is_aos=          2**16
   integer,parameter:: pm_type_is_seq=          2**17
-  integer,parameter:: pm_type_leaves=          2**18
+  integer,parameter:: pm_type_leaves=          2**19
 
-  integer,parameter:: pm_type_is_when=  16384
-  integer,parameter:: pm_type_is_yield= 32768
-  integer,parameter:: pm_type_is_list=  65536
+  integer,parameter:: pm_type_is_when=  2**14
+  integer,parameter:: pm_type_is_yield= 2**15
+  integer,parameter:: pm_type_is_cond=  2**16
+  integer,parameter:: pm_type_is_uncond=2**17
+  integer,parameter:: pm_type_is_list=  2**18
 
   ! Bitwise-or of flags which are not taints (only one so far)
   integer,parameter:: pm_type_flags_untainting = &
-       ior( pm_type_is_list + pm_type_is_when + pm_type_is_yield, &
+       ior( pm_type_is_list + pm_type_is_when + pm_type_is_yield + &
+       pm_type_is_cond + pm_type_is_uncond, &
        pm_type_is_soa + pm_type_is_aos + pm_type_is_seq )
 
   ! Type kind + default flags
@@ -1348,7 +1351,7 @@ contains
   !======================================
   ! Does supertype include subtype?
   !======================================
-  function pm_type_includes(context,supertype,subtype,&
+  recursive function pm_type_includes(context,supertype,subtype,&
        mode) result(ok)
     type(pm_context),pointer:: context
     integer,intent(in):: supertype,subtype
@@ -2592,7 +2595,6 @@ contains
     tv=pm_type_vect(context,tno)
     tv2=pm_type_vect(context,tno2)
     
-    
     if(pm_tv_name(tv)/=pm_tv_name(tv2)) then
        ok=.false.
        return
@@ -3589,11 +3591,15 @@ contains
           if(.not.isfix) then
              if(add_char('fix(')) return
           endif
-       else
-          if(add_char('literal(')) return
        endif
        if(pm_tv_name(tv)==0) then
+          if(tk==pm_type_is_literal_value) then
+             if(add_char('literal(')) return
+          endif
           call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,.true.)
+          if(tk==pm_type_is_literal_value) then
+             if(add_char(')')) return
+          endif
        else
           if(pm_opts%show_details) then
              call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,infix)
@@ -3617,7 +3623,7 @@ contains
           endif
           n=len_trim(str)+1
        endif
-       if(.not.(tk==pm_type_is_fix_value.and.isfix)) then
+       if(tk==pm_type_is_fix_value.and..not.isfix) then
           if(add_char(')')) return
        endif
     case(pm_type_is_fix)
@@ -3721,12 +3727,23 @@ contains
                trim(pm_int_as_string(pm_type_numargs(context,pm_tv_arg(tv,1)))))) return
           istart=1
        endif
+       tno2=pm_tv_arg(tv,1)
+       if(istart>2) then
+          call par_context_to_string(context,&
+               pm_type_arg(context,tno2,2)/=0.and.pm_type_arg(context,tno2,2)/=pm_null,&
+               pm_type_arg(context,tno2,2)==pm_null,&
+               pm_type_arg(context,tno2,1),pm_type_arg(context,tno2,3),str,n)
+       else
+          call par_context_to_string(context,.false.,.false.,&
+               pm_type_arg(context,tno2,1),0,str,n)
+       endif
        call pm_type_to_string(context,pm_tv_arg(tv,1),str,n,tuple_start=istart)
        if(add_char('->')) return
        call pm_type_to_string(context,pm_tv_arg(tv,2),str,n,infix)
        if(iand(pm_tv_flags(tv),pm_type_is_yield)/=0) then
           if(add_char(' yield ')) return
-          call pm_type_to_string(context,pm_type_arg(context,pm_type_arg(context,pm_tv_arg(tv,1),num_comm_args+1),1),str,n,infix)
+          call pm_type_to_string(context,&
+               pm_type_arg(context,pm_type_arg(context,pm_tv_arg(tv,1),num_comm_args+1),1),str,n,infix)
        endif
     case(pm_type_is_undef_result)
        name=pm_tv_name(tv)
@@ -3970,6 +3987,53 @@ contains
 
   end subroutine pm_type_to_string
 
+  
+
+  subroutine par_context_to_string(context,iscond,isuncond,ttyp,dtyp,string,n)
+    type(pm_context),pointer:: context
+    logical,intent(in):: iscond,isuncond
+    integer,intent(in):: ttyp,dtyp
+    character(len=*),intent(inout):: string
+    integer,intent(inout)::n
+    integer:: tno
+    if(.not.iscond.and..not.isuncond.and.ttyp==0.and.dtyp==0) then
+       return
+    endif
+    string(n:n)='['
+    n=n+1
+    if(ttyp/=0) then
+       call pm_type_to_string(context,ttyp,string,n)
+       string(n:n+1)='=>'
+       n=n+2
+    endif
+    if(iscond) then
+       string(n:n+3)='cond'
+       n=n+4
+    elseif(isuncond) then
+       string(n:n+5)='uncond'
+       n=n+6
+    endif
+    if(dtyp/=0) then
+       if(string(n-1:n-1)=='d') then
+          string(n:n)=':'
+          n=n+1
+       endif
+       tno=pm_type_arg(context,dtyp,1)
+       if(tno/=0) then
+          call pm_type_to_string(context,tno,string,n)
+       endif
+       if(pm_type_numargs(context,dtyp)>1) then
+          tno=pm_type_arg(context,dtyp,2)
+          if(tno/=0) then
+             string(n:n)=':'
+             n=n+1
+             call pm_type_to_string(context,tno,string,n)
+          endif
+       endif
+    endif
+    string(n:n)=']'
+    n=n+1
+  end subroutine par_context_to_string
 
   subroutine dump_type(context,iunit,tno)
     type(pm_context),pointer:: context

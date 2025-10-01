@@ -134,7 +134,7 @@ contains
   ! Type-infer procedure
   ! Returns signature index as tiny int on vstack
   ! ====================================================
-  function inf_proc(coder,procnode,callnode,atype,ptype,nret,nkeys,&
+  recursive function inf_proc(coder,procnode,callnode,atype,ptype,nret,nkeys,&
        keynames,keybase,proc_nkeys,nomatch,only_when,new_atype) result(rtype)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: procnode,callnode
@@ -737,7 +737,7 @@ contains
   ! This requires type inference of default expressions before checking
   ! and converting the arguments
   !=======================================================================
-  subroutine inf_key_args(coder,callnode,procnode,atype,nkeys,call_keys,key_base,&
+  recursive subroutine inf_key_args(coder,callnode,procnode,atype,nkeys,call_keys,key_base,&
        key_types,n,combine)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,procnode,call_keys
@@ -1103,7 +1103,7 @@ contains
   !==========================================
   ! Type infer code block
   !==========================================
-  subroutine inf_cblock(coder,cblock)
+  recursive subroutine inf_cblock(coder,cblock)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock
     integer:: save_taints
@@ -1137,7 +1137,7 @@ contains
   ! Type infer general calls
   ! (which include control structures as a special case)
   !========================================================
-  subroutine inf_call(coder,cblock,callnode)
+  recursive subroutine inf_call(coder,cblock,callnode)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,cblock
     integer:: sig
@@ -1584,7 +1584,7 @@ contains
     include 'ftiny.inc'
     include 'ftypeno.inc'
 
-    subroutine inf_if(nupdates,isinvar)
+    recursive subroutine inf_if(nupdates,isinvar)
       integer,intent(in):: nupdates
       logical,intent(in):: isinvar
       integer,dimension(nupdates):: save_var_types
@@ -1632,7 +1632,7 @@ contains
       endif
     end subroutine inf_if
 
-    subroutine inf_any(nupdates)
+    recursive subroutine inf_any(nupdates)
       integer,intent(in):: nupdates
       integer,dimension(nupdates):: init_var_types,final_var_types
       integer:: i,j,slot,slot2
@@ -1704,7 +1704,7 @@ contains
       endif
     end subroutine inf_any
 
-    subroutine inf_rec
+    recursive subroutine inf_rec
       t=cnode_arg(args,2)
       t=cnode_arg(t,1)
       if(cnode_num_arg(args,3)>=0) then
@@ -1771,7 +1771,7 @@ contains
       call combine_types(cnode_arg(args,1),tno2)
     end subroutine inf_rec
 
-    subroutine inf_each_index()
+    recursive subroutine inf_each_index()
       type(pm_ptr):: p,tv
       integer:: start,finish,tno,tno2,i,n,k,key(1)
 !!! need to handle modes
@@ -2141,7 +2141,7 @@ contains
   !==================================================================
   ! Conventional procedure call
   !==================================================================
-  subroutine inf_proc_call(coder,cblock,callnode,sig,args,num_args,nret)
+  recursive subroutine inf_proc_call(coder,cblock,callnode,sig,args,num_args,nret)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,cblock,args
     integer,intent(in):: sig,num_args,nret
@@ -2203,11 +2203,9 @@ contains
 
     if(is_comm) then 
        if(is_cond) then
-          coder%wstack(coder%wtop+num_comm_args)=pm_logical
+          coder%wstack(coder%wtop+2)=coder%true_literal
        else
-          if(coder%wstack(coder%wtop+num_comm_args)/=pm_logical) then
-             is_cond=.false.
-          endif
+          is_cond=coder%wstack(coder%wtop+2)==coder%true_literal
        endif
     endif
 
@@ -2359,7 +2357,7 @@ contains
     ! - If err is present then no error messages - set err to true instead
     ! - If sig_start is present then disable visibility rule (for "." call)
     !========================================================================
-    function simple_proc_call(sig,procs,err,sig_start) result(ressig)
+    recursive function simple_proc_call(sig,procs,err,sig_start) result(ressig)
       integer,intent(in):: sig
       type(pm_ptr),intent(in):: procs
       logical,intent(out),optional:: err
@@ -2673,7 +2671,7 @@ contains
     !================================================
     ! Call with variable procedure name: v.(args)
     !================================================
-    function var_call(callnode) result(ressig)
+    recursive function var_call(callnode) result(ressig)
       type(pm_ptr),intent(in):: callnode
       integer:: ressig
       integer:: i,sig,rsig,apars
@@ -3768,7 +3766,7 @@ contains
   end subroutine make_type_if_possible
 
 
-  subroutine bprop(coder,cblock,rvec,update)
+  recursive subroutine bprop(coder,cblock,rvec,update)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock
     integer,dimension(:),intent(inout):: rvec
@@ -3802,7 +3800,7 @@ contains
   !==========================================
   ! Back propogate information for code block
   !==========================================
-  subroutine bprop_cblock(coder,cblock,access_info,rvec)
+  recursive subroutine bprop_cblock(coder,cblock,access_info,rvec)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock
     integer,dimension(:),intent(inout)::rvec
@@ -3825,7 +3823,7 @@ contains
     include 'fisnull.inc'
   end subroutine bprop_cblock
   
-  subroutine bprop_call(coder,cblock,callnode,access_info,rvec)
+  recursive subroutine bprop_call(coder,cblock,callnode,access_info,rvec)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,cblock
     integer,dimension(:),intent(inout):: rvec
@@ -3976,7 +3974,7 @@ contains
     include 'fisnull.inc'
     include 'fvkind.inc'
 
-    subroutine bprop_if(nupdates)
+    recursive subroutine bprop_if(nupdates)
       integer:: nupdates
       type(pm_ptr):: readlist,p,var
       integer(access_kind),dimension(nupdates):: save_access
@@ -4021,7 +4019,7 @@ contains
       call access(cnode_arg(args,1))
     end subroutine bprop_if
 
-    subroutine bprop_multi_versions(limitsc,cblock,rtn)
+    recursive subroutine bprop_multi_versions(limitsc,cblock,rtn)
       type(pm_ptr),intent(in):: limitsc,cblock,rtn
       integer:: i,j,slot1,slot2,sig,rtn_slot,rtn_access
       type(pm_ptr):: lrvecs,lrvec,limits
@@ -4050,7 +4048,7 @@ contains
       enddo
     end subroutine bprop_multi_versions
 
-    subroutine bprop_proc_call
+    recursive subroutine bprop_proc_call
       type(pm_ptr):: arg_access,key_access,key_names,proc_keys,arg,amps,key_args,procnode
       integer:: i,j,nkeys,nproc_keys,taints,sig
       logical:: arg_accessed,is_accessed, all_accessed, needs_to_run, is_builtin
@@ -4179,7 +4177,7 @@ contains
 
     end subroutine bprop_proc_call
 
-    subroutine std_access(always,start)
+    recursive subroutine std_access(always,start)
       logical,intent(in):: always
       integer,intent(in):: start
       type(pm_ptr):: arg
@@ -4548,12 +4546,13 @@ contains
     integer,intent(in):: base
     integer,intent(in),optional:: numargs
     integer:: i
-    character(len=100):: str
+    character(len=1024):: str,string
     character(len=2):: join,ampstr
     character(len=1):: procchr,dotchr
     integer:: n,k,nargs,nkeys
-    integer::ampidx,signame,signamebase,tno
+    integer::ampidx,signame,signamebase,tno,dtyp,ttyp
     type(pm_ptr):: tv,key,val,amp,keyargs,keynames,name
+    logical:: iscond
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
     nargs=cnode_numargs(cnode_get(node,call_args))-cnode_get_num(node,call_nret)
@@ -4606,9 +4605,9 @@ contains
 
     if(cnode_flags_set(node,call_flags,proccall_is_method)) then
        procchr=' '
-       dotchr='.'
+       dotchr= '.'
     else
-       dotchr=' '
+       dotchr= ' '
     endif
 
     if(cnode_flags_set(node,call_flags,proccall_is_block)) then
@@ -4616,9 +4615,25 @@ contains
     endif
 
     if(pm_opts%show_hidden) n=0
+
+    string=dotchr//trim(pm_name_as_string(coder%context,&
+         signame))//procchr
+
+    k=len_trim(string)+1
+    if(n>1) then
+       iscond=coder%wstack(base+nkeys+2+2)==coder%true_literal
+       dtyp=coder%wstack(base+nkeys+5)
+       if(dtyp==pm_null) dtyp=0
+    else
+       iscond=.false.
+       dtyp=0
+    endif
+    ttyp=coder%wstack(base+nkeys+3)
+    if(ttyp==pm_null) ttyp=0
+    call par_context_to_string(coder%context,iscond,.false.,ttyp,dtyp,string,k)
+    string(k:k)='('
     
-    call more_error(coder%context,dotchr//trim(pm_name_as_string(coder%context,&
-            signame))//procchr//'(')
+    call more_error(coder%context,trim(string))
     k=0
     do i=n+1,nargs
        if(i<nargs.or.nkeys>0) then
@@ -4697,7 +4712,7 @@ contains
     type(code_state):: coder
     type(pm_ptr),intent(in):: node
     integer:: name
-    integer:: istart,n,tno,nret,i
+    integer:: istart,n,tno,tno2,nret,i
     character(len=1024):: str,str2,buf1,buf2
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
@@ -4745,13 +4760,18 @@ contains
           str(n:n)='%'
        endif
        n=n+1
-       istart=7
+       istart=num_comm_args+1
     else
        istart=2
     endif
     if(cnode_flags_set(node,pr_flags,proccall_is_block)) istart=istart+3
     if(pm_opts%show_hidden) istart=1
     tno=cnode_get_num(node,pr_ptype)
+    tno2=0
+    if(istart>2) tno2=pm_type_arg(coder%context,tno,3)
+    call par_context_to_string(coder%context,cnode_flags_set(node,pr_flags,proc_is_cond),&
+         cnode_flags_set(node,pr_flags,proc_is_uncond),&
+         pm_type_arg(coder%context,tno,1),tno2,str,n)
     call pm_type_to_string(coder%context,tno,str,n,tuple_start=istart)
     n=n+1
     if(n>len(str)-20) then
@@ -4772,6 +4792,7 @@ contains
     include 'fisnull.inc'
 
   end subroutine print_proc_details
+
 
 
 end module pm_infer

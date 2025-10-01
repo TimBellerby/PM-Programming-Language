@@ -605,7 +605,7 @@ contains
   !========================================
   ! Wcode a call block
   !========================================
-  function wcode_cblock(wcd,cblock,rv,ve) result(break)
+  recursive function wcode_cblock(wcd,cblock,rv,ve) result(break)
     type(wcoder),intent(inout):: wcd
     type(pm_ptr),intent(in):: cblock,rv
     integer,intent(in):: ve
@@ -1605,7 +1605,7 @@ contains
     include 'fesize.inc'
     include 'fvkind.inc'
 
-    subroutine pm_for(arg,stmts,ve)
+    recursive subroutine pm_for(arg,stmts,ve)
       type(pm_ptr),intent(in):: arg,stmts
       integer,intent(in):: ve
       integer:: j,new_ve,save_xbase,save_lbtop,save_top,save_shared_ve
@@ -1639,7 +1639,7 @@ contains
       wcd%top=save_top
     end subroutine pm_for
 
-    subroutine any_statement
+    recursive subroutine any_statement
       logical:: any_break
       integer:: jmp
       v=cnode_arg(args,4)
@@ -1679,7 +1679,7 @@ contains
       if(.not.pm_is_compiling) call release_var(wcd,new_ve)
     end subroutine any_statement
 
-    subroutine each_index_statement
+    recursive subroutine each_index_statement
       logical:: any_break
       integer:: k,kk,n,num_named,first_pc
       integer,dimension(:),allocatable::rets
@@ -2177,7 +2177,7 @@ contains
   !
   ! If keyargs_out is present then only inline key argument defaults
   !====================================================================
-  subroutine wcode_inlined_call(wcd,callnode,old_rv,ve1,ve2,args,nargs,totargs,nret,&
+  recursive subroutine wcode_inlined_call(wcd,callnode,old_rv,ve1,ve2,args,nargs,totargs,nret,&
        taints,proc,varg,conv,nkeys,keyargs_out)
     type(wcoder),intent(inout):: wcd
     type(pm_ptr),intent(in):: callnode,args,proc
@@ -2741,7 +2741,7 @@ contains
   ! Combine labelled communicating statements on different branches
   ! Labelled statements must be pushed at start..finish by step on costack
   !=======================================================================
-  subroutine combine_labels(wcd,sig,start,finish,step,first_p,out_ve,&
+  recursive subroutine combine_labels(wcd,sig,start,finish,step,first_p,out_ve,&
        loop_rv,loop_ve)
     type(wcoder),intent(inout):: wcd
     integer,intent(in):: sig,start,finish,step
@@ -4426,7 +4426,7 @@ contains
   !=======================================================================
   ! Code assignment arg1:=arg2
   !=======================================================================
-  subroutine comp_assign(wcd,callnode,arg1,arg2,dup,rv,ve)
+  recursive subroutine comp_assign(wcd,callnode,arg1,arg2,dup,rv,ve)
     type(wcoder),intent(inout):: wcd
     integer,intent(in):: ve
     type(pm_ptr),intent(in):: arg1,arg2,callnode,rv
@@ -4437,7 +4437,7 @@ contains
   !=======================================================================
   ! Code assignment (*slot):=arg
   !=======================================================================
-  subroutine comp_assign_to_slot(wcd,callnode,slot,arg,dup,rv,ve)
+  recursive subroutine comp_assign_to_slot(wcd,callnode,slot,arg,dup,rv,ve)
     type(wcoder),intent(inout):: wcd
     integer,intent(in):: ve,slot
     logical,intent(in):: dup

@@ -1658,6 +1658,10 @@ proc /(x:num^any,y:num)={
 // LOOPS AND PARALLEL STATEMENTS
 // ***************************************************
 
+PM__if_compiling
+
+PM__else
+
 proc PM__for_stmt(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<inline>> {
     PM__for size(shape) {
       let here_in_tile=PM__generate(shape,size(shape)) 
@@ -1704,6 +1708,8 @@ proc PM__foreach_stmt(&PM__inout_a,PM__in_a,shape:extent(2)) yield(&any,any) <<i
       index2=index2+1
     }
 }
+
+PM__endif
 
 proc PM__par_stmt(num) yield() <<inline>> {  yield() }
 proc PM__check_task(num)=true
@@ -1839,6 +1845,8 @@ proc _dunmap(x:[indexed_dim or int],m:grid_slice or tuple(int),n:extent)=_dun(x.
 //  **************************************************
 //  SUPPORT FOR OTHER LANGUAGE FEATURES
 //  **************************************************
+
+type topo(t:any) is rec{_t:t}
 
 //  Keyword arguments
 proc PM__getkey(x:any,y:any)=convert(x,y)

@@ -493,15 +493,15 @@ module pm_symbol
   integer,parameter:: sym_contains = hook4 + 5
 
   integer,parameter:: sym_topology = hook4 + 6
-  integer,parameter:: sym_outer = hook4 + 7
+  integer,parameter:: sym_mask = hook4 + 7
   integer,parameter:: sym_region = hook4 + 8
   integer,parameter:: sym_subregion = hook4 + 9
   integer,parameter:: sym_here_in_tile = hook4 + 10
-  integer,parameter:: sym_mask = hook4 + 11
-  integer,parameter:: sym_here = hook4 + 12
+  integer,parameter:: sym_here = hook4 + 11
+  integer,parameter:: sym_outer = hook4 + 12
 
   integer,parameter:: first_state_par_name = sym_topology
-  integer,parameter:: last_state_par_name = sym_mask
+  integer,parameter:: last_state_par_name = merge(sym_subregion,sym_here,pm_is_compiling)
   integer,parameter:: num_comm_args=last_state_par_name-first_state_par_name+1
   
   integer,parameter:: sym_distr_tag = hook4 + 13
@@ -990,6 +990,7 @@ module pm_symbol
   data sym_names(sym_shared_to_local)  /'PM__shared_to_local'/
   data sym_names(sym_clone)            /'PM__clone'/
   data sym_names(sym_contains)         /'contains'/
+  
   data sym_names(sym_mask)             /'PM__mask'/
   data sym_names(sym_here)             /'PM__here'/
   data sym_names(sym_here_in_tile)     /'PM__here_in_tile'/
@@ -997,6 +998,7 @@ module pm_symbol
   data sym_names(sym_region)           /'PM__region'/
   data sym_names(sym_outer)            /'PM__outer'/
   data sym_names(sym_topology)         /'PM__topology'/
+  
   data sym_names(sym_distr_tag)        /'PM__distr_tag'/
   data sym_names(sym_tag)              /'PM__tag'/
   data sym_names(sym_varray)           /'PM__varray'/

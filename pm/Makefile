@@ -24,8 +24,8 @@
 # THE SOFTWARE.
 FC=gfortran
 PC=mpifort
-FFLAGS=  -g -I../src   -fbounds-check   -fcheck=mem # -Wall
-PFLAGS=  -g -I../src    -fbounds-check   -fcheck=mem
+FFLAGS=  -g -I../src   -fcheck=all   # -Wall
+PFLAGS=  -g -I../src   -fcheck=all 
 
 PMCODE= sysdep.o kinds.o pcomp.o memory.o hash.o opts.o lib.o symbol.o types.o ast.o parser.o linker.o vmdefs.o cnodes.o codegen.o infer.o wcoder.o array.o parlib.o vm.o main.o
 
