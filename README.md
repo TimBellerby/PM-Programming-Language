@@ -36,7 +36,7 @@ raise an issue.
 
 ## Roadmap
 
-* PM 0.5 
+* __PM 0.5__ 
 
   - Nested distributed structures
   - A new, much simpler, way to code stencils
@@ -47,33 +47,33 @@ raise an issue.
   - Revised compiler structure
   - Major improvements in generated code 
 
-  * PM 0.5.1  (expected Jan-Feb 2026)
+  * __PM 0.5.1__  (expected Jan-Feb 2026)
     -  PM interpreter
     -  PM to Fortan 2003/MPI transpiler
 
-  * PM 0.5.2
+  * __PM 0.5.2__
     -  PM interpreter with parallel debugger
     -  PM to Fortran 2003/MPI/OpenMP transpiler
 
-  * PM 0.5.3
+  * __PM 0.5.3__
     -  PM interpreter with enhanced parallel debugging
     -  PM to Fortran 2003/MPI/OpenMP/OpenACC transpiler
 
-* PM 0.6
+* __PM 0.6__
   - Add separate compilation
   - Linking to other programming languages (Fortran/C/Python)
   - Support for some standard libraries (Scalapack/netcdf)
 
-* PM 0.7
+* __PM 0.7__
   - Add new transpiler backends (C/Fortran 95/Cuda)
 
-* PM 0.8
+* __PM 0.8__
   - Emphasis on transpiler and interpreter robustness
 
-* PM 0.9
+* __PM 0.9__
   - Finalise standard libraries
 
-* PM 1.0
+* __PM 1.0__
   - Everything works (hopefully!) 
   
 
