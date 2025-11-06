@@ -38,43 +38,43 @@ raise an issue.
 
 * PM 0.5 
 
- - Nested distributed structures
- - A new, much simpler, way to code stencils
- - Enhanced memory management (distibuted mutable values)
- - Methods
- - Procedure calls can take a block of code
- - Many other language improvements
- - Revised compiler structure
- - Major improvements in generated code 
+  - Nested distributed structures
+  - A new, much simpler, way to code stencils
+  - Enhanced memory management (distibuted mutable values)
+  - Methods
+  - Procedure calls can take a block of code
+  - Many other language improvements
+  - Revised compiler structure
+  - Major improvements in generated code 
 
- * PM 0.5.1  (expected Jan-Feb 2026)
-   -  PM interpreter
-   -  PM to Fortan 2003/MPI transpiler
+  * PM 0.5.1  (expected Jan-Feb 2026)
+    -  PM interpreter
+    -  PM to Fortan 2003/MPI transpiler
 
- * PM 0.5.2
-   -  PM interpreter with parallel debugger
-   -  PM to Fortran 2003/MPI/OpenMP transpiler
+  * PM 0.5.2
+    -  PM interpreter with parallel debugger
+    -  PM to Fortran 2003/MPI/OpenMP transpiler
 
- * PM 0.5.3
-   -  PM interpreter with enhanced parallel debugging
-   -  PM to Fortran 2003/MPI/OpenMP/OpenACC transpiler
+  * PM 0.5.3
+    -  PM interpreter with enhanced parallel debugging
+    -  PM to Fortran 2003/MPI/OpenMP/OpenACC transpiler
 
 * PM 0.6
- - Add separate compilation
- - Linking to other programming languages (Fortran/C/Python)
- - Support for some standard libraries (Scalapack/netcdf)
+  - Add separate compilation
+  - Linking to other programming languages (Fortran/C/Python)
+  - Support for some standard libraries (Scalapack/netcdf)
 
 * PM 0.7
- - Add new transpiler backends (C/Fortran 95/Cuda)
+  - Add new transpiler backends (C/Fortran 95/Cuda)
 
 * PM 0.8
- - Emphasis on transpiler and interpreter robustness
+  - Emphasis on transpiler and interpreter robustness
 
 * PM 0.9
- - Finalise standard libraries
+  - Finalise standard libraries
 
 * PM 1.0
- - Everything works (hopefully!) 
+  - Everything works (hopefully!) 
   
 
 ## Contribution
