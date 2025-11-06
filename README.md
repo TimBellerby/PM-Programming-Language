@@ -32,6 +32,51 @@ The implementation is not yet fully free of bugs or unimplemented features. If y
 a problem, then please check the latest code on GitHub. If this does not work, then please
 raise an issue.
 
+**PM Version 0.5 is under active development (see branch pm0_5)**
+
+## Roadmap
+
+* __PM 0.5__ 
+
+  - Nested distributed structures
+  - A new, much simpler, way to code stencils
+  - Enhanced memory management (distibuted mutable values)
+  - Methods
+  - Procedure calls can take a block of code
+  - Many other language improvements
+  - Revised compiler structure
+  - Major improvements in generated code 
+
+  * __PM 0.5.1__  (expected Jan-Feb 2026)
+    -  PM interpreter
+    -  PM to Fortan 2003/MPI transpiler
+
+  * __PM 0.5.2__
+    -  PM interpreter with parallel debugger
+    -  PM to Fortran 2003/MPI/OpenMP transpiler
+
+  * __PM 0.5.3__
+    -  PM interpreter with enhanced parallel debugging
+    -  PM to Fortran 2003/MPI/OpenMP/OpenACC transpiler
+
+* __PM 0.6__
+  - Add separate compilation
+  - Linking to other programming languages (Fortran/C/Python)
+  - Support for some standard libraries (Scalapack/netcdf)
+
+* __PM 0.7__
+  - Add new transpiler backends (C/Fortran 95/Cuda)
+
+* __PM 0.8__
+  - Emphasis on transpiler and interpreter robustness
+
+* __PM 0.9__
+  - Finalise standard libraries
+
+* __PM 1.0__
+  - Everything works (hopefully!) 
+  
+
 ## Contribution
 
 This is an open source project and outside contributions are entirely welcome.
@@ -76,7 +121,7 @@ To compile PM-to-Fortran compiler:
 
   cd pmc
 
-  make clean
+ make clean
 
   make
 
@@ -90,5 +135,5 @@ You can then mpirun the resulting executable.
 
 Both compiler and interpreter expect PM source files to have a .pmm extension.
 
-## PM Version 0.5 is under active development (see branch)
+# PM Version 0.5 is under active development (see branch)
 
