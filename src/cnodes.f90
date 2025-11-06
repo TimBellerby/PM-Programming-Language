@@ -147,6 +147,10 @@ module pm_cnodes
   integer,parameter:: var_is_reference=16384
   integer,parameter:: var_is_key_ptr=32768
   integer,parameter:: var_is_comm=65536
+  integer,parameter:: var_is_temp=131072
+  integer,parameter:: var_is_return=262144
+  integer,parameter:: var_is_list_elem=524288
+  integer,parameter:: var_is_param_move=1048576
 
   ! Offsets into proc & builtin nodes
   integer,parameter:: pr_ptype=cnode_args+0
@@ -159,15 +163,16 @@ module pm_cnodes
 
   ! Offets into proc nodes only
   integer,parameter:: pr_cblock=cnode_args+7
-  integer,parameter:: pr_max_index=cnode_args+8
-  integer,parameter:: pr_recurse=cnode_args+9
-  integer,parameter:: pr_id=cnode_args+10
-  integer,parameter:: pr_ncalls=cnode_args+11
-  integer,parameter:: pr_keys=cnode_args+12
-  integer,parameter:: pr_keycall=cnode_args+13
-  integer,parameter:: pr_argcall=cnode_args+14
-  integer,parameter:: pr_when= cnode_args+15
-  integer,parameter:: pr_whenvar= cnode_args+16
+  integer,parameter:: pr_when= cnode_args+8
+  integer,parameter:: pr_whenvar= cnode_args+9
+  integer,parameter:: pr_max_index=cnode_args+10
+  integer,parameter:: pr_recurse=cnode_args+11
+  integer,parameter:: pr_id=cnode_args+12
+  integer,parameter:: pr_ncalls=cnode_args+13
+  integer,parameter:: pr_keys=cnode_args+14
+  integer,parameter:: pr_keycall=cnode_args+15
+  integer,parameter:: pr_argcall=cnode_args+16
+
   integer,parameter:: pr_node_size=17
 
   ! Offsets into builtin nodes only
@@ -177,13 +182,15 @@ module pm_cnodes
   integer,parameter:: bi_node_size=10
 
    ! Special signatures
-  integer,parameter:: sp_sig_in_process=-1_pm_p
-  integer,parameter:: sp_sig_recursive=-2_pm_p
-  integer,parameter:: sp_sig_break=-3_pm_p
-  integer,parameter:: sp_sig_link=-4_pm_p
-  integer,parameter:: sp_sig_dup=-5_pm_p
-  integer,parameter:: sp_sig_noop=-6_pm_p
-  integer,parameter:: sp_sig_setval=-7_pm_p
+  integer,parameter:: sp_sig_in_process=-1
+  integer,parameter:: sp_sig_recursive=-2
+  integer,parameter:: sp_sig_break=-3
+  integer,parameter:: sp_sig_link=-4
+  integer,parameter:: sp_sig_dup=-5
+  integer,parameter:: sp_sig_noop=-6
+  integer,parameter:: sp_sig_setval=-7
+  integer,parameter:: sp_sig_init=-8
+  integer,parameter:: sp_sig_assign=-9
 
   integer,parameter:: sp_sig_deactivated=-huge(1)
 
@@ -191,18 +198,123 @@ module pm_cnodes
   ! Note - if change access_kind then need to
   ! check for and change any %data%i8 accesses
   ! in bprop routines
-  integer,parameter:: access_kind=pm_i8
-  integer(pm_p),parameter:: access_pm_type=pm_int8
+  integer,parameter:: access_kind=pm_i16
+  integer(pm_p),parameter:: access_pm_type=pm_int16
   integer(access_kind),parameter:: access_deactivated_call=-1
   integer(access_kind),parameter:: access_is_var=1
   integer(access_kind),parameter:: access_used_ever=2
-  integer(access_kind),parameter:: access_used_now=4
-  integer(access_kind),parameter:: access_holds_result=8
-  integer(access_kind),parameter:: access_not_passed=16
+  integer(access_kind),parameter:: access_not_last=4
+  integer(access_kind),parameter:: access_used_now=8
+  integer(access_kind),parameter:: access_used_by_at=16
+  integer(access_kind),parameter:: access_may_be_used=32
+  integer(access_kind),parameter:: access_may_be_at=64
+  integer(access_kind),parameter:: access_holds_result=128
+  integer(access_kind),parameter:: access_not_passed=256
+  integer(access_kind),parameter:: access_is_list=512
+  integer(access_kind),parameter:: access_may_detag=1024
+  integer(access_kind),parameter:: access_needs_movability=2048
   integer(access_kind),parameter:: access_everything=&
        access_is_var+access_used_ever+access_used_now
   
 contains
+
+  !=========================================================
+  ! Given a result variable cnode - return the call, arg#
+  ! and cnode of any argument liked to the result through
+  ! returning a reference to that argument
+  !
+  ! If result will be always movable then returns true
+  ! and may not set new_call etc.
+  !=========================================================
+  function follow_result_back(context,cache,rv,var,new_call,&
+       new_call_index,new_var,new_argn) result(movable)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: cache
+    integer,intent(in),dimension(:):: rv
+    type(pm_ptr),intent(in):: var
+    type(pm_ptr),intent(out):: new_call,new_var
+    integer,intent(out):: new_call_index,new_argn
+    logical:: movable
+    integer:: n,new_proc_sig,nargs,i
+    type(pm_ptr):: args,new_proc,key_names,keys
+
+    movable=.false.
+    
+    ! - first find call that returned the value
+    new_call=cnode_get(var,var_extra_info)
+    new_call_index=cnode_get_num(new_call,call_index)
+    n=-cnode_get_num(var,var_name)
+    new_proc_sig=rv(new_call_index)
+    if(new_proc_sig==sp_sig_link) then
+       new_var=cnode_arg(cnode_get(new_call,call_args),2)
+       new_argn=2
+       return
+    elseif(new_proc_sig<0) then
+       movable=.true.
+       return
+    endif
+    
+    ! - now find the proc that was called from there
+    new_proc=pm_dict_val(context,cache,int(new_proc_sig,pm_ln))
+    if(cnode_get_kind(new_proc)==cnode_is_autoconv_sig) then
+       new_proc=pm_dict_val(context,cache,&
+            int(cnode_num_arg(new_proc,cnode_numargs(new_proc)),pm_ln))
+    endif
+
+    ! Builtin, so assume movable value is returned
+    if(cnode_get_kind(new_proc)/=cnode_is_resolved_proc) then
+       movable=.true.
+       return
+    endif
+    new_proc=cnode_arg(new_proc,1)
+
+    ! - now find the argument # (if any) which the returned value references
+    new_argn=cnode_get_num(new_proc,cnode_args+pr_node_size+n-1)
+    if(new_argn==0) then
+       movable=.true.
+       return
+    endif
+    
+    ! Now detetermine the referenced argument
+    args=cnode_get(new_call,call_args)
+    nargs=cnode_numargs(args)
+    if(new_argn<0) then
+       key_names=pm_name_val(context,cnode_get_num(new_call,call_key_names))
+       keys=cnode_get(new_call,call_keys)
+       do i=1,cnode_numargs(keys)
+          if(key_names%data%i(key_names%offset+i-1)==-new_argn) then
+             new_var=cnode_arg(keys,i)
+             new_argn=i+cnode_numargs(args)
+          endif
+       enddo
+    else
+       new_var=cnode_arg(args,new_argn+cnode_get_num(new_call,call_nret))
+    endif
+  end function follow_result_back
+
+  !========================================================================
+  ! Check arg #idx of call in callnode is a final use of a variable/param
+  !========================================================================
+  function final_flag_set(callnode,rvec,idx) result(ok)
+    type(pm_ptr),intent(in):: callnode,rvec
+    integer,intent(in):: idx
+    logical:: ok
+    integer:: slot
+    ok=final_flag_set_at_call_index(cnode_get_num(callnode,call_index),rvec,idx)
+  end function final_flag_set
+
+  !========================================================================
+  ! Check arg #idx of call @ call_index is a final use of a variable/param
+  !========================================================================
+  function final_flag_set_at_call_index(call_index,rvec,idx) result(ok)
+    type(pm_ptr),intent(in):: rvec
+    integer,intent(in):: call_index,idx
+    logical:: ok
+    integer:: slot
+    slot=call_index+1
+    slot=slot+(idx-1)/bit_size(1)
+    ok=btest(max(rvec%data%i(rvec%offset+slot),0),iand(idx-1,bit_size(1)-1))
+  end function final_flag_set_at_call_index
 
   !=================================
   ! Check cnode (debugging)
@@ -227,6 +339,15 @@ contains
     include 'fvkind.inc'
     include 'fesize.inc'
   end subroutine check_cnode
+
+  !==========================================
+  ! Get name from variable cnode
+  !==========================================
+  function cnode_var_name(ptr) result(name)
+    type(pm_ptr):: ptr
+    integer:: name
+    name=max(0,cnode_get_num(ptr,var_name))
+  end function cnode_var_name
 
   !==========================================
   ! Get argument n from cnode
@@ -504,8 +625,12 @@ contains
           call print_proc_cnode(context,iunit,rvec,&
                sig_cache,proc_cache,cnode_arg(cnode,1))
           write(iunit,*) '   ----------------'
-          call pm_dump_tree(context,iunit,cnode_arg(cnode,6),2)
-          call pm_dump_tree(context,iunit,cnode_arg(cnode,7),2)
+          call print_bprop_list(iunit,cnode_arg(cnode,6))
+          write(iunit,*) '=='
+          call print_bprop_list(iunit,cnode_arg(cnode,7))
+          write(iunit,*) '   ----------------'
+          call dump_parse_tree(context,iunit,cnode_arg(cnode,6),2)
+          call dump_parse_tree(context,iunit,cnode_arg(cnode,7),2)
           write(iunit,'(a)') '}'
        case(cnode_is_callsig)
           write(iunit,'(a)') 'sig{'
@@ -560,7 +685,7 @@ contains
     type(pm_context),pointer:: context
     integer,intent(in):: iunit
     type(pm_ptr),intent(in):: rvec,sig_cache,proc_cache,cnode
-    integer:: flags
+    integer:: i,nret
 
     write(iunit,'(a)') '  '//&
          trim(pm_name_as_string(context,cnode_get_num(cnode,pr_name)))//&
@@ -573,13 +698,16 @@ contains
             op_names(cnode_get_num(cnode,bi_opcode))//&
             pm_int_as_string(cnode_get_num(cnode,bi_opcode2))
     else
-        write(iunit,'(A,i2,A,i2,A,i2,A,i3,A)') &
+       nret=cnode_get_num(cnode,pr_nret)
+       write(iunit,'(A,i2,A,i2,A,i2,A,i3,A)') &
             '   [nargs=',&
-            cnode_get_num(cnode,pr_nargs),',nret=',cnode_get_num(cnode,pr_nret),&
+            cnode_get_num(cnode,pr_nargs),',nret=',nret,&
             ',ncalls=',cnode_get_num(cnode,pr_ncalls),']'
-       call print_cblock_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_get(cnode,pr_cblock),4)
+        call print_cblock_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_get(cnode,pr_cblock),4)
+        if(nret>0) then
+           write(iunit,'(A,32i3)') '   RetRef:',(cnode_get_num(cnode,i),i=cnode_args+pr_node_size,cnode_args+pr_node_size+nret-1)
+        endif
     endif
-
     write(iunit,'(a)') '  }'
   contains
     include 'fisnull.inc'
@@ -644,7 +772,16 @@ contains
        i=len_trim(str)+1
        call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,&
             cnode_get(cnode,call_var),depth,str,i)
-       call append_to_line(iunit,str,i,': ',.false.,depth)
+       if(pm_fast_isnull(rvec)) then
+          call append_to_line(iunit,str,i,': ',.false.,depth)
+       else
+          k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
+          if(k==sp_sig_deactivated) then
+             call append_to_line(iunit,str,i,'[--]: ',.false.,depth)
+          else
+             call append_to_line(iunit,str,i,'['//trim(pm_int_as_string(k))//']: ',.false.,depth)
+          endif
+       endif
     else
        p=pm_dict_key(context,sig_cache,&
             int(signo,pm_ln))
@@ -668,6 +805,15 @@ contains
           elseif(k==sp_sig_noop) then
              str=repeat(' ',depth)//trim(str)//'call [noop]'//&
                   pm_name_as_string(context,name)
+          elseif(k==sp_sig_setval) then
+             str=repeat(' ',depth)//trim(str)//'call [setval]'//&
+                  pm_name_as_string(context,name)
+          elseif(k==sp_sig_init) then
+             str=repeat(' ',depth)//trim(str)//'call [init]'//&
+                  pm_name_as_string(context,name)
+          elseif(k==sp_sig_assign) then
+             str=repeat(' ',depth)//trim(str)//'call [assign]'//&
+                  pm_name_as_string(context,name)     
           elseif(k==sp_sig_deactivated) then
              str=repeat(' ',depth)//trim(str)//'call '//&
                   pm_name_as_string(context,name)
@@ -702,6 +848,11 @@ contains
                 call append_to_line(iunit,str,i,'&',.false.,depth)
                 k=min(k+1,pm_fast_esize(amps))
              endif
+          endif
+       endif
+       if(.not.pm_fast_isnull(rvec)) then
+          if(final_flag_set(cnode,rvec,j-nret)) then
+             call append_to_line(iunit,str,i,'@',.false.,depth)
           endif
        endif
        call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_arg(args,j),depth,str,i)
@@ -752,7 +903,7 @@ contains
       call append_to_line(iunit,str,i,'<- ',.false.,depth)
       do j=nret+1,nargs
          if(j==block_arg) then
-            call append_to_line(iunit,str,i,'{ ',.false.,depth)
+            call append_to_line(iunit,str,i,'#'//trim(pm_int_as_string(cnode_numargs(rvs)))//'{ ',.false.,depth)
             do k=1,cnode_numargs(rvs)
                rv=cnode_arg(rvs,k)
                rvec%data%i(rvec%offset+slot1:rvec%offset+slot2)=&
@@ -797,7 +948,7 @@ contains
        kind=cnode_get_kind(cnode)
        select case(kind)
        case(cnode_is_var)
-          name=cnode_get_num(cnode,var_name)
+          name=cnode_var_name(cnode)
           if(name==0) then
              call append_to_line(iunit,str,i,'#'//&
                   trim(pm_int_as_string(cnode_get_num(cnode,var_index))),.false.,depth)
@@ -822,6 +973,11 @@ contains
              call append_to_line(iunit,str,i,'^',.false.,depth)
           elseif(cnode_flags_set(cnode,var_flags,var_is_maybe_idx)) then
              call append_to_line(iunit,str,i,'#',.false.,depth)
+          elseif(cnode_flags_set(cnode,var_flags,var_is_reference)) then
+             call append_to_line(iunit,str,i,'{',.false.,depth)
+             call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,&
+                  cnode_get(cnode,var_extra_info),depth,str,i)
+             call append_to_line(iunit,str,i,'}',.false.,depth)
           endif
        case(cnode_is_const)
           p=cnode_arg(cnode,1)
@@ -911,9 +1067,6 @@ contains
           if(iand(flags,call_inline_when_compiling)/=0) then
              call append_to_line(iunit,str,i,'i',.false.,depth)
           endif
-          if(iand(flags,call_dup_result)/=0) then
-             call append_to_line(iunit,str,i,'d',.false.,depth)
-          endif
           if(iand(flags,call_is_cond)/=0) then
              call append_to_line(iunit,str,i,'c',.false.,depth)
           endif
@@ -968,5 +1121,78 @@ contains
     endif
   end subroutine append_to_line
 
+  subroutine print_bprop_list(iunit,list)
+    integer,intent(in):: iunit
+    type(pm_ptr),intent(in):: list
+    integer:: i
+    if(pm_fast_isnull(list)) return
+    do i=1,list%data%i16(list%offset)
+       call print_bprop_item(iunit,list%data%i16(list%offset+i))
+    enddo
+  contains
+    include 'fisnull.inc'
+  end subroutine print_bprop_list
+
+  subroutine print_bprop_item(iunit,item)
+    integer,intent(in):: iunit
+    integer(access_kind):: item
+    character(len=120):: str
+    integer:: n
+    if(item==access_deactivated_call) then
+       write(iunit,'(A)') '  -------'
+       return
+    endif
+    str=' '
+    n=3
+    if(iand(item,access_is_var)/=0) then
+       str(n:n+2)='var'
+       n=n+4
+    endif
+    if(iand(item,access_used_ever)/=0) then
+       str(n:n+3)='ever'
+       n=n+5
+    endif
+    if(iand(item,access_not_last)/=0) then
+       str(n:n+6)='notlast'
+       n=n+8
+    endif
+    if(iand(item,access_used_now)/=0) then
+       str(n:n+2)='now'
+       n=n+4
+    endif
+    if(iand(item,access_used_by_at)/=0) then
+       str(n:n+1)='at'
+       n=n+3
+    endif
+    if(iand(item,access_may_be_used)/=0) then
+       str(n:n+4)='maybe'
+       n=n+6
+    endif
+    if(iand(item,access_may_be_at)/=0) then
+       str(n:n+6)='maybeat'
+       n=n+8
+    endif
+    if(iand(item,access_holds_result)/=0) then
+       str(n:n+5)='result'
+       n=n+7
+    endif
+    if(iand(item,access_not_passed)/=0) then
+       str(n:n+5)='nopass'
+       n=n+7
+    endif
+    if(iand(item,access_is_list)/=0) then
+       str(n:n+3)='list'
+       n=n+5
+    endif
+    if(iand(item,access_may_detag)/=0) then
+       str(n:n+4)='detag'
+       n=n+6
+    endif
+    if(iand(item,access_needs_movability)/=0) then
+       str(n:n+3)='move'
+       n=n+5
+    endif
+    write(iunit,'(I4,A)') item,trim(str)
+  end subroutine print_bprop_item
   
 end module pm_cnodes

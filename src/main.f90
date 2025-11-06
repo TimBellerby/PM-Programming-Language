@@ -129,6 +129,18 @@ contains
     ! Parse sytem module
     call init_parser(parser,context)
 
+    if(pm_opts%checks_to_run_set) then
+       if(pm_is_compiling) then
+          call parse_from_string(parser,trim(pm_opts%checks_to_run))
+       else
+          call parse_from_string(parser,'sys,'//trim(pm_opts%checks_to_run))
+       endif
+       call scan(parser)
+       if(checks(parser,pm_null_obj)) then
+          call pm_stop('Bad -fcheck= option')
+       endif
+    endif
+    
     call dcl_module(parser,'PM__system')
     parser%sysmodl=parser%modl
 
@@ -140,7 +152,6 @@ contains
        endif
        call pm_stop('Compilation terminated')
     endif
-    !write(*,*) 'Parsing',trim(str)
     call parse_file_on_unit(parser,pm_comp_file_unit,.false.)
     close(pm_comp_file_unit)
     if(parser%error_count>0) then
@@ -150,8 +161,6 @@ contains
        call pm_stop('Compilation terminated')
     endif
     
-!!$    
-!!$    call sysdefs(parser)
     call pm_gc(context,.false.)
     if(pm_opts%out_debug_files) then
        open(unit=9,file='sysmod.dmp')
@@ -416,6 +425,7 @@ contains
     root=parser%modls
     parser%modl=parser%modls
     first=.true.
+    write(*,'(a)') 'PM interactive mode - "exit" to exit'
     do
        write(*,'(a)',advance='NO') 'PM> '
        read(*,'(a)') line

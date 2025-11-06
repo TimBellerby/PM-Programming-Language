@@ -1289,9 +1289,27 @@ contains
             arg(3),arg(4)))
     case(op_clone)
        call set_arg(2,copy_vector(context,arg(3),ve,0_pm_ln,esize+1))
+    case(op_move_if)
+       if(arg(4)%data%l(arg(4)%offset)) then
+          call set_arg(2,arg(3))
+       else
+          call set_arg(2,copy_vector(context,arg(3),ve,0_pm_ln,esize+1))
+       endif
     case(op_assign)
        errno=0
        call vector_assign(context,arg(2),arg(3),ve,errno,esize)
+       if(errno/=0) then
+          goto 997
+       endif
+    case(op_assign_move)
+       errno=0
+       call vector_assign(context,arg(2),arg(3),ve,errno,esize,moveit=.true.)
+       if(errno/=0) then
+          goto 997
+       endif
+    case(op_assign_move_if)
+       errno=0
+       call vector_assign(context,arg(2),arg(3),ve,errno,esize,moveit=arg(4)%data%l(arg(4)%offset))
        if(errno/=0) then
           goto 997
        endif
@@ -1360,6 +1378,8 @@ contains
           endif
        endif
     case(op_elem)
+!!$      write(*,*) 'elem',opcode2
+!!$       call pm_dump_tree(context,6,arg(3),2)
        if(pm_fast_typeof(arg(3))==pm_elemref_type) then
           call set_arg(2,elem_ref_get_struct_elem(context,arg(3),opcode2,esize))
        else
@@ -1373,6 +1393,10 @@ contains
              call set_arg(2,arg(3)%data%ptr(arg(3)%offset+opcode2))
           endif
        endif
+!!$       write(*,*) ' IS '
+!!$       call pm_dump_tree(context,6,arg(2)%data%ptr(arg(2)%offset),2)
+
+       
     case(op_chan_array_vect)
        v=arg(3)%data%ptr(arg(3)%offset+pm_array_vect)
        call set_arg(2,v%data%ptr(v%offset))

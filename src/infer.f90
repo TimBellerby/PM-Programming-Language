@@ -52,7 +52,8 @@ module pm_infer
   ! Print compiler debugging messages
   logical,parameter:: debug_inference=.false.
   logical,parameter:: debug_bprop=.false.
-  
+  logical,parameter:: debug_bprop_tagging=.false.
+ 
   ! Maximum times a procedure template can call itself with
   ! *different* arguments types each time
   integer,parameter:: max_recur=32
@@ -194,7 +195,6 @@ contains
     coder%atype=atype
     coder%proc=procnode
     
-    
     keysize=2
     pushed_stack_frame=.false.
 
@@ -225,6 +225,9 @@ contains
        call inf_cblock(coder,cnode_get(procnode,pr_when))
        pushed_stack_frame=.true.
        tno=get_arg_type(coder,callnode,cnode_get(procnode,pr_whenvar))
+       if(debug_inference) then
+          write(*,*) 'WHEN>',pm_type_as_string(coder%context,tno)
+       endif
        if(tno==coder%false_fix.or.tno==coder%false_literal) then
           call pop_stack_frame(coder)
           nomatch=.true.
@@ -235,6 +238,7 @@ contains
                '"when" expression must have a fixed or literal bool value')
           call more_error(coder%context,'Type of expression is: '//&
                trim(pm_type_as_string(coder%context,tno)))
+          return
        endif
     endif
 
@@ -579,7 +583,11 @@ contains
             .true.)
 
     endif
-    if(proc_nkeys==0) call code_null(coder)
+    if(proc_nkeys==0) then
+       call code_null(coder)
+    else
+       call swap_code(coder)
+    endif
 
     ! Create record -- proc resvec flags rtype new_atype arg_uses key_uses
     call make_code(coder,pm_null_obj,cnode_is_resolved_proc,7)
@@ -841,7 +849,7 @@ contains
     integer:: rtype,mode,atype1
     integer,dimension(1):: key
     integer:: k,t1,t2,n,opcode
-    type(pm_ptr):: tv,v
+    type(pm_ptr):: tv,v,args,arg
     logical:: isstatic,iscomm,ok,added
 
     new_atype=-1
@@ -885,12 +893,28 @@ contains
        goto 10
     case(op_clone_var)
        mode=cnode_get_num(procnode,bi_opcode2)
-       rtype=atype1
-       if(mode/=0) rtype=pm_type_for_var(coder%context,atype1,mode)
+       rtype=pm_type_for_var(coder%context,atype1)
+       if(mode/=0) rtype=pm_type_add_mode(coder%context,rtype,mode)
        call code_num(coder,sp_sig_dup)
+       goto 10
+    case(op_clone)
+       mode=cnode_get_num(procnode,bi_opcode2)
+       rtype=pm_type_for_var(coder%context,atype1)
+       if(mode/=0) rtype=pm_type_add_mode(coder%context,rtype,mode)
+    case(op_setref)
+       rtype=atype1
+       call code_num(coder,sp_sig_link)
        goto 10
     case(op_noop)
        call code_num(coder,sp_sig_noop)
+       goto 10
+    case(op_init_var)
+       new_atype=pm_type_arg(coder%context,atype,3)
+       call code_num(coder,sp_sig_init)
+       goto 10
+    case(op_init_const)
+       new_atype=pm_type_arg(coder%context,atype,3)
+       call code_num(coder,sp_sig_init)
        goto 10
     case(op_array_get_elem,op_extractelm)
        rtype=pm_type_arg(coder%context,atype1,1)
@@ -910,10 +934,6 @@ contains
     case(op_import_varg,op_broadcast_val,&
          op_get_rf)
        rtype=atype1
-    case(op_clone)
-       mode=cnode_get_num(procnode,bi_opcode2)
-       rtype=atype1
-       if(mode/=0) rtype=pm_type_for_var(coder%context,atype1,mode)
     case(op_elem)
        n=cnode_get_num(procnode,bi_opcode2)
        if(n/=0) then
@@ -954,11 +974,11 @@ contains
        endif
        if(opcode==op_var_array) then
           rtype=pm_new_arr_type(coder%context,sym_var,&
-               pm_type_for_var(coder%context,atype1,sym_private),&
-               pm_type_for_var(coder%context,pm_type_arg(coder%context,atype,3),sym_private),t2)
+               pm_type_for_var(coder%context,atype1),&
+               pm_type_for_var(coder%context,pm_type_arg(coder%context,atype,3)),t2)
        else
           rtype=pm_new_arr_type(coder%context,sym_const,&
-               pm_type_for_var(coder%context,atype1,sym_private),&
+               pm_type_for_var(coder%context,atype1),&
                t1,t2)
        endif
 !!$    case(op_redim)
@@ -999,8 +1019,17 @@ contains
     case(op_list_splice)
        call infer_list_splice
     case(op_assign)
-       new_atype=pm_type_combine(coder%context,&
-            pm_type_arg(coder%context,atype,2),pm_type_arg(coder%context,atype,3),ok,added)
+       if(pm_type_kind(coder%context,atype1)==pm_type_is_uninitialised) then
+          new_atype=pm_type_arg(coder%context,atype,3)
+          call code_num(coder,sp_sig_init)
+          goto 10
+       else
+          new_atype=pm_type_combine(coder%context,&
+               pm_type_arg(coder%context,atype,2),pm_type_arg(coder%context,atype,3),&
+               ok,added)
+          call code_num(coder,sp_sig_assign)
+          goto 10
+       endif
     case(op_array_set_elem)
        new_atype=pm_new_arr_type(coder%context,pm_type_name(coder%context,atype1),&
             pm_type_combine(coder%context,&
@@ -1301,7 +1330,7 @@ contains
           tno2=pop_word(coder)
           tno2=pm_type_add_mode(coder%context,tno2,mode)
           call combine_types(cnode_arg(args,1),tno2)
-       case(sym_dot,sym_dot_ref)
+       case(sym_dot,sym_dot_ref,sym_simple_list_elem)
           name=arg_type(3)
           tno=arg_type_with_mode(2)
           if(tno==error_type.or.name==error_type) then
@@ -1309,20 +1338,20 @@ contains
           else
              if(tno>0) then
                 call set_call_sig(resolve_elem(cnode_arg(args,2),tno,name,&
-                     sig==sym_dot_ref,.false.,tno2))
+                     sig==sym_dot_ref,.false.,sig==sym_simple_list_elem,tno2))
                 call combine_types(cnode_arg(args,1),tno2)
              else
                 call set_arg_to_error_type(1)
              endif
           endif
-       case(sym_open_brace)
+       case(sym_get_dot,sym_get_dot_ref,sym_get_list_elem)
           ! Used in .{ }
           ! Check type is literal string or literal integer
           ! Cater for literal string of the form "_name"
-          tno=arg_type(2)
+          tno=arg_type(3)
           if(tno>0) then
              if(pm_type_kind(coder%context,tno)/=pm_type_is_single_name) then
-                tv=pm_type_vect(coder%context,arg_type(2))
+                tv=pm_type_vect(coder%context,tno)
                 if(pm_tv_kind(tv)==pm_type_is_literal_value.or.pm_tv_kind(tv)==pm_type_is_fix_value) then
                    tno2=pm_tv_arg(tv,1)
                    if(tno2==pm_string_type) then
@@ -1349,21 +1378,17 @@ contains
                 endif
              endif
           endif
-          coder%stack(get_slot(1))=tno
-       case(sym_dotdotdot)
-          ! Used in var ...x=y
-          ! Checks existing value of var
-          ! if it is an unintialised value type then convert to type-value
-          ! otherwise give an error
-          tno=get_var_type(coder,callnode,cnode_arg(args,2),init=.true.)
-          if(tno==error_type) then
+          name=tno
+          tno=arg_type_with_mode(2)
+          if(tno==error_type.or.name==error_type) then
              call set_arg_to_error_type(1)
           else
-             tv=pm_type_vect(coder%context,tno)
-             if(pm_tv_kind(tv)==pm_type_is_uninitialised) then
-                coder%stack(get_slot(1))=pm_tv_arg(tv,1)
+             if(tno>0) then
+                call set_call_sig(resolve_elem(cnode_arg(args,2),tno,name,&
+                     sig==sym_get_dot_ref,.false.,sig==sym_get_list_elem,tno2))
+                call combine_types(cnode_arg(args,1),tno2)
              else
-                call inf_error(coder,callnode,'Cannot initialise "var..." or "let..." twice')
+                call set_arg_to_error_type(1)
              endif
           endif
        case(sym_cast)
@@ -1385,10 +1410,14 @@ contains
           endif
           tno2=pm_type_strip_mode(coder%context,&
                arg_type_with_mode(2),mode)
-          k=inf_cast(coder,callnode,tno,tno2,.true.)
-          call set_call_sig(int(k))
-          call combine_types(cnode_arg(args,1),&
-               pm_type_add_mode(coder%context,tno2,mode))
+          k=inf_cast(coder,callnode,tno,tno2)
+          if(k<0) then
+             call set_arg_to_error_type(1)
+          else
+             call set_call_sig(int(k))
+             call combine_types(cnode_arg(args,1),&
+                  pm_type_add_mode(coder%context,tno2,mode))
+          endif
        case(sym_var_set_mode)
           mode2=cnode_num_arg(args,2)
           coder%stack(get_slot(1))=pm_type_add_mode(coder%context,&
@@ -1405,13 +1434,6 @@ contains
           do i=1,nret
              call set_arg_to_type(i,tno)
           enddo
-       case(sym_const)
-          tno=arg_type(1)
-          if(pm_type_kind(coder%context,tno)/=pm_type_is_uninitialised) then
-             call inf_error(coder,callnode,&
-                  'Cannot initialise constant twice in succession: ',&
-                  cnode_get(cnode_arg(args,1),var_name))
-          endif
        case(sym_pm_assign)
           tno=pm_type_get_mode(coder%context,arg_type_with_mode(1))
           if(tno>=sym_invar) then
@@ -1432,11 +1454,7 @@ contains
        case(sym_test)
           call inf_cblock(coder,cnode_arg(args,1))
        case(sym_check)
-          if(.not.pm_fast_isnull(cnode_arg(args,2))) then
-             call inf_cblock(coder,cnode_arg(args,2))
-          endif
-          call inf_cblock(coder,cnode_arg(args,4))
-          tno=arg_type(3)
+          tno=arg_type(2)
           if(tno==coder%false_fix.or.tno==coder%false_literal) then
              tno2=pm_type_strip_mode(coder%context,arg_type(1),mode)
              t=pm_type_vect(coder%context,tno2)
@@ -1458,7 +1476,7 @@ contains
                   'Check message is not a string, got:'//&
                   trim(pm_type_as_string(coder%context,arg_type(1))))
           elseif(tno/=coder%true_fix.and.tno/=coder%true_literal) then
-             call check_logical(3,.false.)
+             call check_logical(2,.false.)
              coder%taints=ior(coder%taints,proc_is_impure)
           endif
        case(sym_fix,sym_literal)
@@ -1518,6 +1536,13 @@ contains
           continue
        case(sym_present)
           call combine_types(cnode_arg(args,1),int(pm_logical))
+       case(sym_typeof)
+          tno=get_arg_type(coder,callnode,cnode_arg(args,2),&
+               init=call_takes_uninit)
+          if(pm_type_kind(coder%context,tno)==pm_type_is_uninitialised) then
+             tno=pm_type_arg(coder%context,tno,1)
+          endif
+          coder%stack(get_slot(1))=pm_new_type_type(coder%context,tno)
        case(sym_result)
           call get_arg_types_and_modes
           call make_type_if_possible(coder,nargs+2)
@@ -1526,6 +1551,14 @@ contains
           call get_arg_types_and_modes
           call make_type_if_possible(coder,nargs+2)
           coder%new_atype=pop_word(coder)
+       case(sym_move)
+          n=nargs/2
+          do i=1,n
+             coder%stack(get_slot(i))=coder%stack(get_slot(i+n))
+          enddo
+          do i=n+1,nargs
+             coder%stack(get_slot(i))=pm_new_uninitialised_type(coder%context,arg_type_with_mode(i))
+          enddo
        case(sym_start_loop)
           coder%stack(get_slot(2))=pm_logical
        case(sym_underscore,sym_colon,sym_end_loop)
@@ -1602,7 +1635,7 @@ contains
             p=writelist
             do while(.not.pm_fast_isnull(p))
                var=p%data%ptr(p%offset)
-               save_var_types(i)=get_var_type(coder,callnode,var,init=.true.)
+               save_var_types(i)=get_var_type(coder,callnode,var,init=call_takes_uninit)
                p=p%data%ptr(p%offset+1)
                i=i+1
             end do
@@ -1612,7 +1645,7 @@ contains
             do while(.not.pm_fast_isnull(p))
                var=p%data%ptr(p%offset)
                typ=save_var_types(i)
-               save_var_types(i)=get_var_type(coder,callnode,var,init=.true.)
+               save_var_types(i)=get_var_type(coder,callnode,var,init=call_takes_uninit)
                call set_var_type(coder,var,typ)
                p=p%data%ptr(p%offset+1)
                i=i+1
@@ -1651,7 +1684,7 @@ contains
          p=writelist
          do while(.not.pm_fast_isnull(p))
             var=p%data%ptr(p%offset)
-            init_var_types(j)=get_var_type(coder,callnode,var,init=.true.)
+            init_var_types(j)=get_var_type(coder,callnode,var,init=call_takes_uninit)
             p=p%data%ptr(p%offset+1)
             j=j+1
          end do
@@ -1760,7 +1793,7 @@ contains
             call inf_error(coder,callnode,&
                  '"'//trim(sym_names(sig))//&
                  '" initial expression has wrong type for: ',&
-                 pm_fast_name(coder%context,name))
+                 name)
             call more_error(coder%context,'Expected: '//trim(pm_type_as_string(coder%context,tno)))
             call more_error(coder%context,'Got:      '//trim(pm_type_as_string(coder%context,tno2)))
             call inf_trace(coder)
@@ -2045,15 +2078,15 @@ contains
     !==================================================================
     ! Resolve signature for item.name
     !==================================================================
-    recursive function resolve_elem(var,tno,nametyp,isref,isopt,elem_type) result(sig)
+    recursive function resolve_elem(var,tno,nametyp,isref,isopt,islist,elem_type) result(sig)
       type(pm_ptr),intent(in):: var
       integer,intent(in):: tno,nametyp
-      logical,intent(in):: isref,isopt
+      logical,intent(in):: isref,isopt,islist
       integer,intent(out):: elem_type
       integer:: sig,tk
       type(pm_ptr):: svec
 
-      sig=pm_type_find_elem(coder%context,tno,nametyp,isref,&
+      sig=pm_type_find_elem(coder%context,tno,nametyp,isref,islist,&
            elem_type)
       if(sig==0) then
          if(.not.isopt) then
@@ -2064,15 +2097,15 @@ contains
             elseif(tk==pm_type_is_uninitialised) then
                call inf_error(coder,callnode,&
                     'Cannot take an element of an uninitialised value: ',&
-                    cnode_get(var,var_name))
+                    cnode_var_name(var))
                coder%stack(cnode_get_num(var,var_index)+coder%base)=error_type
             elseif(tk/=pm_type_is_rec.and.tk/=pm_type_is_tuple) then
                call inf_error(coder,callnode,&
                     'Cannot take an element of a value of type: "'//&
                     trim(pm_type_as_string(coder%context,tno))//'": ',&
-                    cnode_get(var,var_name))
+                    cnode_var_name(var))
             else
-               sig=pm_type_find_elem(coder%context,tno,nametyp,.false.,&
+               sig=pm_type_find_elem(coder%context,tno,nametyp,.false.,islist,&
                     elem_type)
                if(sig==0) then
                   call inf_error_with_trace(coder,callnode,&
@@ -2196,7 +2229,7 @@ contains
     call check_wstack(coder,nargs)
 
     do i=1,nargs
-       tno=get_arg_type(coder,callnode,cnode_arg(args,i+nret))
+       tno=get_arg_type(coder,callnode,cnode_arg(args,i+nret),init=merge(flags,0,i==2))
        coder%wstack(coder%wtop+i)=tno
        undef_arg=undef_arg.or.tno<=0
     enddo
@@ -2220,6 +2253,40 @@ contains
                trim(sig_name_str(coder,int(sig))),coder%stack(4),coder%vtop
        endif
        return
+    endif
+
+    if(amps/=0.and..not.ignore_rules) then
+       
+       amplocs=pm_name_val(coder%context,amps)
+       do i=0,pm_fast_esize(amplocs)
+!!$          write(*,*) 'update',&
+!!$               trim(pm_type_as_string(coder%context,coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i))))
+          mode2=pm_type_get_mode(coder%context,&
+               coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i)))
+          if(mode2/=sym_private) then
+             if(is_comm) then
+                if(is_unlabelled) then
+                   call call_error('Cannot modify a "'//trim(sym_names(mode2))//&
+                        '" value in an unlabelled conditional context')
+                   bad_amp=.true.
+                endif
+             else
+                select case(mode2)
+                case(sym_shared)
+                   call call_error('A "'//trim(sym_names(mode2))//&
+                        '" variable can only be modified by an "invar" assignment or "%" call')
+                case(sym_invar)
+                   call call_error('An "'//trim(sym_names(mode2))//&
+                        '" variable can only be modified by an "invar" assignment or "%" call')
+                case default
+                   call call_error('A "'//trim(sym_names(mode2))//&
+                     '" variable can only be modified by a "sync" assignment or "%" call')
+                end select
+                bad_amp=.true.
+             endif
+ 
+          endif
+       enddo
     endif
     
     ! Standard calls
@@ -2247,33 +2314,10 @@ contains
           mode=sym_private
        endif
        
-       ! Rules for "&" arguments
-!!! -- Need better error positioning
-  
-       
        ! As this is standard call strip argument modes before passing
        do i=1,nargs
           coder%wstack(coder%wtop+i)=&
                pm_type_strip_mode(coder%context,coder%wstack(coder%wtop+i),mode2)
-       enddo
-    endif
-
-    if(amps/=0.and..not.ignore_rules) then
-       
-       amplocs=pm_name_val(coder%context,amps)
-       do i=0,pm_fast_esize(amplocs)
-          mode2=pm_type_get_mode(coder%context,&
-               coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i)))
-          if(mode2/=sym_private.and.((mode2/=sym_chan.and..not.is_comm).or.is_unlabelled)) then
-             if(mode2==sym_chan.or.is_comm) then
-                call call_error('Cannot modify a "'//trim(sym_names(mode2))//&
-                     '" value in an unlabelled conditional context')
-             else
-                call call_error('Cannot modify a "'//trim(sym_names(mode2))//&
-                     '" value using a conventional procedure call')
-             endif
-             bad_amp=.true.
-          endif
        enddo
     endif
 
@@ -2545,7 +2589,7 @@ contains
                found_has_no_rtypes=&
                     pm_type_kind(coder%context,cnode_get_num(match_proc,pr_rtype))==&
                     pm_type_is_undef_result
-               
+
                if(nret>0) then
                   if(rt>0) then
                      rtvect=pm_type_vect(coder%context,rt)
@@ -2565,7 +2609,9 @@ contains
                      enddo
                   endif
                endif
-               if(new_apars>0.and.amps/=0.and..not.bad_amp) then
+
+               ! Types of & args may have changed
+               if(new_apars>0.and.amps/=0.and..not.bad_amp.and..not.ignore_rules) then
 !!$                  write(*,*) 'Changing to',trim(pm_type_as_string(coder%context,new_apars))
                   amplocs=pm_name_val(coder%context,amps)
                   rtvect=pm_type_vect(coder%context,new_apars)
@@ -2573,11 +2619,11 @@ contains
                        iand(pm_tv_flags(rtvect),pm_type_is_list)==0) then
                      do j=0,pm_fast_esize(amplocs)
                         m=amplocs%data%i(amplocs%offset+j)
-                        call combine_types(cnode_arg(args,m),pm_tv_arg(rtvect,j+1))
+                        call combine_types(cnode_arg(args,nret+m),pm_tv_arg(rtvect,j+1))
                      enddo
                   else
                      m=amplocs%data%i(amplocs%offset)
-                     call combine_types(cnode_arg(args,m),new_apars)
+                     call combine_types(cnode_arg(args,nret+m),new_apars)
                   endif
                endif
             elseif(apars==error_type) then
@@ -3200,130 +3246,18 @@ contains
     if(coder%base==0) call pm_panic('xxx')
   end subroutine pop_stack_frame
 
-!!$  !===============================================================
-!!$  ! Perform poly type conversion from typ2 to typ1 if possible
-!!$  ! Return converted type or -1 on failure
-!!$  !===============================================================
-!!$  function convert_poly(coder,typ1,typ2,conv_poly) result(typ3)
-!!$    type(code_state),intent(inout):: coder
-!!$    integer,intent(in):: typ1,typ2
-!!$    logical,intent(in):: conv_poly
-!!$    integer:: typ3
-!!$    type(pm_ptr):: tv1,tv2
-!!$    if(typ1<=0) return
-!!$    typ3=-1
-!!$    tv1=pm_type_vect(coder%context,typ1)
-!!$    tv2=pm_type_vect(coder%context,typ2)
-!!$    if(pm_tv_kind(tv1)==pm_type_is_poly) then
-!!$       if(pm_tv_kind(tv2)==pm_type_is_poly) then
-!!$          if(conv_poly.and.pm_type_includes(coder%context,&
-!!$               pm_tv_arg(tv1,1),pm_tv_arg(tv2,1),&
-!!$               pm_type_incl_type)) then
-!!$             if(add_poly_to_poly(coder,typ1,typ2)) then
-!!$                coder%types_finished=.false.
-!!$             endif
-!!$             typ3=typ1
-!!$          endif
-!!$       else
-!!$         if(pm_type_includes(coder%context,&
-!!$               pm_tv_arg(tv1,1),typ2,&
-!!$               pm_type_incl_type)) then
-!!$            if(add_type_to_poly(coder,typ1,typ2)) then
-!!$               coder%types_finished=.false.
-!!$            endif
-!!$             typ3=typ1
-!!$          endif
-!!$       endif
-!!$    endif
-!!$  end function convert_poly
-!!$
-!!$  !==============================================================
-!!$  ! Return the working set for a given poly type
-!!$  ! Returns a set type
-!!$  !==============================================================
-!!$  function check_poly(coder,poly_type) result(ptr)
-!!$    type(code_state),intent(inout):: coder
-!!$    integer,intent(in):: poly_type
-!!$    type(pm_ptr):: ptr
-!!$    integer(pm_ln):: j
-!!$    integer,dimension(1):: key
-!!$    key(1)=poly_type
-!!$    j=pm_ivect_lookup(coder%context,coder%poly_cache,key,1)
-!!$    if(j==0) then
-!!$       ptr=pm_null_obj
-!!$    else
-!!$       ptr=pm_dict_val(coder%context,coder%poly_cache,j)
-!!$    endif
-!!$  end function check_poly
-!!$
-!!$  !=======================================================
-!!$  ! Add a type to the working set for a given poly type
-!!$  ! Return whether working set has changed
-!!$  !======================================================
-!!$  function add_type_to_poly(coder,poly_type,mtyp) result(changed)
-!!$    type(code_state),intent(inout):: coder
-!!$    integer,intent(in):: poly_type,mtyp
-!!$    logical:: changed
-!!$    integer,dimension(1):: key
-!!$    integer(pm_ln):: j
-!!$    type(pm_ptr):: v
-!!$    key(1)=poly_type
-!!$    j=pm_ivect_lookup(coder%context,coder%poly_cache,key,1)
-!!$    if(j==0) then
-!!$       coder%temp=pm_set_new(coder%context,32_pm_ln)
-!!$       j=pm_idict_add(coder%context,&
-!!$            coder%poly_cache,&
-!!$            key,1,coder%temp)
-!!$       key(1)=mtyp
-!!$       j=pm_iset_add(coder%context,&
-!!$            coder%temp,key,1)
-!!$       changed=.true.
-!!$    else
-!!$       key(1)=mtyp
-!!$       v=pm_dict_val(coder%context,coder%poly_cache,j)
-!!$       j=pm_iset_add(coder%context,v,key,1,changed)
-!!$    endif
-!!$  end function add_type_to_poly
-!!$  
-!!$  !=======================================================
-!!$  ! Add all types in poly_type2 to the working set for
-!!$  ! poly type poly_type
-!!$  ! Return whether working set has changed
-!!$  !======================================================
-!!$  function add_poly_to_poly(coder,poly_type,poly_type2) result(changed)
-!!$    type(code_state),intent(inout):: coder
-!!$    integer,intent(in):: poly_type,poly_type2
-!!$    logical:: changed
-!!$    type(pm_ptr):: typeset1,typeset2,type_entry
-!!$    integer(pm_ln):: i,j,n
-!!$    integer,dimension(1):: key
-!!$    changed=.false.
-!!$    typeset2=check_poly(coder,poly_type2)
-!!$    if(pm_fast_isnull(typeset2)) return
-!!$    typeset1=check_poly(coder,poly_type)
-!!$    if(pm_fast_isnull(typeset1)) then
-!!$       coder%temp=pm_set_new(coder%context,32_pm_ln)
-!!$       key(1)=poly_type
-!!$       j=pm_idict_add(coder%context,&
-!!$            coder%poly_cache,&
-!!$            key,1,coder%temp)
-!!$       typeset1=coder%temp
-!!$    endif
-!!$    call pm_set_merge(coder%context,typeset1,typeset2,changed)
-!!$  contains
-!!$    include 'fisnull.inc'
-!!$  end function add_poly_to_poly
 
   !=================================================
   ! Get currently resolved type (&mode) for argument
   ! (variable or constant)
   !=================================================
-  function get_arg_type(coder,callnode,arg) result(tno)
+  function get_arg_type(coder,callnode,arg,init) result(tno)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,arg
+    integer,intent(in),optional:: init
     integer:: tno
     if(cnode_get_kind(arg)==cnode_is_var) then
-       tno=get_var_type(coder,callnode,arg)
+       tno=get_var_type(coder,callnode,arg,init)
     else
        if(pm_debug_checks) then
           if(cnode_get_kind(arg)/=cnode_is_const) then
@@ -3336,14 +3270,12 @@ contains
   
   !============================================================================
   ! Get currently resolved type (&mode) for variable
-  ! Can pass call flags through init parameter
-  !  - call_takes_init       - no error for unitialised value
-  !  - call_converts_uninit  - Convert uninitialsed value to a type value
+  
   !============================================================================
   function get_var_type(coder,callnode,var,init) result(tno)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,var
-    logical,intent(in),optional:: init
+    integer,intent(in),optional:: init
     integer:: tno
     integer:: tk
     tno=coder%stack(cnode_get_num(var,var_index)+coder%base)
@@ -3355,10 +3287,18 @@ contains
 !!$       return
 !!$    endif
     tk=pm_type_kind(coder%context,tno)
-    if(tk==pm_type_is_uninitialised.and..not.present(init)) then
+    if(tk==pm_type_is_uninitialised) then
+       if(present(init)) then
+          if(iand(init,call_converts_uninit)/=0) then
+             tno=pm_type_arg(coder%context,tno,1)
+             return
+          elseif(iand(init,call_takes_uninit+call_needs_uninit)/=0) then
+             return
+          endif
+       endif
        call cnode_error(coder,callnode,&
-            'Attempt to use "var..." or "const..." before it is initialised: ',&
-            cnode_get(var,var_name))
+            'Attempt to use variable or constant before it is initialised: ',&
+            cnode_var_name(var))
        call cnode_error(coder,var,&
             'Definition statement relating to above error')
        coder%stack(cnode_get_num(var,var_index)+coder%base)=error_type
@@ -3409,7 +3349,7 @@ contains
     logical,intent(in),optional:: no_init
     integer:: typ0,typ2
     logical:: ok,added
-    typ0=get_var_type(coder,cnode,var,init=.true.)
+    typ0=get_var_type(coder,cnode,var,init=call_takes_uninit)
     typ2=typ0
 !!$    write(*,*) 'Combining...',trim(pm_type_as_string(coder%context,typ0)),'<>',&
 !!$         trim(pm_type_as_string(coder%context,typ))
@@ -3417,38 +3357,29 @@ contains
        if(typ0<=0) then
           typ2=typ
        elseif(typ>0) then
-          if(present(no_init).or.&
-               pm_type_kind(coder%context,typ0)/=pm_type_is_uninitialised) then
-             if(pm_type_kind(coder%context,typ0)==pm_type_is_uninitialised.or.&
-                  pm_type_kind(coder%context,typ)==pm_type_is_uninitialised) then
-                call cnode_error(coder,cnode,&
-                     'Variable/constant is not intialised in '//&
-                     ' all branches of a conditional statment:',&
-                     cnode_get(var,var_name))
-                typ2=error_type
-             else
-                typ2=pm_type_combine(coder%context,typ0,typ,ok,added)
-                if(.not.ok) then
-                   call cnode_error(coder,var,'Value does not have consistent type:',&
-                        cnode_get(var,var_name))
-                   call more_error(coder%context,&
-                        'First:  '//trim(pm_type_as_string(coder%context,typ0)))
-                   call more_error(coder%context,&
-                        'Then:   '//trim(pm_type_as_string(coder%context,typ)))
-                   if(present(no_init)) then
-                      call cnode_error(coder,cnode,&
-                           'Above type is inconsistent between branches of this statement')
-                   else
-                      call cnode_error(coder,cnode,'Type inconsistency occurs here')
-                   endif
-                   typ2=error_type
-                   call inf_trace(coder)
-                elseif(added) then
-                   coder%types_changed=.true.
+          if(pm_type_kind(coder%context,typ0)==pm_type_is_uninitialised.and..not.present(no_init)) then
+             typ2=typ
+          else
+             typ2=pm_type_combine(coder%context,typ0,typ,ok,added)
+             if(.not.ok) then
+                call cnode_error(coder,var,'Value does not have consistent type:',&
+                     cnode_var_name(var))
+                call more_error(coder%context,&
+                     'First:  '//trim(pm_type_as_string(coder%context,typ0)))
+                call more_error(coder%context,&
+                     'Then:   '//trim(pm_type_as_string(coder%context,typ)))
+                if(present(no_init)) then
+                   call cnode_error(coder,cnode,&
+                        'Above type is inconsistent between branches of this statement')
+                else
+                   call cnode_error(coder,cnode,'Type inconsistency occurs here')
                 endif
+                typ2=error_type
+                call inf_trace(coder)
+             elseif(added) then
+                coder%types_changed=.true.
              endif
           endif
-  
        endif
     endif
 !!$    write(*,*) '....to',trim(pm_type_as_string(coder%context,typ2))
@@ -3468,22 +3399,22 @@ contains
     integer,intent(in):: oldtype,newtype
     integer:: vartype
     if(oldtype==newtype) return
-    vartype=get_var_type(coder,var,var,init=.true.)
+    vartype=get_var_type(coder,var,var,init=call_takes_uninit)
     if(vartype<=0.or.oldtype<=0.or.newtype<=0) return
     vartype=pm_type_replace(coder%context,vartype,oldtype,newtype)
     call set_var_type(coder,var,vartype)
   end subroutine combine_subvar_type
   
-
   !===========================================================
   ! Type constraint / Cast
+  ! Convert type tno2 to tno1
+  ! Returns 0, type (for poly conversion) or -1 for error
   !===========================================================
-  function inf_cast(coder,node,tno1,tno2,isvar) result(k)
+  function inf_cast(coder,node,tno1,tno2) result(k)
     type(code_state):: coder
     type(pm_ptr),intent(in):: node
     integer,intent(in):: tno1
     integer,intent(inout):: tno2
-    logical,intent(in):: isvar
     integer:: k
     logical:: ok,converted_to_poly
     integer:: tno3,base,key(1)
@@ -3492,7 +3423,8 @@ contains
        return
     endif
     if(debug_inference) then
-       write(*,*) 'Cast:',trim(pm_type_as_string(coder%context,tno2)),' to: ',trim(pm_type_as_string(coder%context,tno1))
+       write(*,*) 'Cast:',trim(pm_type_as_string(coder%context,tno2)),&
+            ' to: ',trim(pm_type_as_string(coder%context,tno1))
     endif
     tno3=pm_type_convert(coder%context,tno1,tno2,.true.,.false.,.false.)
     if(tno3>=0) tno2=tno3
@@ -3510,6 +3442,7 @@ contains
             'Value of type "'//trim(pm_type_as_string(coder%context,tno2))//&
             '" cannot be converted to type "'//trim(pm_type_as_string(coder%context,tno1))//'"')
        call inf_trace(coder)
+       k=-1
     endif
     if(debug_inference) write(*,*) 'Cast Converts to:',trim(pm_type_as_string(coder%context,tno2))
   contains
@@ -3576,6 +3509,15 @@ contains
        return
     elseif(opcode==op_same_rec_fold) then
        ok=pm_type_same_rec(coder%context,pm_type_arg(coder%context,atype,2),pm_type_arg(coder%context,atype,3))
+       if(ok) then
+          rtype=coder%true_literal
+       else
+          rtype=coder%false_literal
+       endif
+       return
+    elseif(opcode==op_directly_assignable_fold) then
+       ok=pm_type_equal(coder%context,pm_type_arg(coder%context,atype,2),pm_type_arg(coder%context,atype,3)).and.&
+            iand(pm_type_flags(coder%context,pm_type_arg(coder%context,atype,2)),pm_type_has_array+pm_type_has_poly)==0
        if(ok) then
           rtype=coder%true_literal
        else
@@ -3741,6 +3683,8 @@ contains
        ok=a%data%l(a%offset).and.b%data%l(b%offset)
     case(op_or_fold)
        ok=a%data%l(a%offset).or.b%data%l(b%offset)
+    case(op_not_fold)
+       ok=.not.a%data%l(a%offset)
     case(op_except_fold)
        ok=a%data%l(a%offset).and..not.b%data%l(b%offset)
     end select
@@ -3765,7 +3709,23 @@ contains
     call make_type(coder,n)
   end subroutine make_type_if_possible
 
-
+  !================================================================
+  ! Set the n-th flag bit associated with a call
+  !================================================================
+  subroutine set_call_bit(coder,callnode,n)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr):: callnode
+    integer:: n
+    integer:: m
+    m=cnode_get_num(callnode,call_index)+(n+bit_size(1)-2)/bit_size(1)
+    coder%stack(coder%base+m)=ibset(max(0,coder%stack(coder%base+m)),iand(n-1,bit_size(1)-1))
+  end subroutine set_call_bit
+  
+  !================================================================
+  ! Run backpropogation analysis on cblock in function
+  ! that has been type-resolved yielding resolution vector rvec
+  ! Update rvec if update is true
+  !================================================================
   recursive subroutine bprop(coder,cblock,rvec,update)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock
@@ -3774,15 +3734,16 @@ contains
     integer(access_kind),allocatable,dimension(:):: access_info
     integer:: save_loop_depth,i
     if(debug_bprop) then
-       write(*,*) 'BP'
+       write(*,*) 'BP', size(rvec)
     endif
-    allocate(access_info(size(rvec)+pm_max_args))
+    allocate(access_info(size(rvec)+pm_max_args+1))
     access_info(1:size(rvec))=0
     access_info(size(rvec)+1:)=access_is_var
+    access_info(size(rvec)+pm_max_args+1)=-1
     save_loop_depth=coder%loop_depth
-    call bprop_cblock(coder,cblock,access_info,rvec)
+    call bprop_cblock(coder,cblock,access_info,rvec,update.and.pm_opts%run_bprop)
     coder%loop_depth=save_loop_depth
-    if(update) then
+    if(update.and.pm_opts%run_bprop) then
        do i=1,size(rvec)
           if(access_info(i)==access_deactivated_call.or.&
                access_info(i)==access_is_var) then
@@ -3800,11 +3761,12 @@ contains
   !==========================================
   ! Back propogate information for code block
   !==========================================
-  recursive subroutine bprop_cblock(coder,cblock,access_info,rvec)
+  recursive subroutine bprop_cblock(coder,cblock,access_info,rvec,update)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: cblock
     integer,dimension(:),intent(inout)::rvec
-    integer(access_kind),dimension(*),intent(inout):: access_info
+    integer(access_kind),dimension(:),allocatable,intent(inout):: access_info
+    logical,intent(in):: update
     integer:: nvars,idx,newbase
     type(pm_ptr):: p
     if(pm_fast_isnull(cblock)) return
@@ -3816,20 +3778,25 @@ contains
     enddo
     p=cnode_get(cblock,cblock_last_call)
     do while(.not.pm_fast_isnull(p))
-       call bprop_call(coder,cblock,p,access_info,rvec)
+       call bprop_call(coder,cblock,p,access_info,rvec,update)
        p=cnode_get(p,call_back_link)
     enddo
   contains
     include 'fisnull.inc'
   end subroutine bprop_cblock
-  
-  recursive subroutine bprop_call(coder,cblock,callnode,access_info,rvec)
+
+
+  !==========================================
+  ! Back propogate information for call cnode
+  !==========================================
+  recursive subroutine bprop_call(coder,cblock,callnode,access_info,rvec,update)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,cblock
     integer,dimension(:),intent(inout):: rvec
-    integer(access_kind),dimension(*),intent(inout):: access_info
+    integer(access_kind),dimension(:),allocatable,intent(inout):: access_info
+    logical,intent(in):: update
     type(pm_ptr):: args,arg,tv
-    integer:: nret,nargs,nvargs,opcode,i,sig,tno
+    integer:: nret,nargs,nvargs,opcode,i,j,n,sig,tno,slot
     integer(access_kind):: acc
     nret=cnode_get_num(callnode,call_nret)
     sig=-cnode_get_num(callnode,call_sig)
@@ -3846,15 +3813,17 @@ contains
                .or.block_writes_accessed(4)) then
              coder%loop_depth=coder%loop_depth+1
              call access(cnode_arg(args,2))
-             call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
+             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
+             call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec,update)
              call access(cnode_arg(args,2))
-             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
              if(coder%loop_depth==1) then
                 call access(cnode_arg(args,2))
-                call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
+                call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec,update)
                 call access(cnode_arg(args,2))
-                call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+                call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
              endif
+             coder%loop_depth=coder%loop_depth-1
           else
              if(debug_bprop) then
                 write(*,*) 'DISABLE while'
@@ -3865,12 +3834,15 @@ contains
          if(cblock_must_run(cnode_arg(args,1)).or.&
               block_writes_accessed(3)) then
             call access(cnode_arg(args,2))
-            call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+            coder%loop_depth=coder%loop_depth+1
+            call access(cnode_arg(args,2))
+            call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
             call access(cnode_arg(args,2))
             if(coder%loop_depth==1) then
-               call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+               call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
                call access(cnode_arg(args,2))
             endif
+            coder%loop_depth=coder%loop_depth-1
          else
             if(debug_bprop) then
                write(*,*) 'DISABLE until'
@@ -3880,62 +3852,113 @@ contains
        case(sym_if,sym_if_invar)
           call bprop_if(count_updates(cnode_arg(args,4),1))
        case(sym_do)
-          call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec)
+          call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
        case(sym_pct)
-          call bprop_cblock(coder,cnode_arg(args,2),access_info,rvec)
+          call bprop_cblock(coder,cnode_arg(args,2),access_info,rvec,update)
           call access(cnode_arg(args,1))
-          write(*,*) 'DONE PCT'
        case(sym_any,sym_any_invar)
           call bprop_multi_versions(cnode_arg(args,4),cnode_arg(args,2),cnode_arg(args,1))
           call access(cnode_arg(args,3))
        case(sym_pm_each_index)
           if(nret==1.or.accessed(cnode_arg(args,1))) then
-             if(nret>1) call access(cnode_arg(args,nret+4))
-             call bprop_multi_versions(cnode_arg(args,nret+3),cnode_arg(args,nret+2),&
-                  cnode_arg(args,nret))
+             if(nret>1) then
+                call bprop_multi_versions(cnode_arg(args,nret+3),cnode_arg(args,nret+2),&
+                     cnode_arg(args,nret),cnode_arg(args,nret+4))
+             else
+                call bprop_multi_versions(cnode_arg(args,nret+3),cnode_arg(args,nret+2),&
+                     cnode_arg(args,nret))
+             endif
              call access(cnode_arg(args,nret+1))
           else
              call disable
           endif
        case(sym_task)
 
+          
+       case(sym_check)
+          call std_access(.true.,1)
+       case(sym_test)
+          if(cnode_num_arg(args,2)==sym_true.and.pm_opts%check_stmts) then
+             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
+          else
+             call disable
+          endif
+       case(sym_dot,sym_dot_ref,sym_get_dot,sym_get_dot_ref)
+          if(accessed(cnode_arg(args,1))) then
+             arg=cnode_arg(args,2)
+             call access(arg)
+             call access(cnode_arg(args,3))
+          else
+             call disable
+          endif
+       case(sym_get_list_elem)
+          if(accessed(cnode_arg(args,1))) then
+             arg=cnode_arg(args,2)
+             call access(arg)
+             call access(cnode_arg(args,3))
+             slot=cnode_get_num(arg,var_index)
+             tno=rvec(slot)
+             if(tno>0) then
+                tv=pm_type_vect(coder%context,tno)
+                n=alloc_list_info(list_info_start(),pm_tv_numargs(tv),slot,access_info(slot))
+                access_info(n+1+rvec(cnode_get_num(callnode,call_index)))=access_info(slot)
+                access_info(slot)=ior(access_info(slot),access_is_list)
+             endif
+          else
+             call disable
+          endif
        case(sym_pm_ref)
           call std_access(.false.,3)
        case(sym_open)
-          arg=cnode_arg(args,nargs)
           nvargs=0
-          if(cnode_get_kind(arg)==cnode_is_var) then
-             if(cnode_flags_set(arg,var_flags,var_is_varg)) then
+          n=0
+          do i=1,nargs
+             arg=cnode_arg(args,i)
+             if(cnode_get_kind(arg)==cnode_is_var) then
                 tno=rvec(cnode_get_num(arg,var_index))
                 if(tno>0) then
                    tv=pm_type_vect(coder%context,tno)
-                   if(pm_tv_kind(tv)==pm_type_is_tuple.and.&
-                        iand(pm_tv_flags(tv),pm_type_is_list)==0) then
-                      nvargs=pm_tv_numargs(tv)
-                      call combine_access_info(arg,access_holds_result)
+                   if(pm_tv_kind(tv)==pm_type_is_tuple) then
+                      if(iand(pm_tv_flags(tv),pm_type_is_list)==0) then
+                         nvargs=pm_tv_numargs(tv)
+                      else
+                         n=n+pm_tv_numargs(tv)+2
+                      endif
+                      call combine_access_info(arg,access_holds_result,.false.)
                    endif
                 endif
              endif
-          endif
+          enddo
           call code_val(coder,pm_new(coder%context,&
-               access_pm_type,int(max(nargs+max(nvargs-1,0),1),pm_ln)))
+               access_pm_type,int(nargs+nvargs+n+2,pm_ln)))
           arg=top_code(coder)
-          do i=1,nargs
-             arg%data%i8(arg%offset+i-1)=get_arg_access_info(cnode_arg(args,i))
+          j=nargs+nvargs-merge(1,0,nvargs>0)+1
+          arg%data%i16(arg%offset)=j-1
+          do i=1,nargs-merge(1,0,nvargs>0)
+             acc=get_arg_access_info(cnode_arg(args,i))
+             arg%data%i16(arg%offset+i)=acc
+             if(debug_bprop_tagging) then
+                write(*,'(i4,i4)',advance='NO') i,acc
+                call print_bprop_item(6,acc)
+             endif
+             call copy_list_info_for_param(acc,arg%data%i16(arg%offset:),j,cnode_arg(args,i))
              if(debug_bprop) then
-                write(*,*) 'BP store access',arg%data%i8(arg%offset+i-1),&
+                write(*,*) 'BP store access',arg%data%i16(arg%offset+i),&
                      cnode_get_num(cnode_arg(args,i),var_index)
              endif
           enddo
-          do i=0,nvargs-1
-             acc=access_info(size(rvec)+i+1)
+          do i=1,nvargs
+             acc=access_info(size(rvec)+i)
              if(acc==access_is_var) then
                 acc=ior(acc,access_not_passed)
-             elseif(iand(pm_type_flags(coder%context,pm_tv_arg(tv,i+1)),pm_type_has_storage)==0) then
+             elseif(iand(pm_type_flags(coder%context,&
+                  pm_tv_arg(tv,i)),pm_type_has_storage)==0) then
                 acc=ior(acc,access_not_passed)
              endif
-             arg%data%i8(arg%offset+i+nargs-1)=acc
+             arg%data%i16(arg%offset+i+nargs-1)=acc
+             call copy_list_info_for_param_idx(acc,arg%data%i16(arg%offset:),j,size(rvec)+i)
           enddo
+          arg%data%i16(arg%offset+j)=-1
        case(sym_key)
           do i=1,nret/2
              call access(cnode_arg(args,i))
@@ -3944,12 +3967,13 @@ contains
              if(accessed(cnode_arg(args,i/2+nret/2))) then
                 call access(cnode_arg(args,nret+i))
              endif
-             call bprop_cblock(coder,cnode_arg(args,nret+i-1),access_info,rvec)
+             call bprop_cblock(coder,cnode_arg(args,nret+i-1),access_info,rvec,update)
           enddo
-          call code_val(coder,pm_new(coder%context,access_pm_type,int(max(nret/2,1),pm_ln)))
+          call code_val(coder,pm_new(coder%context,access_pm_type,int(max(nret/2,1)+1,pm_ln)))
           arg=top_code(coder)
+          arg%data%i16(arg%offset)=nret/2
           do i=nret/2+1,nret
-             arg%data%i8(arg%offset+i-1)=get_arg_access_info(cnode_arg(args,i))
+             arg%data%i16(arg%offset+i-nret/2)=get_arg_access_info(cnode_arg(args,i))
           enddo
        case(sym_amp,sym_result)
           do i=1,nargs
@@ -3957,11 +3981,33 @@ contains
           enddo
        case(sym_rec)
           call std_access(.false.,3)
-       case(sym_var,sym_var_set_mode,sym_set_mode,sym_change_mode,sym_underscore,sym_colon,sym_end_loop)
+       case(sym_var,sym_var_set_mode,sym_set_mode,sym_change_mode,sym_underscore,&
+            sym_colon,sym_end_loop)
           continue
        case(sym_type_val)
           if(.not.accessed(cnode_arg(args,1))) call disable
-          
+       case(sym_list)
+          n=find_list_info(list_info_start(),access_info,cnode_get_num(cnode_arg(args,1),var_index))
+          if(n<0) then
+             acc=get_access_info(cnode_arg(args,i))
+             do i=2,nargs
+                call combine_access_info(cnode_arg(args,i),acc,.false.)
+             enddo
+          else
+             do i=2,nargs
+                call combine_access_info(cnode_arg(args,i),access_info(n+i),.false.)
+             enddo
+          endif
+       case(sym_typeof,sym_pm_uninit)
+          continue
+       case(sym_move)
+          n=nargs/2
+          do i=1,n
+             if(accessed(cnode_arg(args,i))) then
+                call combine_access_info(cnode_arg(args,i+n),&
+                     access_used_ever+access_used_now+access_is_var,.false.)
+             endif
+          enddo
        case default
           call std_access(.false.,1)
        end select
@@ -3996,7 +4042,7 @@ contains
          p=p%data%ptr(p%offset+1)
          i=i+1
       enddo
-      call bprop_cblock(coder,cnode_arg(args,2),access_info,rvec)
+      call bprop_cblock(coder,cnode_arg(args,2),access_info,rvec,update)
       i=1
       p=readlist
       do while(.not.pm_fast_isnull(p))
@@ -4007,20 +4053,21 @@ contains
          p=p%data%ptr(p%offset+1)
          i=i+1
       enddo
-      call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec)
+      call bprop_cblock(coder,cnode_arg(args,3),access_info,rvec,update)
       i=1
       p=readlist
       do while(.not.pm_fast_isnull(p))
          var=p%data%ptr(p%offset)
-         call combine_access_info(var,save_access(i))
+         call combine_access_info(var,save_access(i),.false.)
          p=p%data%ptr(p%offset+1)
          i=i+1
       enddo
       call access(cnode_arg(args,1))
     end subroutine bprop_if
 
-    recursive subroutine bprop_multi_versions(limitsc,cblock,rtn)
+    recursive subroutine bprop_multi_versions(limitsc,cblock,rtn,res)
       type(pm_ptr),intent(in):: limitsc,cblock,rtn
+      type(pm_ptr),intent(in),optional:: res
       integer:: i,j,slot1,slot2,sig,rtn_slot,rtn_access
       type(pm_ptr):: lrvecs,lrvec,limits
       sig=rvec(cnode_get_num(callnode,call_index))
@@ -4031,35 +4078,71 @@ contains
       slot2=limits%data%i(limits%offset+1)
       rtn_slot=cnode_get_num(rtn,var_index)
       rtn_access=access_info(rtn_slot)
+      if(debug_bprop) write(*,*) 'BPROP MULTI>',cnode_numargs(lrvecs)
       do j=cnode_numargs(lrvecs),1,-1
          lrvec=cnode_arg(lrvecs,j)
-         rvec(slot1:slot2)=lrvec%data%i(lrvec%offset+slot2-slot1)
+         rvec(slot1:slot2)=lrvec%data%i(lrvec%offset:lrvec%offset+slot2-slot1)
          access_info(slot1:slot2)=0
          access_info(rtn_slot)=rtn_access
-         call bprop_cblock(coder,cblock,access_info,rvec)
-         write(*,*) '->',rvec(slot1:slot2)
-         write(*,*) '>>',access_info(slot1:slot2)
-         do i=slot1,slot2
-          if(access_info(i)==access_deactivated_call.or.&
-               access_info(i)==access_is_var) then
-             lrvec%data%i(lrvec%offset+i-slot1)=sp_sig_deactivated
-          endif
-       end do
+         if(present(res)) call access(res)
+         call bprop_cblock(coder,cblock,access_info,rvec,update)
+         if(update) then
+            do i=slot1,slot2
+               if(access_info(i)==access_deactivated_call.or.&
+                    access_info(i)==access_is_var) then
+                  lrvec%data%i(lrvec%offset+i-slot1)=sp_sig_deactivated
+               else
+                  lrvec%data%i(lrvec%offset+i-slot1)=rvec(i)
+               endif
+            end do
+         endif
       enddo
+      if(debug_bprop) write(*,*) 'BPROP MULTI END>'
     end subroutine bprop_multi_versions
 
     recursive subroutine bprop_proc_call
       type(pm_ptr):: arg_access,key_access,key_names,proc_keys,arg,amps,key_args,procnode
-      integer:: i,j,nkeys,nproc_keys,taints,sig
+      integer:: i,j,nkeys,nproc_keys,taints,sig,totargs,slot,bit,ifirst
       logical:: arg_accessed,is_accessed, all_accessed, needs_to_run, is_builtin
+      integer(access_kind):: acc
+
+      ifirst=merge(num_comm_args+1,2,cnode_flags_set(callnode,call_flags,proccall_is_comm))
 
       sig=rvec(cnode_get_num(callnode,call_index))
-      if(sig<=0) then
-         if(debug_bprop) write(*,*) 'BPspecial sig',sig
-         call std_access(.false.,1)
+      if(sig<0) then
+         select case(sig)
+         case(sp_sig_init,sp_sig_assign)
+            if(accessed(cnode_arg(args,2))) then
+               call access(cnode_arg(args,3))
+               if(debug_bprop_tagging) then
+                  call print_bprop_item(6,get_access_info(cnode_arg(args,2)))
+               endif
+               call modify(cnode_arg(args,2))
+               call tag_associated_param(cnode_arg(args,3))
+               call set_final_tags_for_call(args,nargs,3,pm_null_obj,0)
+            else
+               call disable
+            endif
+         case(sp_sig_dup)
+            if(accessed(cnode_arg(args,1))) then
+               call access(cnode_arg(args,3))
+               call tag_associated_param(cnode_arg(args,3))
+               call set_final_tags_for_call(args,nargs,2,pm_null_obj,0)
+            else
+               call disable
+            endif
+         case(sp_sig_link) 
+            call combine_access_info(cnode_arg(args,3),&
+                 get_access_info(cnode_arg(args,1)),.false.)
+         case(sp_sig_noop)
+            continue
+         case default
+            if(debug_bprop) write(*,*) 'BPspecial sig',sig
+            call std_access(.false.,ifirst)
+         end select
          return
       endif
-      
+
       amps=cnode_get(callnode,call_amp)
 
       if(debug_bprop) then
@@ -4103,7 +4186,7 @@ contains
          all_accessed=all_accessed.and.arg_accessed
          call modify(arg)
       enddo
-      
+
       if(.not.pm_fast_isnull(amps)) then
          amps=pm_name_val(coder%context,int(amps%offset))
          do i=0,pm_fast_esize(amps)
@@ -4119,9 +4202,9 @@ contains
       endif
 
       if(debug_bprop) then
-         write(*,*) 'BPa',is_accessed,all_accessed
+         write(*,*) 'BPaccess',is_accessed,all_accessed
       endif
-      
+
       if(.not.is_accessed.and.iand(taints,proc_must_run)==0) then
          if(debug_bprop) write(*,*) 'BP disable',is_accessed,iand(taints,proc_must_run),&
               trim(sig_name_str(coder,cnode_get_num(callnode,call_sig)))
@@ -4131,51 +4214,128 @@ contains
 
       if(.not.all_accessed) then
          do i=1,nret
-            call combine_access_info(cnode_arg(args,i),access_holds_result)
+            call combine_access_info(cnode_arg(args,i),access_holds_result,.false.)
          enddo
          if(.not.pm_fast_isnull(amps)) then
             do i=0,pm_fast_esize(amps)
                arg=cnode_arg(args,nret+amps%data%i(amps%offset+i))
-               call combine_access_info(arg,access_holds_result)
+               call combine_access_info(arg,access_holds_result,.false.)
             enddo
          endif
       endif
 
       if(is_builtin) then
-         do i=1,nargs
+         totargs=cnode_get_num(procnode,pr_nargs)
+         do i=ifirst,nargs-merge(1,0,totargs>nargs)
             call access(cnode_arg(args,nret+i))
          enddo
-      else
+         if(totargs>nargs) then
+            do i=nargs,totargs
+               j=size(rvec)+i-nargs+1
+               call access_at_idx(j)
+            enddo
+         endif
+      else  
+         ! Main arguments
          arg_access=cnode_arg(procnode,6)
-         key_access=cnode_arg(procnode,7)
-         do i=1,nargs
-    !!$            write(*,*) 'Combine #',i,cnode_get_num(cnode_arg(args,i+nret),var_index),'with',arg_access%data%i8(arg_access%offset+i-1)
-    !!! Need to cater for vargs
-            call combine_access_info(cnode_arg(args,i+nret),&
-                iand(arg_access%data%i8(arg_access%offset+i-1),not(access_not_passed)))
+         totargs=arg_access%data%i16(arg_access%offset)
+         do i=1,nargs-merge(1,0,totargs>nargs)
+            acc=arg_access%data%i16(arg_access%offset+i)
+            arg=cnode_arg(args,i+nret)
+            call combine_arg_access_info(arg,acc)
+            call copy_list_info_for_arg(acc,&
+                 arg_access%data%i16(arg_access%offset:),totargs+1,i,arg)
          enddo
-         do i=nargs,pm_fast_esize(arg_access)+1
-            j=size(rvec)+i-nargs+1
-            access_info(j)=ior(access_info(j),iand(arg_access%data%i8(arg_access%offset+i-1),not(access_not_passed)))
-         enddo
+
+         if(totargs>nargs) then
+            do i=nargs,totargs
+               j=size(rvec)+i-nargs+1
+               acc=arg_access%data%i16(arg_access%offset+i)
+               call combine_arg_access_info_at_idx(j,acc)
+               call copy_list_info_for_arg_idx(acc,&
+                    arg_access%data%i16(arg_access%offset:),totargs+1,i,j)
+            enddo
+         endif
+
+         ! Keyword arguments
          if(.not.pm_fast_isnull(cnode_get(callnode,call_keys))) then
             nkeys=cnode_numargs(cnode_get(callnode,call_keys))
             key_names=pm_name_val(coder%context,cnode_get_num(callnode,call_key_names))
             proc_keys=cnode_get(cnode_arg(procnode,1),pr_keys)
             nproc_keys=pm_fast_esize(proc_keys)/2
             key_args=cnode_get(callnode,call_keys)
+            key_access=cnode_arg(procnode,7)
             outer: do j=1,nproc_keys
                do i=1,nkeys
-                  if(proc_keys%data%i(proc_keys%offset+j-1)==key_names%data%i(key_names%offset+i-1)) then
-                     call combine_access_info(cnode_arg(key_args,i),iand(key_access%data%i8(key_access%offset+j-1),not(access_not_passed)))
+                  if(proc_keys%data%i(proc_keys%offset+j-1)==&
+                       key_names%data%i(key_names%offset+i-1)) then
+                     call combine_arg_access_info(cnode_arg(key_args,i),&
+                          key_access%data%i16(key_access%offset+j-1))
                      cycle outer
                   endif
                enddo
             enddo outer
+         else
+            nkeys=0
          endif
+
+         call set_final_tags_for_call(args,nargs,totargs,key_args,nkeys)
+
       endif
 
     end subroutine bprop_proc_call
+
+    subroutine set_final_tags_for_call(args,nargs,totargs,key_args,nkeys)
+      type(pm_ptr),intent(in):: args,key_args
+      integer,intent(in):: nargs,totargs,nkeys
+      integer:: i,j,slot,bit
+      slot=cnode_get_num(callnode,call_index)+1
+      bit=0
+      do i=1,nargs-merge(1,0,totargs>nargs)
+         call set_final_flags(cnode_arg(args,i+nret),slot,bit)
+      enddo
+      if(totargs>nargs) then
+         do i=nargs,totargs
+            j=size(rvec)+i-nargs+1
+            call set_final_flags_at_idx(j,slot,bit)
+         enddo
+      endif
+      do i=1,nkeys
+         call set_final_flags(cnode_arg(key_args,i),slot,bit)
+      enddo
+    end subroutine set_final_tags_for_call
+
+    subroutine set_final_flags(arg,slot,bit)
+      type(pm_ptr),intent(in):: arg
+      integer,intent(inout):: slot,bit
+      integer(access_kind):: acc
+      type(pm_ptr):: var
+      if(cnode_get_kind(arg)==cnode_is_var) then
+         var=arg
+         if(cnode_flags_set(var,var_flags,var_is_reference)) then
+            var=cnode_get(var,var_extra_info)
+         endif
+         call set_final_flags_at_idx(cnode_get_num(var,var_index),slot,bit)
+      endif
+    end subroutine set_final_flags
+
+    subroutine set_final_flags_at_idx(idx,slot,bit)
+      integer,intent(in):: idx
+      integer,intent(inout):: slot,bit
+      integer(access_kind):: acc
+      if(debug_bprop_tagging) then
+         write(*,'(A,i4)',advance='NO') 'final',idx
+         call print_bprop_item(6,access_info(idx))
+      endif
+      if(iand(access_info(idx),access_used_ever+access_not_last)==access_used_ever) then
+         rvec(slot)=ibset(max(rvec(slot),0),bit)
+      endif
+      bit=bit+1
+      if(bit>=bit_size(1)) then
+         slot=slot+1
+         bit=0
+      endif
+    end subroutine set_final_flags_at_idx
 
     recursive subroutine std_access(always,start)
       logical,intent(in):: always
@@ -4193,43 +4353,58 @@ contains
          all_accessed=all_accessed.and.arg_accessed
          call modify(arg)
       enddo
-      if(is_accessed.or.always) then 
+      should_disable=.not.(is_accessed.or.always)
+      if(should_disable) then
+         do i=start,nargs
+            arg=cnode_arg(args,i+nret)
+            if(.not.pm_fast_isnull(arg)) then
+               if(cnode_get_kind(arg)==cnode_is_cblock) then
+                  should_disable=.false.
+                  exit
+               endif
+            endif
+         enddo
+      endif
+      if(.not.should_disable) then 
          do i=start,nargs
             call access(cnode_arg(args,i+nret))
          enddo
-         if(.not.all_accessed) then
+         if(nret>0.and..not.all_accessed) then
             do i=1,nret
-               call combine_access_info(cnode_arg(args,i),access_holds_result)
+               call combine_access_info(cnode_arg(args,i),access_holds_result,.false.)
             enddo
          endif
-      else
-         should_disable=.true.
-      endif
-      do i=start,nargs
-         arg=cnode_arg(args,i+nret)
-         if(.not.pm_fast_isnull(arg)) then
-            if(cnode_get_kind(arg)==cnode_is_cblock) then
-               call bprop_cblock(coder,arg,access_info,rvec)
-               should_disable=.false.
+         do i=start,nargs
+            arg=cnode_arg(args,i+nret)
+            if(.not.pm_fast_isnull(arg)) then
+               if(cnode_get_kind(arg)==cnode_is_cblock) then
+                  call bprop_cblock(coder,arg,access_info,rvec,update)
+               endif
             endif
-         endif
-      enddo
-      if(should_disable) then
+         enddo
+      else
          if(debug_bprop.and.sig>0) write(*,*) 'disable ',trim(sym_names(sig))
          call disable
       endif
     end subroutine std_access
 
-    subroutine access(var)
-      type(pm_ptr):: var
+    subroutine access(arg)
+      type(pm_ptr):: arg
       integer:: idx
-      if(debug_bprop) then
-         if(cnode_get_kind(var)==cnode_is_var) then
-            write(*,*) 'Make access to',cnode_get_num(var,var_index)
+      type(pm_ptr):: var
+      if(cnode_get_kind(arg)==cnode_is_var) then
+         if(cnode_flags_set(arg,var_flags,var_is_reference)) then
+            var=cnode_get(arg,var_extra_info)
+            call access_at_idx(cnode_get_num(arg,var_index))
          endif
+         call access_at_idx(cnode_get_num(arg,var_index))
       endif
-      call combine_access_info(var,access_used_ever+access_used_now+access_is_var)
     end subroutine access
+
+    subroutine access_at_idx(idx)
+      integer,intent(in):: idx
+      call combine_access_info_at_idx(idx,access_used_ever+access_used_now+access_is_var,.true.)
+    end subroutine access_at_idx
 
     function accessed(var) result(ok)
       type(pm_ptr):: var
@@ -4246,7 +4421,12 @@ contains
       integer:: idx
       idx=cnode_get_num(var,var_index)
       access_info(idx)=ior(access_is_var,&
-           iand(not(access_used_now),access_info(idx)))
+           iand(not(access_used_now+access_used_by_at),access_info(idx)))
+      if(cnode_flags_set(var,var_flags,var_is_reference)) then
+         idx=cnode_get_num(cnode_get(var,var_extra_info),var_index)
+         access_info(idx)=ior(access_is_var,&
+              iand(not(access_used_now+access_used_by_at),access_info(idx)))
+      endif
     end subroutine modify
 
     subroutine enable
@@ -4265,15 +4445,58 @@ contains
       endif
     end subroutine set_access_info
 
-    subroutine combine_access_info(var,acc)
-      type(pm_ptr),intent(in):: var
+    subroutine combine_arg_access_info(arg,acc)
+      type(pm_ptr),intent(in):: arg
       integer(access_kind),intent(in):: acc
+      if(iand(acc,access_not_passed)==0) then
+         call combine_access_info(arg,&
+              iand(acc,not(access_not_passed+access_needs_movability)),&
+              iand(acc,access_used_ever)/=0)
+      endif
+      if(iand(acc,access_needs_movability)/=0) call tag_associated_param(arg)
+    end subroutine combine_arg_access_info
+    
+    subroutine combine_arg_access_info_at_idx(idx,acc)
+      integer,intent(in):: idx
+      integer(access_kind),intent(in):: acc
+      if(iand(acc,access_not_passed)==0) then
+         call combine_access_info_at_idx(idx,&
+              iand(acc,not(access_not_passed+access_needs_movability)),&
+              iand(acc,access_used_ever)/=0)
+      endif
+      if(iand(acc,access_needs_movability)/=0) call tag_associated_param(arg)
+    end subroutine combine_arg_access_info_at_idx
+    
+    subroutine combine_access_info(arg,acc,count_as_access)
+      type(pm_ptr),intent(in):: arg
+      integer(access_kind),intent(in):: acc
+      logical,intent(in):: count_as_access
       integer:: idx
-      if(cnode_get_kind(var)==cnode_is_var) then
-         idx=cnode_get_num(var,var_index)
-         access_info(idx)=ior(int(acc,access_kind),access_info(idx))
+      if(cnode_get_kind(arg)==cnode_is_var) then
+         if(cnode_flags_set(arg,var_flags,var_is_reference)) then
+            call combine_access_info_at_idx(&
+                 cnode_get_num(cnode_get(arg,var_extra_info),var_index),&
+                 acc,count_as_access)
+         endif
+         idx=cnode_get_num(arg,var_index)
+         call combine_access_info_at_idx(idx,acc,count_as_access)
       endif
     end subroutine combine_access_info
+
+    subroutine combine_access_info_at_idx(idx,acc,count_as_access)
+      integer,intent(in):: idx
+      integer(access_kind),intent(in):: acc
+      logical,intent(in):: count_as_access
+      ! if access is already used_now then set not_final
+      if(count_as_access) then
+         access_info(idx)=ior(access_info(idx),&
+              ishft(iand(access_info(idx),access_used_ever),1))
+      endif
+      if(debug_bprop) then
+         if(iand(acc,access_needs_movability)/=0) write(*,*) 'MOVING',idx
+      endif
+      access_info(idx)=ior(acc,access_info(idx))
+    end subroutine combine_access_info_at_idx
 
     function get_access_info(var) result(acc)
       type(pm_ptr),intent(in):: var
@@ -4292,8 +4515,12 @@ contains
          acc=access_info(cnode_get_num(var,var_index))
          if(acc==access_is_var) then
             acc=ior(acc,access_not_passed)
-         elseif(iand(pm_type_flags(coder%context,rvec(cnode_get_num(var,var_index))),pm_type_has_storage)==0) then
-            acc=ior(acc,access_not_passed)
+         elseif(iand(pm_type_flags(coder%context,&
+              rvec(cnode_get_num(var,var_index))),pm_type_has_storage)==0) then
+            acc=access_not_passed
+         endif
+         if(debug_bprop) then
+            write(*,*) 'GOT',cnode_get_num(var,var_index),acc
          endif
       else
          acc=0
@@ -4323,6 +4550,152 @@ contains
          p=p%data%ptr(p%offset+1)
       enddo
     end function block_writes_accessed
+
+    function find_list_info(start,arr,var_index) result(pos)
+      integer,intent(in):: start,var_index
+      integer(access_kind),dimension(:),intent(in):: arr
+      integer:: pos
+      integer:: i
+      if(var_index>huge(arr(start))) call pm_panic('Program too large')
+      i=start
+      do while(arr(i)>=0)
+         if(arr(i)==var_index) then
+            pos=i
+            return
+         endif
+         i=i+arr(i+1)+2
+      enddo
+      pos=-1
+    end function find_list_info
+
+    function alloc_list_info(start,n,var_index,acc) result(idx)
+      integer,intent(in):: start,n,var_index
+      integer(access_kind),intent(in):: acc
+      integer:: idx
+      integer:: i,old_size,new_size
+      integer(access_kind),dimension(:),allocatable:: temp
+      if(var_index>huge(acc)) call pm_panic('Program too large')
+      i=start
+      do while(access_info(i)>=0)
+         if(access_info(i)==var_index) then
+            return
+         endif
+         i=i+access_info(i+1)+2
+      enddo
+      old_size=size(access_info)
+      if(i+n+2>old_size) then
+         allocate(temp(old_size))
+         temp=access_info
+         deallocate(access_info)
+         new_size=old_size+max(255,8*(i+n+2))
+         allocate(access_info(new_size))
+         access_info(1:old_size)=temp
+      endif
+      access_info(i)=var_index
+      access_info(i+1)=n
+      access_info(i+2:i+1+n)=acc
+      access_info(i+2+n)=-1
+      idx=i
+    end function   alloc_list_info
+
+    subroutine copy_list_info_for_arg(acc,arr,start,arg_index,arg)
+      integer(access_kind),intent(in):: acc
+      integer(access_kind),dimension(:),intent(in)::arr
+      integer,intent(in):: start,arg_index
+      type(pm_ptr),intent(in):: arg
+      integer:: idx
+      if(cnode_get_kind(arg)==cnode_is_var) then
+         idx=cnode_get_num(arg,var_index)
+         call copy_list_info_for_arg_idx(acc,arr,start,arg_index,idx)
+      endif
+    end subroutine copy_list_info_for_arg
+    
+    subroutine copy_list_info_for_arg_idx(acc,arr,start,arg_index,var_index)
+      integer(access_kind),intent(in):: acc
+      integer(access_kind),dimension(:),intent(in)::arr
+      integer,intent(in):: start,arg_index,var_index
+      integer:: src,dst,i
+      if(iand(acc,access_is_list)/=0) then
+         src=find_list_info(start,arr,arg_index)
+         if(src<0) return
+         dst=find_list_info(list_info_start(),access_info,var_index)
+         if(dst>0) then
+            do i=2,arr(dst+i)+1
+               access_info(dst+i)=ior(access_info(dst+i),arr(src+i))
+            enddo
+            return
+         endif
+         dst=alloc_list_info(list_info_start(),int(arr(src+1)),var_index,acc)
+         do i=0,arr(src+1)+1
+            access_info(dst+i)=arr(src+i)
+         enddo
+      endif
+    end subroutine copy_list_info_for_arg_idx
+
+    subroutine copy_list_info_for_param(acc,arr,start,arg)
+      integer(access_kind),intent(in):: acc
+      integer(access_kind),dimension(:),intent(inout)::arr
+      type(pm_ptr),intent(in):: arg
+      integer,intent(inout):: start
+      integer:: idx
+      if(cnode_get_kind(arg)==cnode_is_var) then
+         idx=cnode_get_num(arg,var_index)
+         call copy_list_info_for_param_idx(acc,arr,start,idx)
+      endif
+    end subroutine copy_list_info_for_param
+
+    subroutine copy_list_info_for_param_idx(acc,arr,start,var_index)
+      integer(access_kind),intent(in):: acc
+      integer(access_kind),dimension(:),intent(inout)::arr
+      integer,intent(in):: var_index
+      integer,intent(inout):: start
+      integer:: src,i
+      if(iand(acc,access_is_list)/=0) then
+         src=find_list_info(list_info_start(),access_info,var_index)
+         if(src<0) return
+         do i=0,arr(src+1)+1
+            arr(start+i)=access_info(src+i)
+         enddo
+         start=start+arr(src+1)+2
+      endif
+    end subroutine copy_list_info_for_param_idx
+    
+    function list_info_start() result(n)
+      integer:: n
+      n=size(rvec)+pm_max_args+1
+    end function list_info_start
+
+    recursive subroutine tag_associated_param(arg)
+      type(pm_ptr),intent(in):: arg
+      integer:: flags
+      type(pm_ptr):: var,new_call,new_var
+      integer:: new_call_index,new_argn
+      logical:: ok
+      if(debug_bprop_tagging) write(*,*) 'TAG ASSOCIATED>'
+      if(cnode_get_kind(arg)/=cnode_is_var) return
+      var=arg
+      flags=cnode_get_num(var,var_flags)
+      if(iand(flags,var_is_reference)/=0) then
+         var=cnode_get(var,var_extra_info)
+         flags=cnode_get_num(var,var_flags)
+      endif
+      if(iand(flags,var_is_return)/=0) then
+         if(.not.follow_result_back(coder%context,coder%proc_cache,rvec,&
+              var,new_call,new_call_index,new_var,new_argn)) then
+            if(debug_bprop_tagging) then
+               write(*,*) 'VAR FOLLOWED BACK>',cnode_get_num(new_var,var_index)
+            endif
+            call tag_associated_param(new_var)
+         endif
+         return
+      endif
+      if(debug_bprop_tagging) write(*,*) 'VAR_FLAGS_AND_INDEX>',flags,cnode_get_num(var,var_index)
+      if(iand(flags,var_is_param+var_is_key+var_is_key_ptr)/=0) then
+         if(debug_bprop_tagging) write(*,*) 'TAGGING>'
+         call combine_access_info_at_idx(cnode_get_num(var,var_index),&
+              access_needs_movability,.false.)
+      endif
+    end subroutine tag_associated_param
     
   end subroutine bprop_call
     
@@ -4350,7 +4723,7 @@ contains
     type(code_state):: coder
     type(pm_ptr),intent(in):: node
     character(len=*):: message
-    type(pm_ptr),intent(in),optional:: name
+    integer,intent(in),optional:: name
     logical:: save_supress,current_supress
     current_supress=coder%supress_errors
     call inf_error(coder,node,message,name)
@@ -4367,7 +4740,7 @@ contains
     type(code_state):: coder
     type(pm_ptr),intent(in):: node
     character(len=*):: message
-    type(pm_ptr),intent(in),optional:: name
+    integer,intent(in),optional:: name
     character(len=250):: str
     type(pm_ptr):: modname
     integer:: i,modl_name,lineno,charno
@@ -4400,8 +4773,8 @@ contains
             lineno,&
             charno)
        if(present(name)) then
-          if(.not.pm_fast_isnull(name)) then
-             call pm_name_string(coder%context,int(name%offset),str)
+          if(name>0) then
+             call pm_name_string(coder%context,name,str)
              str=trim(pm_opts%error)//' '//trim(message)//' '//trim(str)
           else
              str=trim(pm_opts%error)//' '//message
@@ -4435,7 +4808,7 @@ contains
     character(len=100):: str
     call pm_strval(pm_type_val(coder%context,tno),str)
     call inf_error(coder,node,trim(str)//': '//&
-         trim(pm_name_as_string(coder%context,cnode_get_num(var,var_name))))
+         trim(pm_name_as_string(coder%context,cnode_var_name(var))))
   end subroutine inf_type_error
 
   ! ============================================================
@@ -4780,7 +5153,7 @@ contains
        if(cnode_flags_set(node,pr_flags,proccall_is_block)) then
           str(n:)='yield '
           n=n+6
-          tno=pm_type_arg(coder%context,pm_type_arg(coder%context,tno,istart-3),1)
+          tno=pm_type_arg(coder%context,pm_type_arg(coder%context,tno,num_comm_args+1),1)
           call pm_type_to_string(coder%context,tno,str,n)
        endif
     endif

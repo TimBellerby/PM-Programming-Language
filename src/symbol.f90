@@ -68,10 +68,8 @@ module pm_symbol
   integer,parameter:: sym_assign = 24
   integer,parameter:: sym_cond = 25
   integer,parameter:: sym_move = 26
-  integer,parameter:: sym_move_all = 27
-  integer,parameter:: sym_swap = 28
-  integer,parameter:: sym_string = 29
-  integer,parameter:: sym_number = 30
+  integer,parameter:: sym_string = 27
+  integer,parameter:: sym_number = 28
 
   ! Operators
   integer,parameter:: sym1 = sym_number
@@ -136,7 +134,8 @@ module pm_symbol
   integer,parameter:: sym_new = last_operator + 11
   integer,parameter:: sym_when = last_operator + 12
   integer,parameter:: sym_bounds = last_operator + 13
-  integer,parameter:: last_expr = sym_bounds
+  integer,parameter:: sym_typeof = last_operator + 14
+  integer,parameter:: last_expr = sym_typeof
   integer,parameter:: last_word = last_expr
 
   ! Modes
@@ -356,9 +355,12 @@ module pm_symbol
   integer,parameter:: sym_repl_line = node0 + 53
   integer,parameter:: sym_call = node0 + 54
   integer,parameter:: sym_check_par_state = node0 + 55
+  integer,parameter:: sym_invar_assign = node0 + 56
+  integer,parameter:: sym_get_list_elem = node0 + 57
+  integer,parameter:: sym_simple_list_elem = node0 + 58
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 56
+  integer,parameter:: hook = node0 + 59
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -412,7 +414,7 @@ module pm_symbol
   integer,parameter:: sym_make_shared_var = hook + 50
   integer,parameter:: sym_make_const = hook + 51
   integer,parameter:: sym_pm_at = hook + 52
-  integer,parameter:: sym_pm_pling = hook + 53
+  integer,parameter:: sym_pm_dash = hook + 53
   integer,parameter:: sym_lcl_stmt = hook + 54
   integer,parameter:: sym_localise = hook + 55
   integer,parameter:: sym_check_iter = hook + 56
@@ -428,7 +430,12 @@ module pm_symbol
   integer,parameter:: sym_fix_tuple = hook + 66
   integer,parameter:: sym_unbounded = hook + 67
   integer,parameter:: sym_idx_uminus = hook + 68
-  integer,parameter:: hook1 = hook + 68
+  integer,parameter:: sym_pm_move = hook + 69
+  integer,parameter:: sym_exchange = hook + 70
+  integer,parameter:: sym_pm_uninit = hook + 71
+  integer,parameter:: sym_convert = hook + 72
+  integer,parameter:: sym_pm_move_ref = hook + 73
+  integer,parameter:: hook1 = hook + 73
   
   integer,parameter:: sym_d1= hook1 + 1
   integer,parameter:: sym_d2= hook1 + 2
@@ -453,7 +460,11 @@ module pm_symbol
   integer,parameter:: sym_dim6= hook1 + 21
   integer,parameter:: sym_dim7= hook1 + 22
   integer,parameter:: sym_range = hook1 + 23
-  integer,parameter:: hook2= hook1+23
+  integer,parameter:: sym_assign_sync = hook1 + 24
+  integer,parameter:: sym_assign_sync_op = hook1 + 25
+  integer,parameter:: sym_assign_invar = hook1 + 26
+  integer,parameter:: sym_assign_invar_op = hook1 + 27
+  integer,parameter:: hook2= hook1+27
 
   integer,parameter:: sym_generate = hook2 + 1
   integer,parameter:: sym_broadcast = hook2 +2
@@ -495,28 +506,24 @@ module pm_symbol
   integer,parameter:: sym_topology = hook4 + 6
   integer,parameter:: sym_mask = hook4 + 7
   integer,parameter:: sym_region = hook4 + 8
-  integer,parameter:: sym_subregion = hook4 + 9
-  integer,parameter:: sym_here_in_tile = hook4 + 10
-  integer,parameter:: sym_here = hook4 + 11
-  integer,parameter:: sym_outer = hook4 + 12
 
   integer,parameter:: first_state_par_name = sym_topology
-  integer,parameter:: last_state_par_name = merge(sym_subregion,sym_here,pm_is_compiling)
+  integer,parameter:: last_state_par_name = sym_region
   integer,parameter:: num_comm_args=last_state_par_name-first_state_par_name+1
   
-  integer,parameter:: sym_distr_tag = hook4 + 13
-  integer,parameter:: sym_tag = hook4 + 14
-  integer,parameter:: sym_varray= hook4 + 15
-  integer,parameter:: sym_map_array= hook4 + 16
-  integer,parameter:: sym_map_varray= hook4 + 17
-  integer,parameter:: sym_get_val_ref = hook4 + 18
-  integer,parameter:: sym_local_distr = hook4 + 19
-  integer,parameter:: sym_make_chan = hook4 + 20
-  integer,parameter:: sym_get_chan = hook4 + 21
-  integer,parameter:: sym_pm_local = hook4 + 22
-  integer,parameter:: sym_casts_to = hook4 + 23
-  integer,parameter:: sym_combine_indices = hook4 + 24
-  integer,parameter:: hook5 = hook4 + 24
+  integer,parameter:: sym_distr_tag = hook4 + 9
+  integer,parameter:: sym_tag = hook4 + 10
+  integer,parameter:: sym_varray= hook4 + 11
+  integer,parameter:: sym_map_array= hook4 + 12
+  integer,parameter:: sym_map_varray= hook4 + 13
+  integer,parameter:: sym_get_val_ref = hook4 + 14
+  integer,parameter:: sym_local_distr = hook4 + 15
+  integer,parameter:: sym_make_chan = hook4 + 16
+  integer,parameter:: sym_get_chan = hook4 + 17
+  integer,parameter:: sym_pm_local = hook4 + 18
+  integer,parameter:: sym_casts_to = hook4 + 19
+  integer,parameter:: sym_combine_indices = hook4 + 20
+  integer,parameter:: hook5 = hook4 + 20
   
   integer,parameter:: sym_pm_ref_type =   hook5 + 1
   integer,parameter:: sym_pling_local =   hook5 + 2
@@ -552,7 +559,7 @@ module pm_symbol
   integer,parameter:: sym_split_param =   hook5 + 32
   integer,parameter:: sym_dim_noinit  =   hook5 + 33
   integer,parameter:: sym_pm_node     =   hook5 + 34
-  integer,parameter:: sym_init_constx  =   hook5 + 35
+  integer,parameter:: sym_pm_typeof   =   hook5 + 35
   integer,parameter:: sym_pm_dump     =   hook5 + 36
 
   integer,parameter:: hook6 = 36 + hook5
@@ -596,9 +603,7 @@ module pm_symbol
   data sym_names(sym_dcolon)           /'::'/
   data sym_names(sym_assign)           /'='/
   data sym_names(sym_cond)             /'=>'/
-  data sym_names(sym_move)             /'<--'/
-  data sym_names(sym_move_all)         /'<=='/
-  data sym_names(sym_swap)             /'<->'/
+  data sym_names(sym_move)             /'<=='/
   
   data sym_names(sym_string)           /'<string>'/
   data sym_names(sym_number)           /'<number>'/
@@ -640,7 +645,7 @@ module pm_symbol
   data sym_names(sym_not_includes)     /'notinc'/
   data sym_names(sym_ortho)            /'ortho'/
   data sym_names(sym_is)               /'is'/
-  data sym_names(sym_is_not)           /'isnt'/
+  data sym_names(sym_is_not)           /'isnot'/
   data sym_names(sym_as)               /'as'/
   data sym_names(sym_not)              /'not'/
 
@@ -657,6 +662,7 @@ module pm_symbol
   data sym_names(sym_new)              /'new'/
   data sym_names(sym_when)             /'when'/
   data sym_names(sym_bounds)           /'bounds'/
+  data sym_names(sym_typeof)           /'typeof'/
 
   data sym_names(sym_individual)       /'indiv'/
   data sym_names(sym_connected)        /'cntd'/
@@ -832,6 +838,9 @@ module pm_symbol
   data sym_names(sym_also)             /'<also>'/
   data sym_names(sym_pval)             /'PM__pval'/
   data sym_names(sym_pval_as)          /'PM__pval_as'/
+  data sym_names(sym_invar_assign)     /'PM__invar_assign'/
+  data sym_names(sym_get_list_elem)    /'<get_list_elem>'/
+  data sym_names(sym_simple_list_elem) /'<simple_list_elem>'/
   data sym_names(sym_change_mode)      /'<change_mode>'/
   data sym_names(sym_dot_amp)          /'<dot-amp>'/
   data sym_names(sym_type_val)         /'<type-val>'/
@@ -909,8 +918,8 @@ module pm_symbol
   data sym_names(sym_make_shared_var)  /'PM__make_shrd_var'/
   data sym_names(sym_make_const)       /'PM__make_const'/
   
-  data sym_names(sym_pm_at)            /'PM__chan_stmt'/
-  data sym_names(sym_pm_pling)         /'PM__invar_stmt'/
+  data sym_names(sym_pm_at)            /'PM__at'/
+  data sym_names(sym_pm_dash)          /'PM__dash'/
   data sym_names(sym_lcl_stmt)         /'PM__shrd_stmt'/
 
   data sym_names(sym_localise)         /'PM__localise'/
@@ -928,14 +937,19 @@ module pm_symbol
   data sym_names(sym_fix_tuple)        /'PM__fix_tuple'/
   data sym_names(sym_unbounded)        /'UNBOUNDED'/
   data sym_names(sym_idx_uminus)       /'PM__idx_uminus'/
+  data sym_names(sym_pm_move)          /'PM__move'/
+  data sym_names(sym_exchange)         /'PM__exchange'/
+  data sym_names(sym_pm_uninit)        /'PM__uninit'/
+  data sym_names(sym_convert)          /'convert'/
+  data sym_names(sym_pm_move_ref)      /'PM__move_ref'/
   
-  data sym_names(sym_d1)               /'PM__d1'/
-  data sym_names(sym_d2)               /'PM__d2'/
-  data sym_names(sym_d3)               /'PM__d3'/
-  data sym_names(sym_d4)               /'PM__d4'/
-  data sym_names(sym_d5)               /'PM__d5'/
-  data sym_names(sym_d6)               /'PM__d6'/
-  data sym_names(sym_d7)               /'PM__d7'/
+  data sym_names(sym_d1)               /'D_1'/
+  data sym_names(sym_d2)               /'D_2'/
+  data sym_names(sym_d3)               /'D_3'/
+  data sym_names(sym_d4)               /'D_4'/
+  data sym_names(sym_d5)               /'D_5'/
+  data sym_names(sym_d6)               /'D_6'/
+  data sym_names(sym_d7)               /'D_7'/
 
   data sym_names(sym_copy_in)          /'PM__copy_in'/
   data sym_names(sym_copy_out)         /'PM__copy_out'/
@@ -955,6 +969,10 @@ module pm_symbol
   data sym_names(sym_dim7)             /'tuple7d'/
 
   data sym_names(sym_range)            /'range'/
+  data sym_names(sym_assign_sync)      /'PM__assign_sync'/
+  data sym_names(sym_assign_sync_op)   /'PM__assign_sync_op'/
+  data sym_names(sym_assign_invar)     /'PM__assign_invar'/
+  data sym_names(sym_assign_invar_op)  /'PM__assign_invar_op'/
   
   data sym_names(sym_generate)         /'PM__generate'/
   data sym_names(sym_broadcast)        /'PM__broadcast'/
@@ -990,15 +1008,11 @@ module pm_symbol
   data sym_names(sym_shared_to_local)  /'PM__shared_to_local'/
   data sym_names(sym_clone)            /'PM__clone'/
   data sym_names(sym_contains)         /'contains'/
-  
-  data sym_names(sym_mask)             /'PM__mask'/
-  data sym_names(sym_here)             /'PM__here'/
-  data sym_names(sym_here_in_tile)     /'PM__here_in_tile'/
-  data sym_names(sym_subregion)        /'PM__schedule'/
-  data sym_names(sym_region)           /'PM__region'/
-  data sym_names(sym_outer)            /'PM__outer'/
+
   data sym_names(sym_topology)         /'PM__topology'/
-  
+  data sym_names(sym_mask)             /'PM__mask'/
+  data sym_names(sym_region)           /'PM__region'/
+ 
   data sym_names(sym_distr_tag)        /'PM__distr_tag'/
   data sym_names(sym_tag)              /'PM__tag'/
   data sym_names(sym_varray)           /'PM__varray'/
@@ -1047,7 +1061,7 @@ module pm_symbol
   data sym_names(sym_get_chunk)        /'chunk'/
   data sym_names(sym_pm_atz)           /'PM__atz'/
   data sym_names(sym_pm_node)          /'PM__node'/
-  data sym_names(sym_init_constx)       /'PM__init_constx'/
+  data sym_names(sym_pm_typeof)        /'PM__typeof'/
 
   data sym_names(sym_infer_stack)      /'infer_stack'/
   data sym_names(sym_infer_type)       /'infer_type'/

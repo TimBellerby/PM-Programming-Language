@@ -147,13 +147,15 @@ module pm_ast
   integer,parameter:: call_is_assign_call =   2**11
   integer,parameter:: call_is_vararg =        2**12
   integer,parameter:: call_inline_when_compiling = 2**13
-  integer,parameter:: call_dup_result =       2**14
+  integer,parameter:: call_has_move_args =    2**14
   integer,parameter:: call_is_cond =          2**15
   integer,parameter:: call_is_no_touch =      2**16
   integer,parameter:: call_is_unlabelled =    2**17
   integer,parameter:: call_takes_uninit =     2**18
-  integer,parameter:: call_converts_uninit =  2**19
-  integer,parameter:: call_keep_literals =    2**20
+  integer,parameter:: call_needs_uninit =     2**19
+  integer,parameter:: call_converts_uninit =  2**20
+  integer,parameter:: call_keep_literals =    2**21
+
   
 contains
 

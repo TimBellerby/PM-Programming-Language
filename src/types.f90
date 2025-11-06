@@ -177,10 +177,11 @@ module pm_types
   integer(pm_p),public,parameter:: pm_last_sys_type=pm_elemref_type
 
   ! Categorical types
-  integer,public,parameter:: pm_a_rec_type = pm_last_sys_type + 1
-  integer,public,parameter:: pm_a_unique_type = pm_last_sys_type + 2
-  integer,public,parameter:: pm_a_poly_type = pm_last_sys_type + 3
-  integer,public,parameter:: pm_a_basic_type = pm_last_sys_type + 4
+  integer,public,parameter:: pm_a_uninit_type = pm_last_sys_type + 1
+  integer,public,parameter:: pm_a_rec_type = pm_last_sys_type + 2
+  integer,public,parameter:: pm_a_unique_type = pm_last_sys_type + 3
+  integer,public,parameter:: pm_a_poly_type = pm_last_sys_type + 4
+  integer,public,parameter:: pm_a_basic_type = pm_last_sys_type + 5
   integer,public,parameter:: pm_last_category_type = pm_a_basic_type
 
   ! Literal types
@@ -226,7 +227,7 @@ contains
     '<stack>       ','<usr>         ','<dict>        ','<set>         ',&
     'prc_info      ','string        ','<poly>        ',&
     '<rec>         ','<polyref>     ','<array>       ','<cstarray>    ',&
-    '<dref>        ','<dref-inv>    ','<elemref>     ',&
+    '<dref>        ','<dref-inv>    ','<elemref>     ','PM__uninit    ',&
     'a_rec         ','a_unique      ','a_poly        ','a_basic       '/)
     
     context%tcache=pm_dict_new(context,128_pm_ln)
@@ -549,7 +550,6 @@ contains
 !!$    write(*,*) 'Poly type is:',tno
   end function pm_new_poly_val_type
 
-  
   !==========================================
   !  Create new type-value type: <type>
   !==========================================
@@ -564,6 +564,24 @@ contains
     tno=pm_new_basic_type(context,args)
   end function pm_new_type_type
 
+  !==========================================
+  !  Create new uninitialised type
+  !==========================================
+  function pm_new_uninitialised_type(context,etyp) result(tno)
+    type(pm_context),pointer:: context
+    integer,intent(in):: etyp
+    integer:: tno
+    integer,dimension(3):: arr
+    arr(1)=pm_type_new_uninitialised
+    arr(2)=0
+    if(etyp==0) then
+       arr(3)=0
+    else
+       arr(3)=etyp
+    endif
+    tno=pm_new_basic_type(context,arr)
+  end function pm_new_uninitialised_type
+  
   
   !===============================================
   ! Create new includes: type inc type
@@ -596,6 +614,10 @@ contains
     tno=pm_new_type(context,args)
   end function pm_new_name_type
 
+  !==============================================
+  ! Create new compile time name value type from
+  ! literal string value
+  !==============================================
   function pm_name_type_from_literal_string(context,tno,modname) result(tno2)
     type(pm_context),pointer:: context
     integer,intent(in):: tno,modname
@@ -1719,13 +1741,19 @@ contains
           ok=.false.
        elseif(pm_tv_name(t)/=pm_tv_name(u)) then
           ok=.false.
-       elseif(iand(pm_tv_flags(t),pm_type_is_when)/=0.and.iand(pm_tv_flags(u),pm_type_is_when)==0) then
-          !(  when) does not include (  )
-          ok=.false.
        elseif(iand(pm_tv_flags(t),pm_type_is_yield+pm_type_is_list)/=&
             iand(pm_tv_flags(u),pm_type_is_yield+pm_type_is_list)) then
           ok=.false.
        else
+          if(iand(pm_tv_flags(t),pm_type_is_when)/=0.and.iand(pm_tv_flags(u),pm_type_is_when)==0) then
+             ! ( T when) does not include ( U ) if U includes T
+             ! - implements that when is more specific iff T==U
+             if(pm_test_type_includes(context,q,p,&
+                  mode,params,base,user,ubase)) then
+                ok=.false.
+                return
+             endif
+          endif
           nt=pm_tv_numargs(t)
           nu=pm_tv_numargs(u)
           !write(*,*) 'nt=',nt,'nu=',nu
@@ -1963,6 +1991,8 @@ contains
        ok=.false.
     case(pm_type_is_category)
        select case(p)
+       case(pm_a_uninit_type)
+          ok=uk==pm_type_is_uninitialised
        case(pm_a_rec_type)
           ok=uk==pm_type_is_rec
        case(pm_a_unique_type)
@@ -2455,7 +2485,7 @@ contains
     integer:: ctyp
     integer:: tk
  
-    ctyp=pm_type_for_var(context,pm_type_arg(context,argtyp,1),-1)
+    ctyp=pm_type_for_var(context,pm_type_arg(context,argtyp,1))
     tk=pm_type_kind(context,partyp)
     if(tk==pm_type_is_fix) then
        if(pm_type_includes(context,pm_type_arg(context,partyp,1),ctyp,&
@@ -2559,7 +2589,7 @@ contains
     type(pm_ptr):: tv,tv2
     integer:: i,tno
     integer,dimension(3):: arr
-    write(*,*) 'CVPROC>',trim(pm_type_as_string(context,ptyp)),' to ',trim(pm_type_as_string(context,argtyp))
+    !write(*,*) 'CVPROC>',trim(pm_type_as_string(context,ptyp)),' to ',trim(pm_type_as_string(context,argtyp))
     tv=pm_type_vect(context,ptyp)
     tv2=pm_type_vect(context,argtyp)
     if(pm_tv_kind(tv)/=pm_type_is_proc.or.&
@@ -2632,10 +2662,10 @@ contains
   !      offset<0    Returns dref rather than sub-element
   ! If offset/=0 then etype returns the type of the element
   !=================================================================
-  recursive function pm_type_find_elem(context,value_type,name_type,change,etype) result(offset)
+  recursive function pm_type_find_elem(context,value_type,name_type,change,islist,etype) result(offset)
     type(pm_context),pointer:: context
     integer,intent(in):: value_type,name_type
-    logical,intent(in):: change
+    logical,intent(in):: change,islist
     integer,intent(out):: etype
     integer:: offset,ptype,mode,nametype,tno
     type(pm_ptr):: tv,nameval,names
@@ -2649,7 +2679,7 @@ contains
        nameval=pm_type_val(context,nametype)
        offset=nameval%data%ln(nameval%offset)
        if(tk==pm_type_is_rec) then
-          if(offset<=0.or.offset>pm_type_numargs(context,tno)) then
+          if(islist.or.offset<=0.or.offset>pm_type_numargs(context,tno)) then
              offset=0
           elseif(change) then
              names=pm_name_val(context,pm_tv_name(tv))
@@ -2657,7 +2687,7 @@ contains
           endif
           if(offset/=0) etype=pm_type_arg(context,tno,offset)
        elseif(tk==pm_type_is_tuple.or.tk==pm_type_is_dref) then
-          if(offset<=0.or.offset>pm_type_numargs(context,tno)) then
+          if((.not.islist).or.offset<=0.or.offset>pm_type_numargs(context,tno)) then
              offset=0
           else
              etype=pm_type_arg(context,tno,offset)
@@ -2680,13 +2710,13 @@ contains
     select case(tk)
     case(pm_type_is_all)
        do i=1,pm_tv_numargs(tv)
-          offset=pm_type_find_elem(context,pm_tv_arg(tv,i),nametype,change,etype)
+          offset=pm_type_find_elem(context,pm_tv_arg(tv,i),nametype,change,islist,etype)
           if(offset/=0) return
        enddo
        offset=0
        return
     case(pm_type_is_literal_value)
-       offset=pm_type_find_elem(context,pm_tv_arg(tv,1),nametype,change,etype)
+       offset=pm_type_find_elem(context,pm_tv_arg(tv,1),nametype,change,islist,etype)
        tv=pm_type_vect(context,etype)
        if(pm_tv_kind(tv)==pm_type_is_fix_value) then
           etype=pm_new_literal_value_type(context,&
@@ -2879,23 +2909,21 @@ contains
 
   !================================================================
   ! Create a new type with with all fix values converted
-  ! to base type and mode changed to new_mode
+  ! to base type  - also strips off mode
   !================================================================
-  recursive function pm_type_for_var(context,tno,new_mode) result(typ)
+  recursive function pm_type_for_var(context,tno) result(typ)
     type(pm_context),pointer:: context
-    integer,intent(in):: tno,new_mode
+    integer,intent(in):: tno
     integer:: typ
     type(pm_ptr):: tv
     integer:: tk
     typ=tno
     tv=pm_type_vect(context,tno)
-    if(iand(pm_tv_flags(tv),pm_type_has_fix)==0) return
     tk=pm_tv_kind(tv)
+    if(tk/=pm_type_is_par_kind.and.iand(pm_tv_flags(tv),pm_type_has_fix)==0) return
     select case(tk)
     case(pm_type_is_par_kind)
-       if(new_mode>0) then
-          typ=pm_type_add_mode(context,pm_type_for_var(context,pm_tv_arg(tv,1),new_mode),new_mode)
-       endif
+       typ=pm_type_for_var(context,pm_tv_arg(tv,1))
     case(pm_type_is_user)
        typ=pm_user_type_body(context,tno)
     case(pm_type_is_rec)
@@ -2911,7 +2939,7 @@ contains
       a(1)=iand(pm_tv_flags(tv),not(pm_type_has_fix))
       a(2)=pm_tv_name(tv)
       do i=1,n
-         a(i+2)=pm_type_for_var(context,pm_tv_arg(tv,i),new_mode)
+         a(i+2)=pm_type_for_var(context,pm_tv_arg(tv,i))
       enddo
       typ=pm_new_type(context,a)
     end subroutine remake
@@ -2927,7 +2955,7 @@ contains
     logical,intent(out):: ok,added
     integer:: typ
     type(pm_ptr):: tv,tv2
-    integer:: tk,tk2
+    integer:: tk,tk2,typ1,typ2
 
 !!$    write(*,*) 'combine types: ',trim(pm_type_as_string(context,tno)),' with ',&
 !!$         trim(pm_type_as_string(context,tno2))
@@ -2943,6 +2971,17 @@ contains
     if(pm_type_includes(context,tno,tno2,pm_type_incl_val)) return
     tv=pm_type_vect(context,tno)
     tv2=pm_type_vect(context,tno2)
+
+    if(pm_tv_kind(tv)==pm_type_is_uninitialised.or.&
+         pm_tv_kind(tv2)==pm_type_is_uninitialised) then
+       typ1=tno
+       typ2=tno2
+       if(pm_tv_kind(tv)==pm_type_is_uninitialised) typ1=pm_tv_arg(tv,1)
+       if(pm_tv_kind(tv2)==pm_type_is_uninitialised) typ2=pm_tv_arg(tv2,1)
+       typ=pm_type_combine(context,tno,tno2,ok,added)
+       if(ok) typ=pm_new_uninitialised_type(context,typ)
+       return
+    endif
 
     if(iand(pm_tv_flags(tv),pm_type_has_poly)==0.or.&
          iand(pm_tv_flags(tv2),pm_type_has_poly)==0) then
@@ -3892,7 +3931,7 @@ contains
     ! Print out type in argument #i
     ! Add brackets if the kind of this type
     ! is equal to one of tk1..tk4
-    subroutine bracket(i,tk1,tk2,tk3,tk4)
+    recursive subroutine bracket(i,tk1,tk2,tk3,tk4)
       integer,intent(in):: i,tk1,tk2,tk3,tk4
       integer:: tno,tk
       if(i==0) then
@@ -3910,7 +3949,7 @@ contains
       endif
     end subroutine bracket
 
-    function show_equiv(name,templ,typ) result(ok)
+    recursive function show_equiv(name,templ,typ) result(ok)
       integer,intent(in):: name,templ,typ
       logical:: ok
       integer,dimension(pm_max_type_args):: params
@@ -3987,9 +4026,8 @@ contains
 
   end subroutine pm_type_to_string
 
-  
 
-  subroutine par_context_to_string(context,iscond,isuncond,ttyp,dtyp,string,n)
+  recursive subroutine par_context_to_string(context,iscond,isuncond,ttyp,dtyp,string,n)
     type(pm_context),pointer:: context
     logical,intent(in):: iscond,isuncond
     integer,intent(in):: ttyp,dtyp
@@ -4006,6 +4044,7 @@ contains
        string(n:n+1)='=>'
        n=n+2
     endif
+    if(n+7>len(string)) return
     if(iscond) then
        string(n:n+3)='cond'
        n=n+4
@@ -4013,6 +4052,7 @@ contains
        string(n:n+5)='uncond'
        n=n+6
     endif
+    if(n+10>len(string)) return
     if(dtyp/=0) then
        if(string(n-1:n-1)=='d') then
           string(n:n)=':'
@@ -4022,6 +4062,7 @@ contains
        if(tno/=0) then
           call pm_type_to_string(context,tno,string,n)
        endif
+       if(n+10>len(string)) return
        if(pm_type_numargs(context,dtyp)>1) then
           tno=pm_type_arg(context,dtyp,2)
           if(tno/=0) then

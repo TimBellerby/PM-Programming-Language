@@ -48,8 +48,11 @@ module pm_options
      logical:: show_all_ref
      logical:: print_immediate
      logical:: show_hidden
+     logical:: run_bprop
      logical:: lib_path_set
      character(len=pm_max_filename_size):: lib_path
+     logical:: checks_to_run_set
+     character(len=1024):: checks_to_run
      
      logical:: out_sysmod
      logical:: out_typelist
@@ -102,6 +105,7 @@ contains
     pm_opts%print_immediate=.false.
     pm_opts%show_hidden=.false.
     pm_opts%lib_path_set=.false.
+    pm_opts%checks_to_run_set=.false.
     
     pm_opts%out_sysmod=.false.
     pm_opts%out_typelist=.false.
@@ -109,6 +113,7 @@ contains
     pm_opts%hide_sysmod=.true.
     pm_opts%out_debug_files=.false.
     pm_opts%old_files=.false.
+    pm_opts%run_bprop=.true.
 
     pm_opts%schedule=.false.
     
@@ -152,23 +157,24 @@ contains
     if(pm_main_process) then
        write(*,*)
        if(pm_is_compiling) then
-          write(*,*) 'Usage: pmc [-f<opt>] [-D<opt>] [ --help | root_module_name_or_filename ]'
+          write(*,*) 'Usage: pmc [ options ] root_module_name_or_filename | --help'
        else
-          write(*,*) 'Usage: pm [-f<opt>] [-D<opt>] [ --help | -i | root_module_name_or_filename ]'
-          write(*,*) '  -i            Interactive mode'
+          write(*,*) 'Usage: pm [ options ] [ -i | root_module_name_or_filename ] | --help'
        endif
+       write(*,*)
+       write(*,*) '  OPTIONS'
+       write(*,*) '  --help        Output longer help message'
+       if(.not.pm_is_compiling)  write(*,*) '  -i            Interactive mode'
        write(*,*) '  -L<path>      Set path to locate PM libraries'
        write(*,*) '  -f<opt>       Language options'
        write(*,*) '  -H<opt>       Terminal output options'
        if(pm_is_compiling) then
           write(*,*) '  -ftn<opt>     Fortran language output options'
+          write(*,*) '  -opt<opt>     Optimisation options'
        endif
-       write(*,*) '  -D<opt>       Options for debugging the compiler itself'
-       write(*,*) '  --help        Longer help message'
+       write(*,*) '  -D<opt>       Options for debugging the compiler itself (use --helpD to list)'
     endif
   end subroutine print_usage
-
-
 
   
   subroutine usage
@@ -183,7 +189,9 @@ contains
        write(*,*) '  Here root_module_name_or_filename is either a module name such as'
        write(*,*) '  module1 or mymodules.module2 or a filename such as mymodules/module2.pmm'
        write(*,*) '  Only the main (program) module must be named - other modules are'
-       write(*,*) '  included automatically.'
+       write(*,*) '  included automatically, from either the current directory or the'
+       write(*,*) '  designated lib directory (set by the -L command line option, environment'
+       write(*,*) '  variable PM_LANG_LIBS or equal to ./lib by default)'
        write(*,*)
        write(*,*) '  CONFIGURATION OPTIONS'
        write(*,*) '  -L<library path>  Look for library files in <library path> rather than lib'
@@ -192,8 +200,16 @@ contains
        write(*,*) '  -fno-inline       Do not inline any procedures.'
        write(*,*) '  -fno-check        Do not run "check" or "test" statements.'
        write(*,*) '  -fcheck           Run "check" and "test" statements.'
-       write(*,*) '  -fno-alias-check  Do not check for argument aliasing'
-       write(*,*) '  -falias_check     Check for argument aliasing'
+       write(*,*) '  -fcheck=<check_list>'
+       write(*,*) '                    Give list of checks and tests to run or exclude'
+       if(pm_is_compiling) then
+          write(*,*) '                    Equivalent to adding the pragma $$check(check_list)'
+       else
+          write(*,*) '                    Equivalent to adding the pragma $$check(sys,check_list)'
+       endif
+       write(*,*) '                    to the start of each module'
+       write(*,*) '  -fno-alias-check  Do not include runtime checks for argument aliasing'
+       write(*,*) '  -falias_check     Include runtime checks for argument aliasing' 
        if(.not.pm_is_compiling) then
           write(*,*) '  -fprint-immediate'
           write(*,*) '                    Do not buffer print output by node'
@@ -255,18 +271,21 @@ contains
           write(*,*) '  -ftn-annotate'
           write(*,*) '                 Include various annotation comments (mainly for debugging the compiler)'
        endif
-       write(*,*)
-       write(*,*) '  OPTIONS FOR DEBUGGING THE COMPILER ITSELF'
-       write(*,*) '  -Dshow-details    Show extra details of types'
-       write(*,*) '  -Dshow-hidden     Show hidden procedure parameters'
-       write(*,*) '  -D                Activate all debugging options listed below.'
-       write(*,*) '  -Dfiles           Output files from each compiler stage.'
-       write(*,*) '  -Dtimings         Output time taken by each compilation stage.'
-       write(*,*) '  -Dsys-mod         Output a listing of the system module.'
-       write(*,*) '  -Dtype-list       Output a list of all types used by the system.'
     endif
     call pm_stop('  ')
   end subroutine help
+
+  subroutine help_d
+    write(*,*) '  OPTIONS FOR DEBUGGING THE COMPILER ITSELF'
+    write(*,*) '  -Dshow-details    Show extra details of types'
+    write(*,*) '  -Dshow-hidden     Show hidden procedure parameters'
+    write(*,*) '  -Dno-bprop        Do not run BPROP pass'
+    write(*,*) '  -D                Activate all debugging options listed below.'
+    write(*,*) '  -Dfiles           Output files from each compiler stage.'
+    write(*,*) '  -Dtimings         Output time taken by each compilation stage.'
+    write(*,*) '  -Dtype-list       Output a list of all types used by the system.'
+    call pm_stop(' ')
+  end subroutine help_d
   
   subroutine pm_get_command_line(context,mname)
     type(pm_context),pointer:: context
@@ -275,6 +294,14 @@ contains
     integer:: i,n
     call init_opts(context)
     n=pm_get_cl_count()
+    if(n==0) then
+       if(pm_is_compiling) then
+          call usage
+       else
+          pm_opts%is_repl=.true.
+          return
+       endif
+    endif
     i=1
     do while(i<n)
        call pm_get_cl_arg(i,arg)
@@ -305,6 +332,8 @@ contains
              pm_opts%show_details=.true.
           elseif(arg=='-Dshow-hidden') then
              pm_opts%show_hidden=.true.
+          elseif(arg=='-Dno-bprop') then
+             pm_opts%run_bprop=.false.
           elseif(arg=='-D') then
              pm_opts%out_debug_files=.true.
              pm_opts%out_sysmod=.true.
@@ -335,6 +364,9 @@ contains
              pm_opts%check_stmts=.false.
           elseif(arg=='-check') then
              pm_opts%check_stmts=.true.
+          elseif(arg(1:8)=='-fcheck=') then
+             pm_opts%checks_to_run=arg(9:)
+             pm_opts%checks_to_run_set=.true.
           elseif(arg=='-fshow-elems') then
              pm_opts%show_elems=.true.
           elseif(arg=='-fshow-members') then
@@ -437,6 +469,8 @@ contains
           endif
        elseif(arg=='--help') then
           call help
+       elseif(arg=='--helpD') then
+          call help_d
        else
           if(pm_main_process) then
              write(*,*) 'Do not recognise option: ',trim(arg)
@@ -448,7 +482,9 @@ contains
     call pm_get_cl_arg(i,mname)
     if(mname=='--help') then
        call help
-    elseif(mname=='-i') then
+    elseif(mname=='--helpD') then
+       call help_d
+    elseif(mname=='-i'.and..not.pm_is_compiling) then
        pm_opts%is_repl=.true.
     elseif(mname(1:1)=='-') then
        call usage()

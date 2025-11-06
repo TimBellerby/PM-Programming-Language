@@ -623,13 +623,18 @@ contains
              off2=w%data%ptr(w%offset+pm_array_offset)
              len2=w%data%ptr(w%offset+pm_array_length)
              ix=idx%data%ln(idx%offset+i)+offset%data%ln(offset%offset+i)
-             call pm_ptr_assign(context,vec,i,&
-                  copy_vector(context,&
-                  vec2%data%ptr(vec2%offset+ix),&
-                  pm_null_obj,&
-                  off2%data%ln(off2%offset+ix),&
-                  len2%data%ln(len2%offset+ix)&
-               ))
+             if(off2%data%ln(off2%offset+ix)/=0.or.&
+                  pm_fast_esize(vec2%data%ptr(vec2%offset+ix))>len2%data%ln(len2%offset+ix)) then
+                call pm_ptr_assign(context,vec,i,&
+                     copy_vector(context,&
+                     vec2%data%ptr(vec2%offset+ix),&
+                     pm_null_obj,&
+                     off2%data%ln(off2%offset+ix),&
+                     len2%data%ln(len2%offset+ix)&
+                     ))
+             else
+                 call pm_ptr_assign(context,vec,i,vec2%data%ptr(vec2%offset+ix))
+             endif
              len%data%ln(len%offset+i)=len2%data%ln(len2%offset+ix)
              off%data%ln(off%offset+i)=0_pm_ln
           endif
@@ -1790,14 +1795,15 @@ contains
   ! Make a copy of a vector
   ! size==-1 means use source size
   !=============================================================================
-  recursive function copy_vector(context,v,ve,start,size) result(ptr)
+  recursive function copy_vector(context,v,ve,start,size,moveit) result(ptr)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ve
     integer(pm_ln),intent(in):: start,size
+    logical,intent(in),optional:: moveit
     type(pm_ptr):: ptr
     integer:: typ
     integer(pm_p):: vk
-    integer(pm_ln):: i,esize
+    integer(pm_ln):: i,esize,oldoffset,offset
     type(pm_ptr):: off,len,dom,vec,p,w,oldvec,oldoff,oldlen
     type(pm_root),pointer:: root
     type(pm_reg),pointer:: reg
@@ -1845,12 +1851,15 @@ contains
           oldvec=v%data%ptr(v%offset+pm_array_vect)
           oldoff=v%data%ptr(v%offset+pm_array_offset)
           do i=0,esize
-             !if(len%data%ln(len%offset+i)>0) then
+             oldoffset=oldoff%data%ln(oldoff%offset+i+start)
+             if(present(moveit).and.oldoffset==0) then
+                call pm_ptr_assign(context,vec,i,oldvec%data%ptr(oldvec%offset+i+start))
+             else
                 call pm_ptr_assign(context,vec,i,copy_vector(context,&
                      oldvec%data%ptr(oldvec%offset+i+start),pm_null_obj,&
-                     oldoff%data%ln(oldoff%offset+i+start),&
+                     oldoffset,&
                      max(1,len%data%ln(len%offset+i))))
-             !endif
+             endif
           enddo
           ptr=make_array(context,pm_array_type,&
                int(v%data%ptr(v%offset+pm_array_typeof)%offset),&
@@ -1934,13 +1943,14 @@ contains
   !=============================================================================
   ! Array assignment of lhs(ix) <- rhs(iy)
   !=============================================================================
-  subroutine array_assign(context,lhs,ix,rhs,iy,errno)
+  subroutine array_assign(context,lhs,ix,rhs,iy,errno,moveit)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: lhs,rhs
     integer(pm_ln),intent(in):: ix,iy
     integer,intent(inout):: errno
+    logical,intent(in),optional:: moveit
     type(pm_ptr):: vec1,len1,off1,vec2,len2,off2,v
-    integer(pm_ln):: size1,size2
+    integer(pm_ln):: size1,size2,offset1,offset2
     vec1=lhs%data%ptr(lhs%offset+pm_array_vect)
     len1=lhs%data%ptr(lhs%offset+pm_array_length)
     off1=lhs%data%ptr(lhs%offset+pm_array_offset)
@@ -1949,13 +1959,17 @@ contains
     off2=rhs%data%ptr(rhs%offset+pm_array_offset)
     size1=len1%data%ln(len1%offset+ix)
     size2=len2%data%ln(len2%offset+iy)
-    if(size1==size2) then
+    offset1=off1%data%ln(off1%offset+ix)
+    offset2=off2%data%ln(off2%offset+iy)
+    if(present(moveit).and.offset1==0.and.offset2==0) then
+       call pm_ptr_assign(context,vec1,ix,vec1%data%ptr(vec1%offset+ix))
+    elseif(size1==size2) then
        if(size1==0) return
        call vector_copy_range(context,&
             vec1%data%ptr(vec1%offset+ix),&
-            off1%data%ln(off1%offset+ix),&
+            offset1,&
             vec2%data%ptr(vec2%offset+iy),&
-            off2%data%ln(off2%offset+iy),&
+            offset2,&
             size1,errno)
     else
        if(pm_fast_typeof(lhs)==pm_const_array_type) then
@@ -1972,8 +1986,8 @@ contains
                copy_vector(context,&
                vec2%data%ptr(vec2%offset+iy),&
                pm_null_obj,&
-               off2%data%ln(off2%offset+iy),&
-               len2%data%ln(len2%offset+iy)))
+               offset2,&
+               size2))
           len1%data%ln(len1%offset+ix)=size2
        endif
     endif
@@ -2132,11 +2146,12 @@ contains
   !=============================================================================
   ! Assign lhs <- rhs, masked by ve
   !=============================================================================
-  recursive subroutine vector_assign(context,lhs,rhs,ve,errno,esize)
+  recursive subroutine vector_assign(context,lhs,rhs,ve,errno,esize,moveit)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: lhs,rhs,ve
     integer(pm_ln),intent(in):: esize
     integer,intent(inout):: errno
+    logical,intent(in),optional:: moveit
     integer(pm_p):: i
     integer(pm_i16):: tno,tno2
     integer(pm_ln):: j,k
@@ -2163,20 +2178,20 @@ contains
        endif
        if(pm_fast_vkind(ve)==pm_null) then
           do j=0,esize
-             call array_assign(context,lhs,j,rhs,j,errno)
+             call array_assign(context,lhs,j,rhs,j,errno,moveit)
              if(errno/=0) return
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do j=0,esize
              if(ve%data%l(ve%offset+j)) then
-                call array_assign(context,lhs,j,rhs,j,errno)
+                call array_assign(context,lhs,j,rhs,j,errno,moveit)
                 if(errno/=0) return
              endif
           enddo
        else
           do k=0,esize
              j=ve%data%ln(ve%offset+k)
-             call array_assign(context,lhs,j,rhs,j,errno)
+             call array_assign(context,lhs,j,rhs,j,errno,moveit)
              if(errno/=0) return
           enddo
        endif

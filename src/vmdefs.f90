@@ -251,7 +251,10 @@ module pm_vmdefs
   integer,parameter:: op_fill = first_assign_op + 8
   integer,parameter:: op_number = first_assign_op + 9
   integer,parameter:: op_assign_ptr = first_assign_op + 10
-  integer,parameter:: last_assign_op = first_assign_op+19
+  integer,parameter:: op_assign_move = first_assign_op + 11
+  integer,parameter:: op_move_if = first_assign_op + 12
+  integer,parameter:: op_assign_move_if = first_assign_op + 13
+  integer,parameter:: last_assign_op = first_assign_op+13
 
   integer,parameter:: op_eq = last_assign_op +1
   integer,parameter:: op_ne = last_assign_op +2
@@ -741,16 +744,19 @@ module pm_vmdefs
   integer,parameter:: op_modulo_fold = -24
   integer,parameter:: op_and_fold = -25
   integer,parameter:: op_or_fold = -26
-  integer,parameter:: op_except_fold = -27
-  integer,parameter:: op_concat_fold = -28
-  integer,parameter:: op_num_elems_fold = -29
-  integer,parameter:: op_type_include_fold = -30
-  integer,parameter:: op_same_type_fold = -31
-  integer,parameter:: op_same_rec_fold = -32
-  integer,parameter:: first_fold=-32
-  integer,parameter:: op_clone_var = -33
-  integer,parameter:: op_error_type = -34
-  integer,parameter:: op_noop = -35
+  integer,parameter:: op_not_fold = -27
+  integer,parameter:: op_except_fold = -28
+  integer,parameter:: op_concat_fold = -29
+  integer,parameter:: op_num_elems_fold = -30
+  integer,parameter:: op_type_include_fold = -31
+  integer,parameter:: op_same_type_fold = -32
+  integer,parameter:: op_same_rec_fold = -33
+  integer,parameter:: op_directly_assignable_fold=-34
+  integer,parameter:: first_fold=-35
+  integer,parameter:: op_clone_var = -36
+  integer,parameter:: op_init_const = -37
+  integer,parameter:: op_error_type = -38
+  integer,parameter:: op_noop = -39
   integer,parameter:: min_op=op_noop
  
   integer,dimension(0:num_op):: op_flags
@@ -979,6 +985,9 @@ module pm_vmdefs
   data op_flags(op_fill)             /0/
   data op_flags(op_number)           /0/
   data op_flags(op_assign_ptr)       /0/
+  data op_flags(op_move_if)          /0/
+  data op_flags(op_assign_move)      /0/
+  data op_flags(op_assign_move_if)   /0/
 
   data op_flags(op_eq)               /op_is_arith/
   data op_flags(op_ne)               /op_is_arith/
@@ -1451,6 +1460,7 @@ module pm_vmdefs
   integer,parameter:: v_is_unit_elem=14
   integer,parameter:: v_is_vect_wrapped=15
   integer,parameter:: v_is_pointer=16
+ 
 
   integer,parameter:: cvar_flag_mask=31
   integer,parameter:: cvar_flag_mult=cvar_flag_mask+1
@@ -1499,6 +1509,7 @@ contains
     integer:: i
     if(allocated(op_names)) return
     allocate(op_names(min_op:num_op+1))
+    !write(*,*) 'NUM NAMES=',num_op
     op_names='??'
     op_names(op_call)='call'
     op_names(op_comm_call)='comm_call'
@@ -1697,6 +1708,9 @@ contains
     op_names(op_fill)='fill'
     op_names(op_number)='number'
     op_names(op_assign_ptr)='assign_ptr'
+    op_names(op_move_if)='move_if'
+    op_names(op_assign_move)='assign_move'
+    op_names(op_assign_move_if)='assign_move_if'
 
     op_names(op_eq)='eq'
     op_names(op_ne)='ne'
@@ -2161,13 +2175,16 @@ contains
     op_names(op_modulo_fold)='modulo_fold'
     op_names(op_and_fold)='and_fold'
     op_names(op_or_fold)='or_fold'
+    op_names(op_not_fold)='not_fold'
     op_names(op_except_fold)='except_fold'
     op_names(op_concat_fold)='concat_fold'
     op_names(op_num_elems_fold)='num_elems_fold'
     op_names(op_type_include_fold)='type_include_fold'
     op_names(op_same_type_fold)='same_type_fold'
     op_names(op_same_rec_fold)='same_rec_fold'
+    op_names(op_directly_assignable_fold)='dir_assign_fold'
     op_names(op_clone_var)='clone_var'
+    op_names(op_init_const)='init_const'
     op_names(op_error_type)='error_type'
     op_names(op_noop)='noop'
      
