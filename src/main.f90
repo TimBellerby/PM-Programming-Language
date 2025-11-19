@@ -269,7 +269,7 @@ contains
 
   !************ Intermediate code generation ***************
   subroutine run_coder(coder,root)
-    type(code_state):: coder
+    type(code_state),target:: coder
     type(pm_ptr),intent(in):: root
     type(pm_ptr):: prog
     
@@ -300,7 +300,7 @@ contains
   
   ! *********** Type Inference *********************
   subroutine run_type_inference(coder)
-    type(code_state):: coder
+    type(code_state),target:: coder
     integer:: i
     logical:: save_variants,save_elems,save_members
     if(pm_debug_level>1) write(*,*) 'TYPE INFERENCE>>'

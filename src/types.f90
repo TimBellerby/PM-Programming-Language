@@ -1185,20 +1185,22 @@ contains
 
   
   !=============================================================================================
-  ! Rules for combining modes in a standard procedure call or stucture creation
+  ! Rules for combining modes in a standard procedure call or record creation
   !
   ! Error codes:
   !   combined_mode=-1,-2...
   !        Shared distributed value not allowed for position -combined_mode
   !  shared_ok -- permissible to have an argument with 'shared' mode
   !============================================================================================
-  function pm_type_combine_modes(context,array,is_cond,shared_ok) result(combined_mode)
+  function pm_type_combine_modes(context,array,is_cond,shared_ok,mode0) result(combined_mode)
     type(pm_context),pointer:: context
     integer,intent(in),dimension(:):: array
     logical,intent(in):: is_cond,shared_ok
+    integer,intent(in),optional:: mode0
     integer:: combined_mode
     integer:: i,mode,cmode,tno
     cmode=sym_invar
+    if(present(mode0)) cmode=mode0
     do i=1,size(array)
        tno=pm_type_strip_mode(context,array(i),mode)
        if(mode==sym_shared.and..not.shared_ok) then
@@ -2472,7 +2474,7 @@ contains
        ctyp=pm_poly_type_convert(context,ptyp,atyp,converted_to_poly)
     endif
     ctyp=pm_type_add_mode(context,ctyp,amode)
-    !write(*,*) 'To:',trim(pm_type_as_string(context,ctyp))
+!!$    write(*,*) 'To:',trim(pm_type_as_string(context,ctyp))
   end function pm_type_convert
 
 
@@ -3761,10 +3763,10 @@ contains
                 exit
              endif
           enddo
-       elseif(istart>pm_type_numargs(context,pm_tv_arg(tv,1))) then
-          if(add_char('!!!'//trim(pm_int_as_string(istart))//'>'//&
-               trim(pm_int_as_string(pm_type_numargs(context,pm_tv_arg(tv,1)))))) return
-          istart=1
+!!$       elseif(istart>pm_type_numargs(context,pm_tv_arg(tv,1))) then
+!!$          if(add_char('!!!'//trim(pm_int_as_string(istart))//'>'//&
+!!$               trim(pm_int_as_string(pm_type_numargs(context,pm_tv_arg(tv,1)))))) return
+!!$          istart=1
        endif
        tno2=pm_tv_arg(tv,1)
        if(istart>2) then
@@ -4053,6 +4055,7 @@ contains
        n=n+6
     endif
     if(n+10>len(string)) return
+    !call pm_type_to_string(context,dtyp,string,n)
     if(dtyp/=0) then
        if(string(n-1:n-1)=='d') then
           string(n:n)=':'

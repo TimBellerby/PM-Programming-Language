@@ -214,7 +214,7 @@ module pm_cnodes
   integer(access_kind),parameter:: access_may_detag=1024
   integer(access_kind),parameter:: access_needs_movability=2048
   integer(access_kind),parameter:: access_everything=&
-       access_is_var+access_used_ever+access_used_now
+       access_is_var+access_used_ever+access_used_now+access_used_by_at
   
 contains
 
@@ -598,6 +598,8 @@ contains
           write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//&
                trim(pm_name_as_string(context,&
                cnode_get_name(cnode_arg(cnode,1),pr_name)))//' {'
+          if(cnode_flags_set(cnode,cnode_args+2,proccall_is_comm)) &
+               write(iunit,'(a)') '  [comm]'
           if(cnode_flags_set(cnode,cnode_args+2,proc_is_recursive)) &
                write(iunit,'(a)') '  [recursive]'
           if(cnode_flags_set(cnode,cnode_args+2,proc_unfinished)) &
@@ -772,6 +774,9 @@ contains
        i=len_trim(str)+1
        call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,&
             cnode_get(cnode,call_var),depth,str,i)
+       if(cnode_flags_set(cnode,call_flags,proccall_is_comm)) then
+          call append_to_line(iunit,str,i,'%',.false.,depth)
+       endif
        if(pm_fast_isnull(rvec)) then
           call append_to_line(iunit,str,i,': ',.false.,depth)
        else
@@ -1124,10 +1129,19 @@ contains
   subroutine print_bprop_list(iunit,list)
     integer,intent(in):: iunit
     type(pm_ptr),intent(in):: list
-    integer:: i
+    integer:: i,j
     if(pm_fast_isnull(list)) return
     do i=1,list%data%i16(list%offset)
        call print_bprop_item(iunit,list%data%i16(list%offset+i))
+    enddo
+    i=list%data%i16(list%offset)+1
+    do while(list%data%i16(list%offset+i)>0)
+       write(iunit,'(a,i4,a)') 'List #',list%data%i16(list%offset+i),'{'
+       do j=1,list%data%i16(list%offset+i+1)
+          call print_bprop_item(iunit,list%data%i16(list%offset+i+j+1))
+       enddo
+       write(iunit,'(a)') '}'
+       i=i+2+list%data%i16(list%offset+i+1)
     enddo
   contains
     include 'fisnull.inc'

@@ -1309,7 +1309,6 @@ proc overlap(x:block_seq,y:range(any_int)) {
 proc overlap(x:range(any_int),y:block_seq)=xx,yy where yy,xx=overlap(y,x)
 proc empty(x:block_seq)=block_seq(1,0,1,1,0)
 
-/*
 //  Mapped sequence
 type map_seq(t:array(int)) is rec {array:t}
 proc map_seq(x:any_seq){
@@ -1319,21 +1318,19 @@ proc map_seq(x:any_seq){
     array=a
   }
 }
-proc map_seq(x:array(int,mshape1d))=rec map_seq {
+proc map_seq(x:array(int,1))=rec map_seq {
 array=x} check "Array for ""map_seq"" must be strictly increasing or stricly decreasing"=>_mono(x)
 proc _mono(x) {
-    /*
-  xs=#x
+  let xs=#x
   var ok=true
   if x[low(xs.1)]<x[high(xs.1)] {
-    forall i in low(xs.1)+1..high(xs.1){
-      if x[i]<x[i-1]:sync ok=false
+    for i in low(xs.1)+1..high(xs.1){
+      if x[i]<x[i-1]:invar ok=false
     }
   } else{
-    forall i in low(xs.1)+1..high(xs.1):if x[i]>x[i-1]:sync ok=false
+    for i in low(xs.1)+1..high(xs.1):if x[i]>x[i-1]:sync ok=false
   }
   return ok
-*/
 }
 proc map_seq(x:map_seq)=x
 proc #(x:map_seq)=#(x.array)
@@ -1364,7 +1361,7 @@ proc intersect(x:map_seq,y:map_seq) {
   var a=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
   var n=0
   _intersect_aseq(&n,x.array,size(x.array),y.array,size(y.array),&a)
-  v=rec map_seq {
+  let v=rec map_seq {
     array=a[0..n-1]
   }
   return v
@@ -1373,7 +1370,7 @@ proc overlap(x:map_seq,y:map_seq) {
   var a=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
   var n=0
   _overlap_aseq(&n,x.array,size(x.array),y.array,size(y.array),&a)
-  v=rec map_seq {
+  let v=rec map_seq {
     array=a[0..n-1]
   }
   return v
@@ -1383,11 +1380,11 @@ proc overlap(x:map_seq,y:map_seq) {
   var b=array(0,[0..max(0,min(size(x.array),size(y.array))-1)])
   var n=0
   _overlap_aseq2(&n,x.array,size(x.array),y.array,size(y.array),&a,&b)
-  ns=[0..n-1]
-  v=rec map_seq {
+  let ns=[0..n-1]
+  let v=rec map_seq {
     array=a[ns]
   }
-  w=rec map_seq {
+  let w=rec map_seq {
     array=b[ns]
   }
   return v,w
@@ -1397,7 +1394,7 @@ proc expand(t:map_seq,i:range(any_int)) {
   var a=array(0,[0..max(1,size(t)*max(1,size(i))-1)])
   var m=0
   _expand_aseq(&m,t.array,size(t.array),&a,low(i),high(i))
-  v=rec map_seq {
+  let v=rec map_seq {
     array=a[0..m-1]
   }
   return v
@@ -1409,12 +1406,12 @@ proc inc(x:seq or block_seq,y:map_seq)=map_seq(x) inc y
 proc in(y:any_int,x:map_seq)=_in_aseq(x.array,size(x.array),int(y))
 proc #(x:map_seq,y:any_int)=_index_aseq(x.array,size(x.array),int(y))
 proc empty(x:map_seq) {
-  a=array(0,[1..0])
+  let a=array(0,[1..0])
   return rec map_seq {
     array=a
   }
 }
-*/
+
 proc map_seq(x)=x
 proc _rdiv(x,y)=if(y<0=>if(x<0=>x/y,(y-x+1)/y),x>0=>x/y,(x-y+1)/y)
 
@@ -1459,9 +1456,9 @@ proc _gel(x:empty_head,xx,y,yy)=error_type():compile_error("Rank mismatch")
 //  **************************************
 
 //  Array types
-type array(e,d:extent) is varray(e,d),farray(e,d)
-type varray(e,d:extent) is e^var d
-type farray(e,d:extent) is e^let d
+type array(e,d:dimension_number) is varray(e,d),farray(e,d)
+type varray(e,d:dimension_number) is e^var extent(d)
+type farray(e,d:dimension_number) is e^let extent(d)
 //type farray(e,d:mshape) is ...,
 //    array_slice(e^let any),array_slice(e^var any),array_slice(e^invar any),array_slice(e^fix any)
 
@@ -1481,6 +1478,7 @@ type shape(n:dimension_number,d) is rec{_extent:extent(n),_distr:d}
 proc shape(x,d)=rec shape{_extent=x,_distr=d}
 proc shape(x)=shape(x,null)
 proc string(x:shape)="shape("++x._extent++","++x._distr++")"
+proc size(x:shape)=size(x._extent)
 proc #(x:shape)=x._extent
 
 PM__if_compiling
@@ -1551,9 +1549,9 @@ proc #(x:any^any)=shape(_array_mshape(x)._extent,null)
 proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
 proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
 proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(_array_mshape(PM__import(a)),t),v)
-proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(#(a),t))
-proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(#(a),t),v)
-proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(PM__import(#a),t),v)
+proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
+proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
+proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(PM__import(_array_mshape(a)),t),v)
 proc _make_subref(a:any^any,t:tuple(int))=_make_subref(a,_point2index(_array_mshape(a),t))
 PM__intrinsic _make_subref(a:any^any,i:int)->(*) : "make_rf"
 PM__endif
@@ -1643,7 +1641,7 @@ proc _index2point(i:int,s:tuple(int,5))=[i1,i2,i3,i4,i5] where i1=i-j2*_sz(s.1) 
 proc _index2point(i:int,s:tuple(int,6))=[i1,i2,i3,i4,i5,i6] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-j4*_sz(s.3) where i4=j4-j5*_sz(s.4) where i5=j5-i6*_sz(s.5) where i6=j5/_sz(s.5) where j5=j4/_sz(s.4) where j4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1)  
 proc _index2point(i:int,s:tuple(int,7))=[i1,i2,i3,i4,i5,i6,i7] where i1=i-j2*_sz(s.1) where i2=j2-j3*_sz(s.2) where i3=j3-j4*_sz(s.3) where i4=j4-j5*_sz(s.4) where i5=j5-j6*_sz(s.5) where i6=j6-i7*_sz(s.6) where i7=j6/_sz(s.6) where j6=j5/_sz(s.5) where j5=j4/_sz(s.4) where j4=j3/_sz(s.3) where j3=j2/_sz(s.2) where j2=i/_sz(s.1)
 
-/*
+
 //  Numeric array operations
 proc -(x:num^any)={
   -xx:xx in x
@@ -1663,7 +1661,209 @@ proc *(x:num,y:num^any)={
 proc /(x:num^any,y:num)={
   xx/y:xx in x
 }
-*/
+
+
+// ***************************************************
+// DISTRIBUTIONS
+// ***************************************************
+
+type distr_dim is no_distr,direct_distr,block_distr,vblock_distr,cyclic_distr,block_cyclic_distr
+type distr:iterable is null,blocked_distr,distr_dim,tuple(distr_dim),sliced_distr
+type blocked_distr is block_distr,vblock_distr,tuple(block_distr or vblock_distr)
+type distr_template is null,distr_template_dim,tuple(distr_template_dim),...
+type distr_template_dim is null,vblock_template,direct_template,block_template,cyclic_template,block_cyclic_template,...
+    
+//  Null distribution (mirroring)
+proc distribute(dis:null,d:int,t:int,p:int)=no_distr(d,t,p)
+type no_distr is rec {_hi:int,_p:int,_pr:int}
+proc nodes_needed(d:null,g:int)=1
+proc no_distr(g:int,d:int,p:int)=rec no_distr {
+  _hi=int(g),_p=int(d),_pr=p
+}
+proc #(b:no_distr)=shape([0..b._p-1])
+proc _shp(b:no_distr)=0..b._p-1
+proc dims(b:no_distr)=[b._p]
+proc size(b:no_distr)=b._p
+proc element(b:no_distr,i:int)=0..b._hi-1
+proc tile_size(b:no_distr,i:int)=b._hi
+proc empty(b:no_distr)=1..0
+proc nodes_for_grid(b:no_distr,g:seq(int))=b._pr..b._pr
+proc node_for(b:no_distr,j:int)=b._pr
+proc index(b:no_distr,j:int,p:int)=j
+proc node_nhd(b:no_distr,p:int,d:range(int))=p..p
+proc node_co_nhd(b:no_distr,p:int,d:range(int))=p..p
+
+//  Direct distribution (1-1 map to processor topology)
+type direct_distr is rec {_p:int}
+type direct_template is unique{DIRECT}
+proc distribute(dis:direct_template,d:int,t:int,p:int)=direct_distr(d)
+proc nodes_needed(d:direct_template,g:int)=g
+proc direct_distr(d:int)=rec direct_distr {
+  _p=int(d)
+}
+proc #(b:direct_distr)=shape([0..b._p-1])
+proc _shp(b:direct_distr)=0..b._p-1
+proc dims(b:direct_distr)=[b._p]
+proc size(b:direct_distr)=b._p
+proc element(b:direct_distr,i:int)=0..0
+proc tile_size(b:direct_distr,i:int)=1
+proc empty(b:direct_distr)=1..0
+proc nodes_for_grid(b:direct_distr,g:seq(int))=int(g)
+proc node_for(b:direct_distr,j:int)=j
+//proc index(b:direct_distr,j:int,p:int)='0
+proc node_nhd(b:direct_distr,p:int,d:int or range(int))=d+p
+proc node_co_nhd(b:direct_distr,p:int,d:int or range(int))=-low(d)+p..-high(d)+p by -1
+
+//  Variable block distribution
+type vblock_distr is rec {_hi:int,_p:int}
+type vblock_template is unique{VBLOCK}
+proc distribute(dis:vblock_template,d:int,t:int,p:int)=vblock_distr(d,t)
+proc nodes_needed(d:vblock_template,g:int)=0
+proc vblock_distr(g:int,d:int)=rec vblock_distr {
+  _hi=int(g),_p=int(d)
+}
+proc #(b:vblock_distr)=shape([0..b._p-1])
+proc _shp(b:vblock_distr)=0..b._p-1
+proc dims(b:vblock_distr)=[b._p]
+proc size(b:vblock_distr)=b._p
+proc element(b:vblock_distr,i:int)=start..finish where finish=(ii+1)*b._hi/b._p-1 where start=ii*b._hi/b._p where ii=int(i)
+proc tile_size(b:vblock_distr,i:int)=finish-start+1 where finish=(ii+1)*b._hi/b._p-1 where start=ii*b._hi/b._p where ii=int(i)
+proc empty(b:vblock_distr)=1..0
+proc nodes_for_grid(b:vblock_distr,g:seq(int))=lo1..hi1 where lo1=_rdiv(b._p*(low(g)+1)-1,b._hi), hi1=_rdiv(b._p*(high(g)+1)-1,b._hi)
+proc node_for(b:vblock_distr,j:int)=p where p=_rdiv(b._p*(j+1)-1,b._hi)
+proc index(b:vblock_distr,j:int,p:int)=i where i=jj-s1 where s1=p*b._hi/b._p where jj=int(j)
+proc node_nhd(b:vblock_distr,p:int,d:range(int))=p+(low(d)-bk+1)/bk..p+(high(d)+bk-1)/bk where bk=b._hi/b._p
+
+//  fixed block distribution
+type block_distr is rec {_b:int,_s:int,_p:int}
+type _block_template is rec{block:int}
+type _block_template_default is unique{BLOCK}
+type block_template is _block_template_default,_block_template
+proc BLOCK(block:int)=rec _block_template {
+  block=block
+}
+proc distribute(dis:_block_template,d:int,t:int,p:int)=block_distr(d,t,dis.block)
+proc distribute(dis:block_template,d:int,t:int,p:int)=block_distr(d,t)
+proc nodes_needed(d:_block_template,g:int)=(g+d.block)/d.block
+proc nodes_needed(d:block_template,g:int)=0
+proc block_distr(s:int,p:int)=rec block_distr {
+_b=b,_s=s,_p=p} where b=(s+p-1)/p
+proc block_distr(s:int,t:int,b:int)=rec block_distr {
+_b=b,_s=s,_p=p} where p=(s+b-1)/b
+proc #(b:block_distr)=shape([0..b._p-1])
+proc _shp(b:block_distr)=0..b._p-1
+proc dims(b:block_distr)=[b._p]
+proc size(b:block_distr)=b._p
+proc element(b:block_distr,i:int)=start..finish where finish=min(b._s-1,(ii+1)*b._b-1) where start=ii*b._b where ii=int(i)
+proc tile_size(b:block_distr,i:int)=finish-start+1 where finish=min(b._s-1,(ii+1)*b._b-1) where start=ii*b._b where ii=int(i)
+proc empty(b:block_distr)=1..0
+proc nodes_for_grid(b:block_distr,g:seq(int))=lo1..hi1 where lo1=_rdiv(int(low(g)),b._b), hi1=_rdiv(int(high(g)),b._b)
+proc node_for(b:block_distr,j:int)=p where p=_rdiv(jj,b._b) where jj=int(j)
+proc index(b:block_distr,j:int,p:int)=i where i=jj-s1 where s1=p*b._b where jj=int(j)
+proc node_nhd(b:block_distr,p:int,d:range(int))=p+(low(d)-b._b+1)/b._b..p+(high(d)+b._b-1)/b._b
+
+//  Cyclic distribution
+type cyclic_distr is rec {_hi:int,_p:int}
+type cyclic_template is unique{CYCLIC}
+proc distribute(dis:cyclic_template,d:int,t:int,p:int)=cyclic_distr(d,t)
+proc nodes_needed(d:cyclic_template,g:int)=0
+proc cyclic_distr(g:int,d:int)=rec cyclic_distr {
+  _hi=int(g),_p=int(d)
+}
+proc #(b:cyclic_distr)=shape([0..b._p-1])
+proc _shp(b:cyclic_distr)=0..b._p-1
+proc dims(b:cyclic_distr)=[b._p]
+proc size(b:cyclic_distr)=b._p
+proc element(b:cyclic_distr,i:int)= int(i)..b._hi-1 by b._p
+proc tile_size(b:cyclic_distr,i:int)=(b._hi-1-int(i))/b._p+1
+proc empty(b:cyclic_distr)=1..0 by 1
+proc nodes_for_grid(b:cyclic_distr,g:seq(int))=cyclic_range(lo,high,p) where high=if(hi-lo>=p=>lo+p-1,hi+if(hi>lo=>0,p)) where lo=low(g) mod p,hi=high(g) mod p where p=b._p  
+proc node_for(b:cyclic_distr,j:any_int)=p where p=int(j) mod b._p
+proc index(b:cyclic_distr,j:int,p:int)=int(j)/b._p
+proc node_nhd(b:cyclic_distr,p:int,d:range(int))=cyclic_range(p+low(d),p+high(d),b._p)
+
+//  Block cyclic distribution
+type block_cyclic_distr is rec {_hi:int,_p:int,_b:int,_s:int}
+type block_cyclic_template is rec {block:int}
+proc BLOCK_CYCLIC(block:int)=rec block_cyclic_template{
+  block=block
+}
+proc distribute(dis:block_cyclic_template,d:int,t:int,p:int)=block_cyclic_distr(d,t,dis.block)
+proc nodes_needed(d:block_cyclic_template,g:int)=0
+proc block_cyclic_distr(g:int,p:int,b:int)=rec block_cyclic_distr {
+_hi=int(g),_p=int(pp),_b=bb, _s=s} where s=pp*bb where bb=if(pp==1=>g,b) where pp=min((g+b-1)/b,p)
+proc #(b:block_cyclic_distr)=shape([0..b._p-1])
+proc _shp(b:block_cyclic_distr)=0..b._p-1
+proc dims(b:block_cyclic_distr)=[b._p]
+proc size(b:block_cyclic_distr)=b._p
+proc element(b:block_cyclic_distr,i:int)= block_seq(s,b._hi-1,b._s,b._b,0) where s=ii*b._b where ii=int(i)
+proc tile_size(b:block_cyclic_distr,i:int)=nc*b._b+max(0,min(b._b,df-nc*b._s)) where nc=df/b._s where df=b._hi-s where s=ii*b._b where ii=int(i)
+proc empty(b:block_cyclic_distr)=block_seq(1,0,1,1,0)
+proc nodes_for_grid(b:block_cyclic_distr,g:grid_dim)=if(hi-lo+1<p=>cyclic_range(lo,hi,p),cyclic_range(0,p-1,p)) where lo=low(g)/b._b,hi=high(g)/b._b where p=b._p  
+proc nodes_for_grid(b:block_cyclic_distr,g:strided_range){
+  var r=0..0
+  if b._s==step(g) {
+  let r=nodes_for_grid(b,low(g)..low(g))} else {
+    r=nodes_for_grid(b,low(g)..high(g))
+  }
+  return r
+}
+ proc nodes_for_grid(b:block_cyclic_distr,g:block_seq){
+  var r=cyclic_range(0,0,1)
+  if b._s==step(g) {
+  let r=nodes_for_grid(b,low(g)..low(g)+width(g)-1)} else {
+    r=nodes_for_grid(b,low(g)..high(g))
+  }
+  return r
+}
+proc node_for(b:block_cyclic_distr,j:int)=p where p=_rdiv(jj,b._b) mod b._p where jj=int(j)
+proc index(b:block_cyclic_distr,j:int,p:int)=i where i=r+b._b*(s-p) where r=j-s*b._s where s=_rdiv(j,b._s)
+proc node_nhd(b:block_cyclic_distr,p:int,d:range(int))=p+(low(d)-b._b+1)/b._b..p+(high(d)+b._b-1)/b._b
+proc nodes_for_grid(b,g:single_point)=nodes_for_grid(b,g._t..g._t)
+
+//  Tuple of distributions
+proc distribute(dis:tuple(distr_template_dim),d:tuple(int),t:tuple(int))=map($distribute,dis,d,t,p) where p=index2point(_this_node(),t)
+proc distribute(dis:distr_template_dim,d:tuple(int),t:tuple(int))=map($distribute,spread(dis,d),d,t,p) where p=index2point(_this_node(),t)
+proc distribute(dis:null,d:tuple(int),t:tuple(int))=distribute(VBLOCK,d,t)
+proc nodes_needed(b:tuple(distr_template_dim),g:tuple(int))=map($nodes_needed,b,g)
+proc nodes_needed(b:distr_template_dim,g:tuple(int))=map($nodes_needed,spread(b,g),g)
+proc node_for(b:tuple(distr_dim),j:tuple(int))=map($node_for,b,j)
+proc #(b:tuple(distr_dim))=shape(map($_shp,b))
+proc dims(b:tuple(distr_dim))=map($size,b)
+proc element(b:tuple(distr_dim),i:tuple(int))=map($element,b,i)
+proc element(b:tuple(distr_dim),i:int)=element(b,_index2point(i,dims(b)))
+proc tile_size(b:tuple(distr_dim),i:tuple(int))=map($tile_size,b,i)
+proc empty(b:tuple(distr_dim))=map($empty,b)
+proc nodes_for_grid(b:tuple(distr_dim),g:grid_slice)=map($nodes_for_grid,b,g)
+proc node_num_for(b:tuple(distr_dim),j:tuple(int))=index(dims(b),map($node_for,b,j))
+proc index(b:tuple(distr_dim),j:tuple(int),p:tuple(int))=index(tile_size(b,p),map($index,b,j,p))
+proc node_and_index(b:tuple(distr_dim),j:tuple(int))=index(dims(b),p),i where i=index(tile_size(b,p),map($index,b,j,p)) where p=map($node_for,b,j) 
+proc node_and_index(b:distr_dim,j:int)=p,i where i=index(b,j,p) where p=node_for(b,j)
+proc node_nhd(b:tuple,p:tuple,d:tuple)=map($node_nhd,b,p,d)
+proc node_co_nhd(b:tuple,p:tuple,d:tuple)=map($node_co_nhd,b,p,d)
+
+//  Slice of a tuple of distributions
+type sliced_distr(t,s) is rec{_t:t,_s:s}
+proc sliced_distr(t:tuple(distr_dim),s:tuple(seq(int) or single_point(int)))=rec sliced_distr{
+  _t=t,_s=s
+}
+proc node_for(t:sliced_distr,j:tuple(int))=node_for(t._t,t._s[j])
+proc #(t:sliced_distr)=#t._t
+proc dims(t:sliced_distr)=dims(t._t)
+proc element(t:sliced_distr,i:tuple(int) or int)=overlap(t._s,element(t._t,i))
+proc tile_size(t:sliced_distr,i:tuple(int) or int)=dims(element(t,i))
+proc empty(t:sliced_distr)=rec sliced_distr{
+  _t=empty(t._t),_s=t._s
+}
+proc nodes_for_grid(t:sliced_distr,g:grid)=nodes_for_grid(t._t,t._s[g])
+proc node_num_for(t:sliced_distr,j:tuple(int))=node_num_for(t._t,t._s[j])
+proc index(t:sliced_distr,j:tuple(int),p:tuple(int))=index(tile_size(t,p),element(t,p)#j)
+proc node_and_index(t:sliced_distr,j:int)=p,i where i=index(t,j,p) where p=node_for(t,j)
+proc node_nhd(t:sliced_distr,p:tuple,d:tuple)=node_nhd(t._t,p,_stpmult(d,t._s))
+proc node_co_nhd(t:sliced_distr,p:tuple,d:tuple)=node_co_nhd(t._t,p,_stpmult(d,t._s))
+proc _stpmult(d:tuple,s:tuple)=map($_stpmult,d,s)
+proc _stpmult(d:range,s:range)=d
+proc _stpmult(d:range,s:strided_range)=if(st>0=>st*low(d)..st*high(d),st*high(d)..st*low(d)) where st=step(s)
 
 
 // ***************************************************
@@ -1677,9 +1877,10 @@ PM__else
 proc PM__for_stmt(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<inline>> {
     PM__for size(shape) {
       let shapei=PM__import%(shape)
-      let schedule=PM__import%(#shape)
-      let here_in_tile=PM__generate(shape,size(shape))
-      let here=shapei[here_in_tile]
+      let shapee=#shape
+      let schedule=PM__import%(shapee)
+      let here_in_tile=PM__generate(shapee,size(shape))
+      let here=(#shapei)[here_in_tile]
       let nullv=null
       PM__context nullv,nullv,shapei {
         PM__ref inouts=PM__import%(PM__inouts)
@@ -1693,6 +1894,26 @@ proc PM__for_stmt(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<
         PM__set_multi_elem(&PM__inout_a,inout_a,here_in_tile <<PM__ignore>>)
       }
    }
+}
+
+proc PM__for_stmt(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any)->(any) <<inline>> {
+    var array
+    PM__for size(shape) {
+      let shapei=PM__import%(shape)
+      let schedule=PM__import%(#shape)
+      let here_in_tile=PM__generate(shape,size(shape))
+      let here=shapei[here_in_tile]
+      let nullv=null
+      PM__context nullv,nullv,shapei {
+          chan var elements=PM__yield(&PM__inouts,
+           PM__import%(PM__ins),
+           &PM__inout_a,
+           PM__get_elem(PM__import%(PM__in_a),here_in_tile),
+           PM__get_elem(PM__import%(PM__star_a),here_in_tile) <<inline>>)
+          array=PM__export%(elements')
+      }
+    }
+    return array
 }
 
 proc PM__foreach_stmt(&PM__inout_a,PM__in_a,shape:extent(1)) yield(&any,any) <<inline>> {
@@ -1727,17 +1948,15 @@ proc PM__foreach_stmt(&PM__inout_a,PM__in_a,shape:extent(2)) yield(&any,any) <<i
 
 PM__intrinsic PM__make_chan_var%(x:any)->(*) : "clone_var" chan
 
-/*
-proc PM__make_chan_var%[cond](x:priv,vl,vr)=x {
+proc PM__make_chan_var%[cond](x:priv)=error_type() {
     compile_error("Cannot initialise ""chan var"" using a ""priv"" value in a conditional context")
 }
-*/
 
-proc PM__assign_sync%(&a:chan,ex,b): PM__assign(&a,b <<PM__ignore>>)
-proc PM__assign_sync%(&a:invar,ex,b): compile_error("Cannot modify an ""invar"" value using a ""sync"" assignment")
-proc PM__assign_sync%(&a:invar,ex,b,...:invar): compile_error("Cannot modify an ""invar"" value using a ""sync"" assignment")
-proc PM__assign_sync%(&a:shrd,ex,b): compile_error("Cannot modify a ""shrd"" value using a ""sync"" assignment")
-proc PM__assign_sync%(&a:shrd,ex,b,...:invar): compile_error("Cannot modify a ""shrd"" value using a ""sync"" assignment")
+proc PM__assign_sync%(&a:chan,b,ex): PM__assign(&a,b <<PM__ignore>>)
+proc PM__assign_sync%(&a:invar,b,ex): compile_error("Cannot modify an ""invar"" value using a ""sync"" assignment")
+proc PM__assign_sync%(&a:invar,b,ex,...:invar): compile_error("Cannot modify an ""invar"" value using a ""sync"" assignment")
+proc PM__assign_sync%(&a:shrd,b,ex): compile_error("Cannot modify a ""shrd"" value using a ""sync"" assignment")
+proc PM__assign_sync%(&a:shrd,b,ex,...:invar): compile_error("Cannot modify a ""shrd"" value using a ""sync"" assignment")
 PM__intrinsic PM__make_invar_var%(x:invar)->(*) : "clone_var" invar
 proc PM__assign_invar%(&a:invar,b:invar): PM__assign(&a,b <<PM__ignore>>) // need to run shared
 
@@ -1746,11 +1965,11 @@ proc PM__dash%(x:chan)=_make_array(x,PM__region)
 
 PM__endif
 
-proc PM__par_stmt(num) yield() <<inline>> {  yield() }
-proc PM__check_task(num)=true
+proc PM__par_stmt(num,work:any=null) yield() <<inline>> {  yield() }
+proc PM__check_task%(num)=true
 
 proc PM__chan_stmt() yield() { yield() }
-proc PM__over_stmt(x) yield() { yield() }
+proc PM__over_stmt%(x) yield() { yield() }
 
 proc PM__check_iter(x){}
 proc PM__check_iter_amp(x){}
@@ -1771,6 +1990,7 @@ proc PM__import%(x:PM__list)<<inline>>=PM__each_index(i in num_elements(x):PM__i
 PM__intrinsic PM__import%(x:any)->(*) : "import_val"
 proc PM__export%(&x:PM__list,y:PM__list) <<inline>>{PM__each_index i in num_elements(x){PM__export%(&x^*{i},y^*{i})}}
 PM__intrinsic PM__export%(&x:any,y:any): "export"
+PM__intrinsic PM__export%(any)->(*): "export_param"
 
 proc PM__generate(x,n)=_elts(x,1,n)
 PM__intrinsic<<is_generator>> _iota(siz:int,start:int,finish:int,incr:int,totsiz:int)->(int) : "iota"
@@ -1820,9 +2040,9 @@ proc PM__makeidx(x)=x :test "Malformed indexed expression" => fix(false)
 proc PM__idx_uminus(x,z)=-x
 proc -%(x)=-x
 proc +%(x,y)=$+(x,y)
-proc -%(x,y)=x-y
-proc *%(x,y)=x*y
-proc /%(x,y)=x/y
+proc -%(x,y)=$-(x,y)
+proc *%(x,y)=$*(x,y)
+proc /%(x,y)=$/(x,y)
 proc PM__idx_uminus(x:indexed_dim,z)=rec indexed_dim {
 _m=x._m,_c=-x._c,_d=x._d,_n=x._n} 
 proc +(x:indexed_dim,yy:any_int,z)=rec indexed_dim {
@@ -2151,6 +2371,8 @@ proc PM__for_var(a)=a
 proc PM__import_param%(x)=x
 proc PM__export_param%(x)=x
 proc PM__import_param%(&x,y){}
+
+proc PM__gbl_ctxt%()=null,null,null
 
 proc PM__make_over%(a)=a
 

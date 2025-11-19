@@ -981,6 +981,7 @@ contains
                pm_type_for_var(coder%context,atype1),&
                t1,t2)
        endif
+       if(opcode==op_make_array) rtype=pm_type_add_mode(coder%context,rtype,sym_shared)
 !!$    case(op_redim)
 !!$       tv=pm_type_vect(coder%context,atype1)
 !!$       rtype=pm_new_arr_type(coder%context,pm_tv_name(tv),&
@@ -1243,7 +1244,7 @@ contains
           call inf_cblock(coder,cnode_arg(args,2))
        case(sym_task)
           do i=1,nargs,3
-             call inf_cblock(coder,cnode_arg(args,i+1))
+             call inf_cblock(coder,cnode_arg(args,i))
              call inf_cblock(coder,cnode_arg(args,i+2))
           enddo
        case(sym_do)
@@ -1253,9 +1254,12 @@ contains
        case(sym_pct)
           call inf_cblock(coder,cnode_arg(args,2))
        case(sym_null)
+          tno=pm_type_add_mode(coder%context,int(pm_null),sym_invar)
           do i=1,nret
-             coder%stack(get_slot(i))=pm_null
+             coder%stack(get_slot(i))=tno
           enddo
+       case(sym_assign_sync)
+          call combine_types(cnode_arg(args,1),int(pm_logical))
        case(sym_pm_send:sym_pm_serve)
           call check_long(5)
           coder%taints=ior(coder%taints,proc_is_impure)
@@ -1318,7 +1322,7 @@ contains
           coder%stack(get_slot(1))=pop_word(coder)
        case(sym_rec)
           call inf_rec
-       case(sym_pm_list)
+       case(sym_pm_list,sym_update_list)
           call push_word(coder,pm_type_new_tuple+pm_type_is_list)
           call push_word(coder,0)
           do i=1,nargs
@@ -1551,6 +1555,11 @@ contains
           call get_arg_types_and_modes
           call make_type_if_possible(coder,nargs+2)
           coder%new_atype=pop_word(coder)
+       case(sym_update_from_list)
+          tv=pm_type_vect(coder%context,get_arg_type(coder,callnode,cnode_arg(args,nret+1)))
+          do i=1,nret
+             call combine_types(cnode_arg(args,i),pm_tv_arg(tv,i))
+          enddo
        case(sym_move)
           n=nargs/2
           do i=1,n
@@ -2206,7 +2215,7 @@ contains
     endif
 
     undef_arg=.false.
-    bad_amp=.false.
+ 
     
     keys=cnode_get(callnode,call_keys)
     keynames=cnode_get(callnode,call_key_names)
@@ -2222,7 +2231,6 @@ contains
        nkey=0
     endif
 
-    
     ! Push arguments types to stack
     call push_word(coder,pm_type_new_tuple)
     call push_word(coder,amps)
@@ -2255,6 +2263,8 @@ contains
        return
     endif
 
+    
+    bad_amp=.false.
     if(amps/=0.and..not.ignore_rules) then
        
        amplocs=pm_name_val(coder%context,amps)
@@ -2271,17 +2281,8 @@ contains
                    bad_amp=.true.
                 endif
              else
-                select case(mode2)
-                case(sym_shared)
-                   call call_error('A "'//trim(sym_names(mode2))//&
-                        '" variable can only be modified by an "invar" assignment or "%" call')
-                case(sym_invar)
-                   call call_error('An "'//trim(sym_names(mode2))//&
-                        '" variable can only be modified by an "invar" assignment or "%" call')
-                case default
-                   call call_error('A "'//trim(sym_names(mode2))//&
-                     '" variable can only be modified by a "sync" assignment or "%" call')
-                end select
+                call call_error('"'//trim(sym_names(mode2))//&
+                        '" value can only be modified by an "invar" or "sync" assignment or "%" call')
                 bad_amp=.true.
              endif
  
@@ -2298,15 +2299,16 @@ contains
                   trim(pm_type_as_string(coder%context,coder%wstack(coder%wtop+i)))
           enddo
        endif
-       
-       ! Suspend 'no shared import' rule in system module code
-!!$       ignore_rules=ignore_rules.or.&
-!!$            cnode_get_name(callnode,cnode_modl_name)==sym_pm_system
-!!$       
-       ! Implement mode combination rule for standard procedures
+           
+       ! Implement mode combination rule for standard procedures (ignore topology arg)
        mode=pm_type_combine_modes(coder%context,&
-            coder%wstack(coder%wtop+1:coder%wtop+nargs),is_cond,&
+            coder%wstack(coder%wtop+2:coder%wtop+nargs),is_cond,&
             ignore_rules)
+       if(nkey>0) then
+          mode=pm_type_combine_modes(coder%context,&
+               coder%wstack(keybase+1:keybase+nkey),is_cond,&
+               ignore_rules,mode)
+       endif
        if(mode<0) then
           call call_error('Cannot pass a shared value to a standard procedure')
           call inf_error_with_trace(coder,cnode_arg(args,nret-mode),&
@@ -2314,7 +2316,7 @@ contains
           mode=sym_private
        endif
        
-       ! As this is standard call strip argument modes before passing
+       ! Strip argument modes before passing
        do i=1,nargs
           coder%wstack(coder%wtop+i)=&
                pm_type_strip_mode(coder%context,coder%wstack(coder%wtop+i),mode2)
@@ -3798,6 +3800,7 @@ contains
     type(pm_ptr):: args,arg,tv
     integer:: nret,nargs,nvargs,opcode,i,j,n,sig,tno,slot
     integer(access_kind):: acc
+    logical:: any_accessed
     nret=cnode_get_num(callnode,call_nret)
     sig=-cnode_get_num(callnode,call_sig)
     args=cnode_get(callnode,call_args)
@@ -3872,9 +3875,6 @@ contains
           else
              call disable
           endif
-       case(sym_task)
-
-          
        case(sym_check)
           call std_access(.true.,1)
        case(sym_test)
@@ -3891,17 +3891,17 @@ contains
           else
              call disable
           endif
-       case(sym_get_list_elem)
+       case(sym_get_list_elem,sym_simple_list_elem)
           if(accessed(cnode_arg(args,1))) then
              arg=cnode_arg(args,2)
              call access(arg)
-             call access(cnode_arg(args,3))
+             if(sig/=sym_simple_list_elem) call access(cnode_arg(args,3))
              slot=cnode_get_num(arg,var_index)
              tno=rvec(slot)
              if(tno>0) then
                 tv=pm_type_vect(coder%context,tno)
-                n=alloc_list_info(list_info_start(),pm_tv_numargs(tv),slot,access_info(slot))
-                access_info(n+1+rvec(cnode_get_num(callnode,call_index)))=access_info(slot)
+                n=alloc_list_info(list_info_start(),pm_tv_numargs(tv),slot,access_is_var)
+                access_info(n+1+rvec(cnode_get_num(callnode,call_index)))=access_info(cnode_get_num(cnode_arg(args,1),var_index))
                 access_info(slot)=ior(access_info(slot),access_is_list)
              endif
           else
@@ -3938,10 +3938,10 @@ contains
              acc=get_arg_access_info(cnode_arg(args,i))
              arg%data%i16(arg%offset+i)=acc
              if(debug_bprop_tagging) then
-                write(*,'(i4,i4)',advance='NO') i,acc
+                write(*,'("ARG>",i4,i4)',advance='NO') i,acc
                 call print_bprop_item(6,acc)
              endif
-             call copy_list_info_for_param(acc,arg%data%i16(arg%offset:),j,cnode_arg(args,i))
+             call copy_list_info_for_param(i,acc,arg%data%i16(arg%offset+1:),j,cnode_arg(args,i))
              if(debug_bprop) then
                 write(*,*) 'BP store access',arg%data%i16(arg%offset+i),&
                      cnode_get_num(cnode_arg(args,i),var_index)
@@ -3956,9 +3956,10 @@ contains
                 acc=ior(acc,access_not_passed)
              endif
              arg%data%i16(arg%offset+i+nargs-1)=acc
-             call copy_list_info_for_param_idx(acc,arg%data%i16(arg%offset:),j,size(rvec)+i)
+             call copy_list_info_for_param_idx(i+nargs-1,acc,arg%data%i16(arg%offset+1:),j,size(rvec)+i)
           enddo
           arg%data%i16(arg%offset+j)=-1
+          !write(*,*) '>>',arg%data%i16(arg%offset:arg%offset+pm_fast_esize(arg))
        case(sym_key)
           do i=1,nret/2
              call access(cnode_arg(args,i))
@@ -3975,10 +3976,19 @@ contains
           do i=nret/2+1,nret
              arg%data%i16(arg%offset+i-nret/2)=get_arg_access_info(cnode_arg(args,i))
           enddo
-       case(sym_amp,sym_result)
-          do i=1,nargs
+       case(sym_amp,sym_result,sym_update_list)
+          do i=nret+1,nargs+nret
              call set_access_info(cnode_arg(args,i),access_everything)
           enddo
+       case(sym_update_from_list)
+          any_accessed=.false.
+          do i=1,nret
+             arg=cnode_arg(args,i)
+             any_accessed=any_accessed.or.accessed_after_modify(arg)
+          enddo
+          if(any_accessed) then
+             call access(cnode_arg(args,nargs+nret))
+          endif
        case(sym_rec)
           call std_access(.false.,3)
        case(sym_var,sym_var_set_mode,sym_set_mode,sym_change_mode,sym_underscore,&
@@ -4091,6 +4101,7 @@ contains
                if(access_info(i)==access_deactivated_call.or.&
                     access_info(i)==access_is_var) then
                   lrvec%data%i(lrvec%offset+i-slot1)=sp_sig_deactivated
+                  write(*,*) 'MU-DEACTIVATE',i
                else
                   lrvec%data%i(lrvec%offset+i-slot1)=rvec(i)
                endif
@@ -4112,7 +4123,7 @@ contains
       if(sig<0) then
          select case(sig)
          case(sp_sig_init,sp_sig_assign)
-            if(accessed(cnode_arg(args,2))) then
+            if(accessed_after_modify(cnode_arg(args,2))) then
                call access(cnode_arg(args,3))
                if(debug_bprop_tagging) then
                   call print_bprop_item(6,get_access_info(cnode_arg(args,2)))
@@ -4180,23 +4191,31 @@ contains
          arg=cnode_arg(args,i)
          arg_accessed=accessed(arg)
          if(debug_bprop) then
-            write(*,*) 'accessed #',i,cnode_get_num(arg,var_index),arg_accessed
+            write(*,*) 'accessed #',i,cnode_get_num(arg,var_index),arg_accessed,cnode_flags_set(arg,var_flags,var_is_reference)
+                 call print_bprop_item(6,get_access_info(arg))
          endif
          is_accessed=is_accessed.or.arg_accessed
          all_accessed=all_accessed.and.arg_accessed
-         call modify(arg)
+         !call modify(arg)
       enddo
 
       if(.not.pm_fast_isnull(amps)) then
          amps=pm_name_val(coder%context,int(amps%offset))
          do i=0,pm_fast_esize(amps)
             arg=cnode_arg(args,nret+amps%data%i(amps%offset+i))
-            if(cnode_flags_set(arg,var_flags,var_is_reference)) then
-               arg=cnode_get(arg,var_extra_info)
+!!$            if(cnode_flags_set(arg,var_flags,var_is_reference)) then
+!!$               arg=cnode_get(arg,var_extra_info)
+!!$            endif
+            if(debug_bprop) then
+               write(*,*) 'BPROP AMPS',i,nret+amps%data%i(amps%offset+i),accessed(arg)
+               call print_bprop_item(6,get_access_info(arg))
             endif
-            arg_accessed=accessed(arg)
+            arg_accessed=accessed_after_modify(arg)
             is_accessed=is_accessed.or.arg_accessed
-            all_accessed=all_accessed.and.arg_accessed
+            if(debug_bprop) then
+               write(*,*) 'AMP ACCESS',amps%data%i(amps%offset+i),is_accessed,all_accessed,&
+                    trim(pm_name_as_string(coder%context,cnode_get_num(arg,var_name)))
+            endif
             call modify(arg)
          enddo
       endif
@@ -4206,8 +4225,10 @@ contains
       endif
 
       if(.not.is_accessed.and.iand(taints,proc_must_run)==0) then
-         if(debug_bprop) write(*,*) 'BP disable',is_accessed,iand(taints,proc_must_run),&
-              trim(sig_name_str(coder,cnode_get_num(callnode,call_sig)))
+         if(debug_bprop) then
+            write(*,*) 'BP disable',is_accessed,iand(taints,proc_must_run),&
+                 trim(sig_name_str(coder,cnode_get_num(callnode,call_sig)))
+         endif
          call disable
          return
       endif
@@ -4227,6 +4248,7 @@ contains
       if(is_builtin) then
          totargs=cnode_get_num(procnode,pr_nargs)
          do i=ifirst,nargs-merge(1,0,totargs>nargs)
+            !write(*,*) 'access',nret+i
             call access(cnode_arg(args,nret+i))
          enddo
          if(totargs>nargs) then
@@ -4244,7 +4266,7 @@ contains
             arg=cnode_arg(args,i+nret)
             call combine_arg_access_info(arg,acc)
             call copy_list_info_for_arg(acc,&
-                 arg_access%data%i16(arg_access%offset:),totargs+1,i,arg)
+                 arg_access%data%i16(arg_access%offset+1:),totargs+1,i,arg)
          enddo
 
          if(totargs>nargs) then
@@ -4253,7 +4275,7 @@ contains
                acc=arg_access%data%i16(arg_access%offset+i)
                call combine_arg_access_info_at_idx(j,acc)
                call copy_list_info_for_arg_idx(acc,&
-                    arg_access%data%i16(arg_access%offset:),totargs+1,i,j)
+                    arg_access%data%i16(arg_access%offset+1:),totargs+1,i,j)
             enddo
          endif
 
@@ -4351,7 +4373,7 @@ contains
          arg_accessed=accessed(arg)
          is_accessed=is_accessed.or.arg_accessed
          all_accessed=all_accessed.and.arg_accessed
-         call modify(arg)
+         !call modify(arg)
       enddo
       should_disable=.not.(is_accessed.or.always)
       if(should_disable) then
@@ -4407,17 +4429,33 @@ contains
     end subroutine access_at_idx
 
     function accessed(var) result(ok)
-      type(pm_ptr):: var
+      type(pm_ptr),intent(in):: var
       logical:: ok
+      type(pm_ptr):: rvar
        if(cnode_get_kind(var)==cnode_is_var) then
           ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
        else
           ok=.true.
        endif
-    end function accessed
-
-    subroutine modify(var)
-      type(pm_ptr):: var
+     end function accessed
+     
+     function accessed_after_modify(var) result(ok)
+       type(pm_ptr),intent(in):: var
+       logical:: ok
+       type(pm_ptr):: rvar
+       if(cnode_get_kind(var)==cnode_is_var) then
+          ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
+          if(.not.ok.and.cnode_flags_set(var,var_flags,var_is_reference)) then
+             rvar=cnode_get(var,var_extra_info)
+             ok=iand(access_info(cnode_get_num(rvar,var_index)),access_used_now)/=0
+          endif
+       else
+          ok=.true.
+       endif
+     end function accessed_after_modify
+     
+     subroutine modify(var)
+      type(pm_ptr),intent(in):: var
       integer:: idx
       idx=cnode_get_num(var,var_index)
       access_info(idx)=ior(access_is_var,&
@@ -4427,6 +4465,7 @@ contains
          access_info(idx)=ior(access_is_var,&
               iand(not(access_used_now+access_used_by_at),access_info(idx)))
       endif
+      !!! modify any explicit list
     end subroutine modify
 
     subroutine enable
@@ -4461,10 +4500,9 @@ contains
       integer(access_kind),intent(in):: acc
       if(iand(acc,access_not_passed)==0) then
          call combine_access_info_at_idx(idx,&
-              iand(acc,not(access_not_passed+access_needs_movability)),&
+              iand(acc,not(access_not_passed)),&
               iand(acc,access_used_ever)/=0)
       endif
-      if(iand(acc,access_needs_movability)/=0) call tag_associated_param(arg)
     end subroutine combine_arg_access_info_at_idx
     
     subroutine combine_access_info(arg,acc,count_as_access)
@@ -4556,6 +4594,7 @@ contains
       integer(access_kind),dimension(:),intent(in):: arr
       integer:: pos
       integer:: i
+      !write(*,*) '@@',arr(start:min(size(arr),start+10))
       if(var_index>huge(arr(start))) call pm_panic('Program too large')
       i=start
       do while(arr(i)>=0)
@@ -4572,12 +4611,14 @@ contains
       integer,intent(in):: start,n,var_index
       integer(access_kind),intent(in):: acc
       integer:: idx
-      integer:: i,old_size,new_size
+      integer:: i,old_size,new_size,iacc
       integer(access_kind),dimension(:),allocatable:: temp
       if(var_index>huge(acc)) call pm_panic('Program too large')
+      iacc=acc
       i=start
       do while(access_info(i)>=0)
          if(access_info(i)==var_index) then
+            idx=i
             return
          endif
          i=i+access_info(i+1)+2
@@ -4593,10 +4634,10 @@ contains
       endif
       access_info(i)=var_index
       access_info(i+1)=n
-      access_info(i+2:i+1+n)=acc
+      access_info(i+2:i+1+n)=iacc
       access_info(i+2+n)=-1
       idx=i
-    end function   alloc_list_info
+    end function alloc_list_info
 
     subroutine copy_list_info_for_arg(acc,arr,start,arg_index,arg)
       integer(access_kind),intent(in):: acc
@@ -4615,6 +4656,7 @@ contains
       integer(access_kind),dimension(:),intent(in)::arr
       integer,intent(in):: start,arg_index,var_index
       integer:: src,dst,i
+      !write(*,*) '###',arr(1:start+5)
       if(iand(acc,access_is_list)/=0) then
          src=find_list_info(start,arr,arg_index)
          if(src<0) return
@@ -4632,7 +4674,8 @@ contains
       endif
     end subroutine copy_list_info_for_arg_idx
 
-    subroutine copy_list_info_for_param(acc,arr,start,arg)
+    subroutine copy_list_info_for_param(par_index,acc,arr,start,arg)
+      integer,intent(in):: par_index
       integer(access_kind),intent(in):: acc
       integer(access_kind),dimension(:),intent(inout)::arr
       type(pm_ptr),intent(in):: arg
@@ -4640,11 +4683,12 @@ contains
       integer:: idx
       if(cnode_get_kind(arg)==cnode_is_var) then
          idx=cnode_get_num(arg,var_index)
-         call copy_list_info_for_param_idx(acc,arr,start,idx)
+         call copy_list_info_for_param_idx(par_index,acc,arr,start,idx)
       endif
     end subroutine copy_list_info_for_param
 
-    subroutine copy_list_info_for_param_idx(acc,arr,start,var_index)
+    subroutine copy_list_info_for_param_idx(par_index,acc,arr,start,var_index)
+      integer,intent(in):: par_index
       integer(access_kind),intent(in):: acc
       integer(access_kind),dimension(:),intent(inout)::arr
       integer,intent(in):: var_index
@@ -4653,10 +4697,13 @@ contains
       if(iand(acc,access_is_list)/=0) then
          src=find_list_info(list_info_start(),access_info,var_index)
          if(src<0) return
-         do i=0,arr(src+1)+1
+         write(*,*) '<<',access_info(src:src+access_info(src+1)+1)
+         arr(start)=par_index
+         do i=1,access_info(src+1)+1
             arr(start+i)=access_info(src+i)
          enddo
-         start=start+arr(src+1)+2
+         start=start+access_info(src+1)+2
+         arr(start)=-1
       endif
     end subroutine copy_list_info_for_param_idx
     
@@ -4922,7 +4969,7 @@ contains
     character(len=1024):: str,string
     character(len=2):: join,ampstr
     character(len=1):: procchr,dotchr
-    integer:: n,k,nargs,nkeys
+    integer:: n,n0,k,nargs,nkeys
     integer::ampidx,signame,signamebase,tno,dtyp,ttyp
     type(pm_ptr):: tv,key,val,amp,keyargs,keynames,name
     logical:: iscond
@@ -4965,7 +5012,7 @@ contains
 
 
     if(cnode_flags_set(node,call_flags,proccall_is_comm)) then
-       n=6
+       n=num_comm_args
        if(cnode_flags_set(node,call_flags,proccall_is_general)) then
           procchr=' '
        else
@@ -4983,19 +5030,18 @@ contains
        dotchr= ' '
     endif
 
+    n0=n
     if(cnode_flags_set(node,call_flags,proccall_is_block)) then
        n=n+3
     endif
-
-    if(pm_opts%show_hidden) n=0
 
     string=dotchr//trim(pm_name_as_string(coder%context,&
          signame))//procchr
 
     k=len_trim(string)+1
-    if(n>1) then
+    if(n0>1) then
        iscond=coder%wstack(base+nkeys+2+2)==coder%true_literal
-       dtyp=coder%wstack(base+nkeys+5)
+       dtyp=coder%wstack(base+nkeys+3)
        if(dtyp==pm_null) dtyp=0
     else
        iscond=.false.
@@ -5007,6 +5053,8 @@ contains
     string(k:k)='('
     
     call more_error(coder%context,trim(string))
+    n0=n
+    if(pm_opts%show_hidden) n=0
     k=0
     do i=n+1,nargs
        if(i<nargs.or.nkeys>0) then
@@ -5037,7 +5085,7 @@ contains
  
     if(cnode_flags_set(node,call_flags,proccall_is_block)) then
        call more_error(coder%context,' ) yield (')
-       tno=coder%wstack(base+nkeys+2+n-2)
+       tno=coder%wstack(base+nkeys+2+n0-2)
        if(pm_type_kind(coder%context,tno)==pm_type_is_par_kind) tno=pm_type_arg(coder%context,tno,1)
        if(pm_type_kind(coder%context,tno)==pm_type_is_proc) tno=pm_type_arg(coder%context,tno,1)
        call more_error(coder%context,'     '//&
@@ -5085,7 +5133,7 @@ contains
     type(code_state):: coder
     type(pm_ptr),intent(in):: node
     integer:: name
-    integer:: istart,n,tno,tno2,nret,i
+    integer:: istart,istart0,n,tno,tno2,nret,i
     character(len=1024):: str,str2,buf1,buf2
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
@@ -5137,11 +5185,14 @@ contains
     else
        istart=2
     endif
+    istart0=istart
     if(cnode_flags_set(node,pr_flags,proccall_is_block)) istart=istart+3
     if(pm_opts%show_hidden) istart=1
     tno=cnode_get_num(node,pr_ptype)
     tno2=0
-    if(istart>2) tno2=pm_type_arg(coder%context,tno,3)
+    if(istart0>2) then
+       tno2=pm_type_arg(coder%context,tno,3)
+    endif
     call par_context_to_string(coder%context,cnode_flags_set(node,pr_flags,proc_is_cond),&
          cnode_flags_set(node,pr_flags,proc_is_uncond),&
          pm_type_arg(coder%context,tno,1),tno2,str,n)
@@ -5153,7 +5204,8 @@ contains
        if(cnode_flags_set(node,pr_flags,proccall_is_block)) then
           str(n:)='yield '
           n=n+6
-          tno=pm_type_arg(coder%context,pm_type_arg(coder%context,tno,num_comm_args+1),1)
+          !write(*,*) istart, pm_type_as_string(coder%context,tno)
+          tno=pm_type_arg(coder%context,pm_type_arg(coder%context,tno,istart0),1)
           call pm_type_to_string(coder%context,tno,str,n)
        endif
     endif

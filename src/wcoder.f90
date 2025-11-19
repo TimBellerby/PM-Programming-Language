@@ -1437,9 +1437,7 @@ contains
           call wc_call(wcd,callnode,op_logical_return,0,2,1,ve)
        endif
        call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
-    case(sym_private,sym_set_mode,sym_const,sym_var,sym_dotdotdot,sym_amp,sym_typeof,sym_pm_uninit,&
-         sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_sync_assign,sym_pm_assign,sym_check_par_state)
-       continue ! Nothing to do
+
     case(sym_null)
        if(.not.pm_is_compiling) then
           call wc_call_args(wcd,callnode,args,op_nullify,0,nargs,nargs,rv,ve)
@@ -1470,6 +1468,14 @@ contains
     case(sym_fix,sym_literal,sym_caret,sym_change_mode)
        call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
             cnode_arg(args,2),wcd%base,rv,ve)
+    case(sym_sync_assign)
+       if(.not.pm_is_compiling) then
+          call wc_call(wcd,callnode,op_setref,0,3,1,ve)
+          call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
+          call wc(wcd,&
+               -pm_max_stack-&
+               add_const(wcd,pm_type_val(wcd%context,check_arg_type(wcd,args,rv,1))))
+       endif
     case(sym_pm_set_dotdotdot)
        wcd%xbase=wcd%top
        tno=get_arg_type(wcd,cnode_arg(args,2),rv)
@@ -1557,6 +1563,10 @@ contains
        elseif(sig==sym_show_stack) then
           call wc_call(wcd,callnode,op_show_stack,0,1,0,ve)
        endif
+    case(sym_private,sym_set_mode,sym_const,sym_var,sym_dotdotdot,sym_amp,sym_typeof,sym_pm_uninit,&
+         sym_invar,sym_shared,sym_var_set_mode,sym_assign,sym_pm_assign,sym_check_par_state,&
+         sym_update_list,sym_update_from_list)
+       continue ! Nothing to do
     case default
        if(sig>0) then
           write(*,*) 'SIG=',sig
@@ -1577,6 +1587,7 @@ contains
        else
           nkeys=cnode_numargs(cnode_get(callnode,call_keys))
        endif
+       !write(*,*) 've2',cnode_flags_set(callnode,call_flags,proccall_is_comm),wcd%shared_ve
        call wcode_proc_call(wcd,callnode,rv,ve,merge(wcd%shared_ve,-1,&
             cnode_flags_set(callnode,call_flags,proccall_is_comm)),&
             args,nargs,totargs,nkeys,nret,sig)
@@ -1789,6 +1800,8 @@ contains
     endif
     ignore_args=0
     idx=rvv(cnode_get_num(callnode,call_index))
+
+    !write(*,*) 'extra_ve',extra_ve,ve2
     
     ! Check for special signatures
     if(idx<0) then
@@ -1849,7 +1862,8 @@ contains
                 endif
                 tagged=.true.
              else
-                if(pm_is_compiling.and.cnode_flags_clear(arg,var_flags,var_is_reference+var_is_param+var_is_key_ptr)) then
+                if(pm_is_compiling.and.&
+                     cnode_flags_clear(arg,var_flags,var_is_reference+var_is_param+var_is_key_ptr)) then
                    call wc_call(wcd,callnode,op_setref,66,3,1,ve)
                    rout=.true.
                 else
@@ -1875,7 +1889,6 @@ contains
                   -pm_max_stack-&
                   add_const(wcd,pm_type_val(wcd%context,check_arg_type(wcd,args,rv,1))))
           endif
- 
        case default
           call wcode_error(wcd,callnode,'System Error!')
           write(*,*) 'IDX=',idx
@@ -2001,6 +2014,8 @@ contains
     !write(*,*) 'CALLVE>',ve1
     call wc_call(wcd,callnode,op,op2,&
          totargs+extra_ve+1-ignore_args+nproc_keys,nret,ve1)
+
+    ! write(*,*) 'extra_ve now',extra_ve,ve1,ve2
     if(extra_ve>0) then 
        call wc(wcd,ve2)
     endif
@@ -2112,6 +2127,7 @@ contains
       integer,dimension(2):: key
       type(pm_ptr):: proc
       integer::m
+  
       key(1)=sig
       key(2)=0
       m=1
@@ -2134,7 +2150,8 @@ contains
       if(n<0) then
          n=pm_idict_add(wcd%context,wcd%code_cache,key,m,pm_null_obj)-1
       endif
-    end function add_proc
+
+     end function add_proc
 
     ! Inlining criteria
     function inlinable(proc,args,nargs,nret,extra_ve) result(ok)
@@ -2260,7 +2277,7 @@ contains
             if(converted) then
                call wc(wcd,add_bool_const(wcd,.true.))
             elseif(slot>0) then
-               call wc(wcd,wcd%rdata(slot+1+wcd%base))
+               call wc(wcd,wcd%rdata(slot+1))
             else
                call arg_is_movable(wcd,call_index,rv,arg,i,extra_ve==0,&
                     movable,maybe_movable,tag_index)
@@ -2359,7 +2376,7 @@ contains
     wcd%keybase=nret
 
     save_shared_ve=wcd%shared_ve
-    wcd%shared_ve=ve2
+    wcd%shared_ve=merge(ve2,ve,ve2>0)
     wcd%loop_extra_arg=merge(1,0,ve2>0)
     wcd%rdata(wcd%top+1:wcd%top+pm_fast_esize(rv)+1)=-1
 
@@ -2679,6 +2696,7 @@ contains
     ! For a list element, need to use cached tag variable
     if(movable.and.iand(flags,var_is_list_elem)/=0) then
        tag_index=get_tag_slot(wcd,var)
+       write(*,*) 'GOT TAG',tag_index
        if(tag_index>0) then
           maybe_movable=.true.
           if(tag_index==tag_cache_not_movable) then
@@ -2714,6 +2732,7 @@ contains
     else
        idx=0
     endif
+    idx=0
   end function get_tag_slot
 
   !========================================================
@@ -2741,6 +2760,7 @@ contains
        tag=tag_cache_not_movable
     endif
     if(debug_tagging) write(*,*) 'TO>',tag
+    key(1)=arg_slot(wcd,var)
     k=pm_idict_add(wcd%context,wcd%tag_cache,key,1,&
             pm_fast_tinyint(wcd%context,tag))
   contains
@@ -2776,7 +2796,7 @@ contains
        else
           tag=tag_cache_not_movable
        endif
-       tags%data%i(tags%offset-i-start)=tag
+       tags%data%i(tags%offset+i-start)=tag
        if(debug_tagging) write(*,*) 'TAG LIST ITEM>',i,tag
     enddo
     if(debug_tagging) write(*,*) 'TAGGED LIST ITEMS>',slot
@@ -2839,8 +2859,9 @@ contains
     type(pm_ptr),intent(in):: access
     integer,intent(in):: idx
     integer:: pos
-    integer:: i
-    i=access%data%i16(access%offset)
+    integer:: i,j
+    write(*,*) idx,'-->',access%data%i16(access%offset:access%offset+access%data%esize)
+    i=access%data%i16(access%offset)+1
     do while(access%data%i16(access%offset+i)>=0)
        if(access%data%i16(access%offset+i)==var_index) then
           pos=i
