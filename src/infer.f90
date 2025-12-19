@@ -52,6 +52,7 @@ module pm_infer
   ! Print compiler debugging messages
   logical,parameter:: debug_inference=.false.
   logical,parameter:: debug_bprop=.false.
+  logical,parameter:: debug_bprop_simple=.false.
   logical,parameter:: debug_bprop_tagging=.false.
  
   ! Maximum times a procedure template can call itself with
@@ -136,7 +137,7 @@ contains
   ! Returns signature index as tiny int on vstack
   ! ====================================================
   recursive function inf_proc(coder,procnode,callnode,atype,ptype,nret,nkeys,&
-       keynames,keybase,proc_nkeys,nomatch,only_when,new_atype) result(rtype)
+       keynames,keybase,proc_nkeys,nomatch,only_when,new_atype,new_envelope) result(rtype)
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: procnode,callnode
     integer,intent(in):: atype,ptype
@@ -145,6 +146,7 @@ contains
     logical,intent(out):: nomatch
     integer,intent(out):: new_atype
     type(pm_ptr),intent(in):: keynames
+    type(pm_ptr),intent(out):: new_envelope
    
     integer:: rtype
     integer:: at
@@ -159,8 +161,10 @@ contains
     type(pm_ptr):: cached,cac,base_cache,rt_cache,at_cache,rvec
     logical:: ok,added,change_added,pushed_stack_frame,incomplete
     integer,dimension(3):: rtn_cache
+    type(pm_root),pointer:: save_envelope
 
     new_atype=-1
+    new_envelope=pm_null_obj
 
     if(pm_debug_checks) then
        if(cnode_get_kind(procnode)/=cnode_is_proc) then
@@ -258,7 +262,7 @@ contains
     enddo
     k=pm_ivect_lookup(coder%context,coder%proc_cache,key,keysize)
 
-    if(debug_inference.or.debug_bprop) then
+    if(debug_inference) then
        write(*,*) 'INF PROC>',key(1),key(2),k,&
             trim(pm_name_as_string(coder%context,&
             cnode_get_name(procnode,pr_name))),&
@@ -337,6 +341,7 @@ contains
           taints=cnode_num_arg(cached,3)
           rtype=cnode_num_arg(cached,4)
           new_atype=cnode_num_arg(cached,5)
+          new_envelope=cnode_arg(cached,8)
           
           ! Push signature
           call code_num(coder,int(k))
@@ -390,6 +395,7 @@ contains
        coder%taints=taints
        coder%new_atype=-1
        coder%rtype=-1
+       coder%envelope=pm_null_obj
        
        call inf_cblock(coder,cnode_get(procnode,pr_cblock))
 
@@ -588,9 +594,13 @@ contains
     else
        call swap_code(coder)
     endif
+    
+    call code_val(coder,coder%envelope)
 
+    new_envelope=coder%envelope
+    
     ! Create record -- proc resvec flags rtype new_atype arg_uses key_uses
-    call make_code(coder,pm_null_obj,cnode_is_resolved_proc,7)
+    call make_code(coder,pm_null_obj,cnode_is_resolved_proc,8)
     call pm_dict_set_val(coder%context,coder%proc_cache,k,top_code(coder))
     call drop_code(coder)
     call code_num(coder,int(k))
@@ -626,6 +636,7 @@ contains
       save_atype=coder%atype
       save_new_atype=coder%new_atype
       save_rtype=coder%rtype
+      save_envelope=>pm_add_root(coder%context,coder%envelope)
     end subroutine save_proc_state
     
     subroutine restore_proc_state
@@ -637,6 +648,8 @@ contains
       coder%rtype=save_rtype
       coder%loop_depth=save_loop_depth
       coder%types_changed=save_types_changed
+      coder%envelope=save_envelope%ptr
+      call pm_delete_root(coder%context,save_envelope)
     end subroutine restore_proc_state
     
   end function inf_proc
@@ -905,6 +918,8 @@ contains
        rtype=atype1
        call code_num(coder,sp_sig_link)
        goto 10
+    case(op_link_var)
+       rtype=atype1
     case(op_noop)
        call code_num(coder,sp_sig_noop)
        goto 10
@@ -1240,8 +1255,10 @@ contains
           if(sig/=sym_until) call mark_loop_cond(5)
        case(sym_if,sym_if_invar)
           call inf_if(count_updates(cnode_arg(args,4),2),sig==sym_if_invar)
-       case(sym_pm_for,sym_pm_over)
-          call inf_cblock(coder,cnode_arg(args,2))
+       case(sym_pm_for)
+          call inf_pm_for
+       case(sym_pm_over)
+          call inf_cblock(coder,cnode_arg(args,nargs+nret))
        case(sym_task)
           do i=1,nargs,3
              call inf_cblock(coder,cnode_arg(args,i))
@@ -1249,10 +1266,13 @@ contains
           enddo
        case(sym_do)
           call inf_cblock(coder,cnode_arg(args,1))
+       case(sym_pm_invar)
+          call inf_cblock(coder,cnode_arg(args,nret+1))
+          if(nret>1) call combine_types(cnode_arg(args,1),arg_type_with_mode(3))
        case(sym_sync,sym_pm_shared,sym_pm_shared_always,sym_pm_chan,sym_pm_chan_always)
           call inf_cblock(coder,cnode_arg(args,2))
        case(sym_pct)
-          call inf_cblock(coder,cnode_arg(args,2))
+          call inf_cblock(coder,cnode_arg(args,nargs))
        case(sym_null)
           tno=pm_type_add_mode(coder%context,int(pm_null),sym_invar)
           do i=1,nret
@@ -1303,8 +1323,8 @@ contains
        case(sym_pm_ref)
           call push_word(coder,pm_type_new_dref)
           call push_word(coder,cnode_num_arg(args,2))
-          do i=2,nargs
-             call push_word(coder,arg_type_with_mode(i+1))
+          do i=3,nargs+1
+             call push_word(coder,arg_type(i))
           enddo
           call make_type(coder,nargs+1)
           call combine_types(cnode_arg(args,1),pop_word(coder))
@@ -1320,6 +1340,13 @@ contains
           enddo
           call make_type(coder,n+2)
           coder%stack(get_slot(1))=pop_word(coder)
+       case(sym_pm_envelope)
+          wbase=coder%wtop
+          do i=2,nargs
+             call push_word(coder,arg_type(i))
+          enddo
+          call combine_nhd_envelope(coder,callnode,coder%wstack(wbase+1:coder%wtop),nargs/2)
+          coder%wtop=wbase
        case(sym_rec)
           call inf_rec
        case(sym_pm_list,sym_update_list)
@@ -1334,6 +1361,9 @@ contains
           tno2=pop_word(coder)
           tno2=pm_type_add_mode(coder%context,tno2,mode)
           call combine_types(cnode_arg(args,1),tno2)
+       case(sym_pm_import_list)
+          tno=arg_type_with_mode(2)
+          call combine_types(cnode_arg(args,1),pm_type_imported(coder%context,tno,ok))
        case(sym_dot,sym_dot_ref,sym_simple_list_elem)
           name=arg_type(3)
           tno=arg_type_with_mode(2)
@@ -1543,10 +1573,14 @@ contains
        case(sym_typeof)
           tno=get_arg_type(coder,callnode,cnode_arg(args,2),&
                init=call_takes_uninit)
-          if(pm_type_kind(coder%context,tno)==pm_type_is_uninitialised) then
-             tno=pm_type_arg(coder%context,tno,1)
+          if(tno>0) then
+             if(pm_type_kind(coder%context,tno)==pm_type_is_uninitialised) then
+                tno=pm_type_arg(coder%context,tno,1)
+             endif
+             coder%stack(get_slot(1))=pm_new_type_type(coder%context,tno)
+          else
+             call set_arg_to_error_type(1)
           endif
-          coder%stack(get_slot(1))=pm_new_type_type(coder%context,tno)
        case(sym_result)
           call get_arg_types_and_modes
           call make_type_if_possible(coder,nargs+2)
@@ -1556,10 +1590,17 @@ contains
           call make_type_if_possible(coder,nargs+2)
           coder%new_atype=pop_word(coder)
        case(sym_update_from_list)
-          tv=pm_type_vect(coder%context,get_arg_type(coder,callnode,cnode_arg(args,nret+1)))
-          do i=1,nret
-             call combine_types(cnode_arg(args,i),pm_tv_arg(tv,i))
-          enddo
+          tno=get_arg_type(coder,callnode,cnode_arg(args,nret+1))
+          if(tno>0) then
+             tv=pm_type_vect(coder%context,tno)
+             do i=1,nret
+                call combine_types(cnode_arg(args,i),pm_tv_arg(tv,i))
+             enddo
+          else
+             do i=1,nret
+                call set_arg_to_error_type(i)
+             enddo
+          endif
        case(sym_move)
           n=nargs/2
           do i=1,n
@@ -1862,6 +1903,44 @@ contains
            key,1,p)
       call set_call_sig(k)
     end subroutine inf_each_index
+
+    !===================================================================
+    ! Infer PM__for
+    !==================================================================
+    recursive subroutine inf_pm_for
+      integer:: i,n,tno,key(1)
+      logical:: ok
+      integer(pm_ln):: k
+      type(pm_root),pointer:: root
+      n=pm_type_int_value(coder%context,arg_type(3),ok)
+      if(.not.ok) then
+         call inf_error_with_trace(coder,callnode,'Bad rank in PM__for')
+         return
+      endif
+      call push_word(coder,pm_type_new_tuple+pm_type_is_list)
+      call push_word(coder,0)
+      do i=1,n*4
+         call push_word(coder,int(pm_long))
+      enddo
+      call make_type_if_possible(coder,n*4+2)
+      call combine_types(cnode_arg(args,1),pop_word(coder))
+      root=>pm_add_root(coder%context,coder%envelope)
+      coder%envelope=pm_null_obj
+      call inf_cblock(coder,cnode_arg(args,nargs+nret))
+      if(.not.pm_fast_isnull(coder%envelope)) then
+         call code_val(coder,coder%envelope)
+         call make_code(coder,pm_null_obj,cnode_is_any_sig,1)
+         key(1)=pm_dict_size(coder%context,coder%proc_cache)
+         k=pm_idict_add(coder%context,coder%proc_cache,&
+              key,1,top_code(coder))
+         call drop_code(coder)
+      else
+         k=0
+      endif
+      call set_call_sig(int(k))
+      coder%envelope=root%ptr
+      call pm_delete_root(coder%context,root)
+    end subroutine inf_pm_for
 
     !===================================================================
     ! Push argument types with modes for all arguments
@@ -2187,7 +2266,7 @@ contains
     type(code_state),intent(inout):: coder
     type(pm_ptr),intent(in):: callnode,cblock,args
     integer,intent(in):: sig,num_args,nret
-    logical:: is_comm,is_cond,is_unlabelled,ignore_rules
+    logical:: is_comm,is_cond,is_unlabelled,is_invar,ignore_rules
     integer:: name,mode,mode2,i,j,tno,tno2,slot,flags
     integer:: nargs,nkey,keybase,ressig,amps
     logical:: undef_arg,bad_amp
@@ -2209,6 +2288,7 @@ contains
     is_comm=iand(flags,proccall_is_comm)/=0
     is_cond=iand(flags,call_is_cond)/=0
     is_unlabelled=iand(flags,call_is_unlabelled)/=0
+    is_invar=iand(flags,call_is_invar)/=0
     ignore_rules=cnode_flags_set(callnode,call_flags,call_ignore_rules)
     if(sig/=0) then
        proclist=pm_dict_val(coder%context,coder%sig_cache,int(sig,pm_ln))
@@ -2263,7 +2343,6 @@ contains
        return
     endif
 
-    
     bad_amp=.false.
     if(amps/=0.and..not.ignore_rules) then
        
@@ -2273,19 +2352,25 @@ contains
 !!$               trim(pm_type_as_string(coder%context,coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i))))
           mode2=pm_type_get_mode(coder%context,&
                coder%wstack(coder%wtop+amplocs%data%i(amplocs%offset+i)))
-          if(mode2/=sym_private) then
-             if(is_comm) then
-                if(is_unlabelled) then
-                   call call_error('Cannot modify a "'//trim(sym_names(mode2))//&
-                        '" value in an unlabelled conditional context')
+          if(is_invar) then
+             if(mode2/=sym_invar.and.(mode2/=sym_shared.or..not.is_comm)) then
+                call call_error('Cannot modify a "'//trim(sym_names(mode2))//&
+                     '" value in an "invar" statement')
+             endif
+          else
+             if(mode2/=sym_private) then
+                if(is_comm) then
+                   if(is_unlabelled) then
+                      call call_error('Cannot modify a "'//trim(sym_names(mode2))//&
+                           '" value in an unlabelled conditional context')
+                      bad_amp=.true.
+                   endif
+                else
+                   call call_error('"'//trim(sym_names(mode2))//&
+                        '" value can only be modified by an "invar" statement, "sync" assignment or "%" call')
                    bad_amp=.true.
                 endif
-             else
-                call call_error('"'//trim(sym_names(mode2))//&
-                        '" value can only be modified by an "invar" or "sync" assignment or "%" call')
-                bad_amp=.true.
              endif
- 
           endif
        enddo
     endif
@@ -2301,19 +2386,23 @@ contains
        endif
            
        ! Implement mode combination rule for standard procedures (ignore topology arg)
-       mode=pm_type_combine_modes(coder%context,&
-            coder%wstack(coder%wtop+2:coder%wtop+nargs),is_cond,&
-            ignore_rules)
-       if(nkey>0) then
-          mode=pm_type_combine_modes(coder%context,&
-               coder%wstack(keybase+1:keybase+nkey),is_cond,&
-               ignore_rules,mode)
-       endif
-       if(mode<0) then
-          call call_error('Cannot pass a shared value to a standard procedure')
-          call inf_error_with_trace(coder,cnode_arg(args,nret-mode),&
-               'Cannot pass a shared value to a standard procedure')
+       if(iand(flags,call_returns_private)/=0) then
           mode=sym_private
+       else
+          mode=pm_type_combine_modes(coder%context,&
+               coder%wstack(coder%wtop+2:coder%wtop+nargs),is_cond,&
+               ignore_rules)
+          if(nkey>0) then
+             mode=pm_type_combine_modes(coder%context,&
+                  coder%wstack(keybase+1:keybase+nkey),is_cond,&
+                  ignore_rules,mode)
+          endif
+          if(mode<0) then
+             call call_error('Cannot pass a shared value to a standard procedure')
+             call inf_error_with_trace(coder,cnode_arg(args,nret-mode),&
+               'Cannot pass a shared value to a standard procedure')
+             mode=sym_private
+          endif
        endif
        
        ! Strip argument modes before passing
@@ -2412,7 +2501,7 @@ contains
       
       integer:: h,i,j,m,start,slot,pcheck,nkey_sig,jpass,nconsidered
       integer:: vbase,wbase
-      type(pm_ptr):: tv,v,proc,match_proc,rtvect
+      type(pm_ptr):: tv,v,proc,match_proc,rtvect,new_env
       integer:: rt,rt2,pars,mpars,apars,new_apars,tno,match_pars,pflags
       logical:: ok,found,visible,found_has_no_rtypes,when_no_match
       integer,dimension(1):: key
@@ -2513,7 +2602,7 @@ contains
                            endif
                            rt=inf_proc(coder,proc,callnode,apars,pars,nret,nkey,&
                                 keynames,keybase,&
-                                int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.true.,new_apars)
+                                int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.true.,new_apars,new_env)
                            coder%trace_depth=coder%trace_depth-1
                            if(.not.when_no_match) then
                               call inf_error(coder,callnode,&
@@ -2560,7 +2649,7 @@ contains
 
                   rt=inf_proc(coder,proc,callnode,apars,pars,nret,nkey,&
                        keynames,keybase,&
-                       int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.false.,new_apars)
+                       int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.false.,new_apars,new_env)
                   coder%trace_depth=coder%trace_depth-1
                   if(when_no_match) then
                      cycle
@@ -2583,6 +2672,12 @@ contains
                   else
                      !if(coder%vtop/=pcheck+1) call pm_panic('pcheck mismatch')
                   endif
+                  
+                  ! Be careful not to add GC code between inf_proc and here (new_env not protected)
+                  if(.not.pm_fast_isnull(new_env)) then
+                     call combine_nhd_call_envelope(coder,new_env)
+                  endif
+                  
                endif
 
                found=.true.
@@ -2591,7 +2686,7 @@ contains
                found_has_no_rtypes=&
                     pm_type_kind(coder%context,cnode_get_num(match_proc,pr_rtype))==&
                     pm_type_is_undef_result
-
+               
                if(nret>0) then
                   if(rt>0) then
                      rtvect=pm_type_vect(coder%context,rt)
@@ -2614,18 +2709,24 @@ contains
 
                ! Types of & args may have changed
                if(new_apars>0.and.amps/=0.and..not.bad_amp.and..not.ignore_rules) then
-!!$                  write(*,*) 'Changing to',trim(pm_type_as_string(coder%context,new_apars))
+                  if(debug_inference) then
+                     write(*,*) 'Changing & to',trim(pm_type_as_string(coder%context,new_apars))
+                  endif
                   amplocs=pm_name_val(coder%context,amps)
                   rtvect=pm_type_vect(coder%context,new_apars)
                   if(pm_tv_kind(rtvect)==pm_type_is_tuple.and.&
                        iand(pm_tv_flags(rtvect),pm_type_is_list)==0) then
                      do j=0,pm_fast_esize(amplocs)
                         m=amplocs%data%i(amplocs%offset+j)
-                        call combine_types(cnode_arg(args,nret+m),pm_tv_arg(rtvect,j+1))
+                        tno=pm_tv_arg(rtvect,j+1)
+                        if(is_invar.and..not.is_comm) tno=pm_type_add_mode(coder%context,tno,sym_invar)
+                        call combine_types(cnode_arg(args,nret+m),tno)
                      enddo
                   else
                      m=amplocs%data%i(amplocs%offset)
-                     call combine_types(cnode_arg(args,nret+m),new_apars)
+                     tno=new_apars
+                     if(is_invar.and..not.is_comm) tno=pm_type_add_mode(coder%context,tno,sym_invar)
+                     call combine_types(cnode_arg(args,nret+m),tno)
                   endif
                endif
             elseif(apars==error_type) then
@@ -2990,7 +3091,7 @@ contains
     subroutine call_error(str)
       character(len=*):: str
       call inf_error(coder,callnode,str)
-      call print_call_details(coder,callnode,coder%wtop,nargs)
+      call print_call_details(coder,callnode,keybase,nargs)
       call inf_trace(coder)
     end subroutine call_error
     
@@ -3087,6 +3188,8 @@ contains
        ! Bundle arguments into a single type
        argtyp=pm_new_type(coder%context,coder%wstack(wbase+1:&
             wbase+nargs+2))
+!!$       write(*,*) 'ARGTYP=',argtyp,trim(pm_type_as_string(coder%context,argtyp)),coder%wstack(wbase+1:&
+!!$            wbase+nargs+2)
 
     else
        argtyp=1
@@ -3722,6 +3825,133 @@ contains
     m=cnode_get_num(callnode,call_index)+(n+bit_size(1)-2)/bit_size(1)
     coder%stack(coder%base+m)=ibset(max(0,coder%stack(coder%base+m)),iand(n-1,bit_size(1)-1))
   end subroutine set_call_bit
+
+
+  !================================================================
+  ! Update the current envelope for @[] accesses to nhd vars
+  !================================================================
+  subroutine combine_nhd_envelope(coder,callnode,args,n)
+    type(code_state):: coder
+    type(pm_ptr):: callnode
+    integer,dimension(:),intent(in):: args
+    integer,intent(in):: n
+    integer(pm_ln):: env(n*2)
+    integer:: i,s,nz
+    type(pm_ptr):: p
+    logical:: ok
+
+    ! Create envelope record if there is none
+    ! Record goes: non_literal_flag min max ... (for ortho) min max ... (for non-ortho)
+    if(pm_fast_isnull(coder%envelope)) then
+       coder%envelope=pm_new(coder%context,pm_long,int(n*4,pm_ln))
+       p=coder%envelope
+       p%data%ln(p%offset)=0
+       do i=0,n*4-2,2
+          p%data%ln(p%offset+i)=huge(1_pm_ln)
+          p%data%ln(p%offset+i+1)=-huge(1_pm_ln)
+       enddo
+    else
+       p=coder%envelope
+    endif
+
+    ! This should only happen if there are errors elsewhere
+    if(n*4/=pm_fast_esize(p)+1) then
+       return
+    endif
+
+    ! Get envelope values from argument types (will set ok=false if non-literal type)
+    ok=.true.
+    do i=1,n*2-1,2
+       env(i)=val_for(i)
+       env(i+1)=val_for(i+1,env(i))
+    enddo
+    if(.not.ok) then
+       call inf_error(coder,callnode,'Arguments to "@[]" must be "literal" or "fix" integers')
+       return
+    endif
+
+    ! How many dimensions have non-zero indices?
+    nz=0
+    do i=1,n*2-1,2
+       if(env(i)==0.and.env(i+1)==0) nz=nz+1
+    enddo
+
+    ! Update the otho envelope (which must also include non-otho so always update)
+    do i=1,n*2-1,2
+       p%data%ln(p%offset+i-1)=min(p%data%ln(p%offset+i-1),env(i))
+       p%data%ln(p%offset+i)=max(p%data%ln(p%offset+i),env(i+1))
+    enddo
+
+    ! If this is a non-ortho access, then also update non-ortho envelope
+    if(nz/=n-1) then
+       s=n*2
+       do i=1,n*2-1,2
+          p%data%ln(p%offset+i+s-1)=min(p%data%ln(p%offset+i+s-1),env(i))
+          p%data%ln(p%offset+i+s)=max(p%data%ln(p%offset+i+s),env(i+1))
+       enddo
+    endif
+
+  contains
+    include 'fisnull.inc'
+    include 'fesize.inc'
+    
+    function val_for(i,def) result(n)
+      integer,intent(in):: i
+      integer(pm_ln),intent(in),optional:: def
+      integer(pm_ln):: n
+      integer:: tno,tk
+      type(pm_ptr):: p
+      tno=args(i)
+      tk=pm_type_kind(coder%context,tno)
+      if(tk==pm_type_is_literal_value.or.tk==pm_type_is_fix_value) then
+         p=pm_type_val(coder%context,tno)
+         n=p%data%ln(p%offset)
+      elseif(tno==pm_null) then
+         if(present(def)) then
+            n=def
+         else
+            ok=.false.
+         endif
+      else
+         ok=.false.
+      endif
+    end function val_for
+    
+  end subroutine combine_nhd_envelope
+
+
+  !==================================================
+  ! Combine envelope returned by a % proc into
+  ! the current nhd envelope
+  !==================================================
+  subroutine combine_nhd_call_envelope(coder,envelope)
+    type(code_state),intent(inout):: coder
+    type(pm_ptr),intent(in):: envelope
+    integer:: i,esize
+    if(pm_fast_isnull(envelope)) return
+    if(pm_fast_isnull(coder%envelope)) then
+       coder%envelope=envelope
+       return
+    endif
+!!$    call pm_dump_tree(coder%context,6,coder%envelope,2)
+!!$    write(*,*) '[--]'
+!!$    call pm_dump_tree(coder%context,6,envelope,2)
+    esize=pm_fast_esize(coder%envelope)
+    if(esize/=pm_fast_esize(envelope)) return
+    do i=0,pm_fast_esize(coder%envelope),2
+       coder%envelope%data%ln(coder%envelope%offset+i)=min(&
+            coder%envelope%data%ln(coder%envelope%offset+i),&
+            envelope%data%ln(envelope%offset+i))
+       coder%envelope%data%ln(coder%envelope%offset+i+1)=max(&
+            coder%envelope%data%ln(coder%envelope%offset+i+1),&
+            envelope%data%ln(envelope%offset+i+1))
+    enddo
+  contains
+    include 'fesize.inc'
+    include 'fisnull.inc'
+  end subroutine combine_nhd_call_envelope
+
+  
   
   !================================================================
   ! Run backpropogation analysis on cblock in function
@@ -3798,13 +4028,42 @@ contains
     integer(access_kind),dimension(:),allocatable,intent(inout):: access_info
     logical,intent(in):: update
     type(pm_ptr):: args,arg,tv
-    integer:: nret,nargs,nvargs,opcode,i,j,n,sig,tno,slot
+    integer:: nret,nargs,nvargs,opcode,i,j,n,sig,tno,slot,mode
     integer(access_kind):: acc
     logical:: any_accessed
     nret=cnode_get_num(callnode,call_nret)
     sig=-cnode_get_num(callnode,call_sig)
     args=cnode_get(callnode,call_args)
     nargs=cnode_numargs(args)-nret
+    if(debug_bprop_simple) then
+       if(sig>0) then
+          write(*,*) 'BPCALL',sym_names(sig)
+       else
+          write(*,*) 'PROCCALL',sig,trim(sig_name_str(coder,-sig))
+       endif
+       do i=1,nret
+          write(*,'(A,I4,X)',advance='NO') 'ARG=',i
+          if(pm_fast_vkind(cnode_arg(args,i))==pm_pointer) then
+             if(cnode_get_kind(cnode_arg(args,i))==cnode_is_var) then
+                acc=access_info(cnode_get_num(cnode_arg(args,i),var_index))
+                call print_bprop_item(6,acc)
+                if(iand(acc,access_is_list)/=0) then
+                   n=find_list_info(list_info_start(),access_info,&
+                        cnode_get_num(cnode_arg(args,i),var_index))
+                   if(n>0) then
+                      write(*,*) '{'
+                      do j=1,access_info(n+1)
+                         call print_bprop_item(6,access_info(n+1+j))
+                      enddo
+                      write(*,*) '}'
+                   endif
+                endif
+             else
+                write(*,*) 'NONVAR'
+             endif
+          endif
+       enddo
+    endif
     call enable
     if(sig>0) then
        if(debug_bprop) then
@@ -3834,39 +4093,63 @@ contains
              call disable
           endif
        case(sym_until,sym_until_invar)
-         if(cblock_must_run(cnode_arg(args,1)).or.&
-              block_writes_accessed(3)) then
-            call access(cnode_arg(args,2))
-            coder%loop_depth=coder%loop_depth+1
-            call access(cnode_arg(args,2))
-            call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
-            call access(cnode_arg(args,2))
-            if(coder%loop_depth==1) then
-               call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
-               call access(cnode_arg(args,2))
-            endif
-            coder%loop_depth=coder%loop_depth-1
-         else
-            if(debug_bprop) then
-               write(*,*) 'DISABLE until'
+          if(cblock_must_run(cnode_arg(args,1)).or.&
+               block_writes_accessed(3)) then
+             call access(cnode_arg(args,2))
+             coder%loop_depth=coder%loop_depth+1
+             call access(cnode_arg(args,2))
+             call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
+             call access(cnode_arg(args,2))
+             if(coder%loop_depth==1) then
+                call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
+                call access(cnode_arg(args,2))
              endif
-            call disable
-         endif
+             coder%loop_depth=coder%loop_depth-1
+          else
+             if(debug_bprop) then
+                write(*,*) 'DISABLE until'
+             endif
+             call disable
+          endif
        case(sym_if,sym_if_invar)
           call bprop_if(count_updates(cnode_arg(args,4),1))
        case(sym_do)
           call bprop_cblock(coder,cnode_arg(args,1),access_info,rvec,update)
        case(sym_pct)
-          call bprop_cblock(coder,cnode_arg(args,2),access_info,rvec,update)
-          call access(cnode_arg(args,1))
+          call bprop_cblock(coder,cnode_arg(args,nargs),access_info,rvec,update)
+          if(nargs>1) call access(cnode_arg(args,1))
+       case(sym_pm_for)
+          i=cnode_get_num(callnode,call_index)
+          call bprop_cblock(coder,cnode_arg(args,nret+nargs),access_info,rvec,update)
+          if(.not.accessed(cnode_arg(args,1))) then
+             rvec(i)=0
+          elseif(rvec(i)==0) then
+             rvec(i)=-2
+          endif
+          do i=1,nargs-1
+             call access(cnode_arg(args,nret+i))
+          enddo
+          if(debug_bprop) then
+             write(*,*) 'FOR>',accessed(cnode_arg(args,1)),rvec(i)
+          endif
        case(sym_any,sym_any_invar)
           call bprop_multi_versions(cnode_arg(args,4),cnode_arg(args,2),cnode_arg(args,1))
           call access(cnode_arg(args,3))
+       case(sym_pm_invar)
+          if(nret==1) then
+             if(.not.accessed(cnode_arg(args,1))) then
+                call disable
+                return
+             endif
+          endif
+          call bprop_cblock(coder,cnode_arg(args,nret+1),access_info,rvec,update)
+       case(sym_pm_set_dotdotdot)
+          call access(cnode_arg(args,2))
        case(sym_pm_each_index)
           if(nret==1.or.accessed(cnode_arg(args,1))) then
              if(nret>1) then
                 call bprop_multi_versions(cnode_arg(args,nret+3),cnode_arg(args,nret+2),&
-                     cnode_arg(args,nret),cnode_arg(args,nret+4))
+                     cnode_arg(args,nret),cnode_arg(args,nret+4),cnode_arg(args,1))
              else
                 call bprop_multi_versions(cnode_arg(args,nret+3),cnode_arg(args,nret+2),&
                      cnode_arg(args,nret))
@@ -3875,6 +4158,8 @@ contains
           else
              call disable
           endif
+       case(sym_pm_envelope)
+          call combine_access_info(cnode_arg(args,1),access_used_by_at,.false.)
        case(sym_check)
           call std_access(.true.,1)
        case(sym_test)
@@ -3891,19 +4176,66 @@ contains
           else
              call disable
           endif
+       case(sym_pm_list)
+          if(cnode_flags_set(cnode_arg(args,1),var_flags,var_is_list)) then
+             n=find_list_info(list_info_start(),access_info,cnode_get_num(cnode_arg(args,1),var_index))
+             if(debug_bprop) then
+                write(*,*)'LIST>',trim(pm_name_as_string(coder%context,cnode_get_num(cnode_arg(args,1),var_name))),'@',n
+             endif
+             if(n<0) then
+                acc=get_access_info(cnode_arg(args,1))
+                do i=2,nargs+nret
+                   call combine_access_info(cnode_arg(args,i),acc,.false.)
+                enddo
+             else
+                do i=2,nargs+nret
+                   call combine_access_info(cnode_arg(args,i),access_info(n+i),.false.)
+                enddo
+             endif
+             call set_final_tags_for_call(args,nargs,nargs,pm_null_obj,0)
+          else
+             if(accessed(cnode_arg(args,1))) then
+                do i=2,nargs+nret
+                   call access(cnode_arg(args,i))
+                enddo
+             else
+                call disable
+             endif
+          endif
        case(sym_get_list_elem,sym_simple_list_elem)
-          if(accessed(cnode_arg(args,1))) then
+          if(ever_accessed(cnode_arg(args,1))) then
              arg=cnode_arg(args,2)
              call access(arg)
              if(sig/=sym_simple_list_elem) call access(cnode_arg(args,3))
-             slot=cnode_get_num(arg,var_index)
-             tno=rvec(slot)
-             if(tno>0) then
-                tv=pm_type_vect(coder%context,tno)
-                n=alloc_list_info(list_info_start(),pm_tv_numargs(tv),slot,access_is_var)
-                access_info(n+1+rvec(cnode_get_num(callnode,call_index)))=access_info(cnode_get_num(cnode_arg(args,1),var_index))
-                access_info(slot)=ior(access_info(slot),access_is_list)
+             if(.not.cnode_flags_clear(arg,var_flags,var_is_list+var_is_list_param)) then
+                slot=cnode_get_num(arg,var_index)
+                tno=rvec(slot)
+                if(tno>0) then
+                   tv=pm_type_vect(coder%context,pm_type_strip_mode(coder%context,tno,mode))
+                   n=alloc_list_info(list_info_start(),pm_tv_numargs(tv),slot,access_is_var)
+                   access_info(n+1+rvec(cnode_get_num(callnode,call_index)))=&
+                        access_info(cnode_get_num(cnode_arg(args,1),var_index))
+                   access_info(slot)=ior(access_info(slot),access_is_list)
+                endif
              endif
+          else
+             call disable
+          endif
+       case(sym_update_from_list)
+          any_accessed=.false.
+          do i=1,nret
+             arg=cnode_arg(args,i)
+             any_accessed=any_accessed.or.accessed_after_modify(arg)
+          enddo
+          if(any_accessed) then
+             call access(cnode_arg(args,nargs+nret))
+          endif
+       case(sym_pm_import_list)
+          if(accessed(cnode_arg(args,1))) then
+             arg=cnode_arg(args,2)
+             call copy_list_info(cnode_arg(args,1),arg)
+             call combine_access_info(arg,access_is_list,.false.)
+             call access(arg)
           else
              call disable
           endif
@@ -3920,7 +4252,7 @@ contains
                    tv=pm_type_vect(coder%context,tno)
                    if(pm_tv_kind(tv)==pm_type_is_tuple) then
                       if(iand(pm_tv_flags(tv),pm_type_is_list)==0) then
-                         nvargs=pm_tv_numargs(tv)
+                         nvargs=pm_tv_numargs(tv)-1
                       else
                          n=n+pm_tv_numargs(tv)+2
                       endif
@@ -3932,9 +4264,9 @@ contains
           call code_val(coder,pm_new(coder%context,&
                access_pm_type,int(nargs+nvargs+n+2,pm_ln)))
           arg=top_code(coder)
-          j=nargs+nvargs-merge(1,0,nvargs>0)+1
+          j=nargs+nvargs+1
           arg%data%i16(arg%offset)=j-1
-          do i=1,nargs-merge(1,0,nvargs>0)
+          do i=1,nargs
              acc=get_arg_access_info(cnode_arg(args,i))
              arg%data%i16(arg%offset+i)=acc
              if(debug_bprop_tagging) then
@@ -3951,11 +4283,11 @@ contains
              acc=access_info(size(rvec)+i)
              if(acc==access_is_var) then
                 acc=ior(acc,access_not_passed)
-             elseif(iand(pm_type_flags(coder%context,&
-                  pm_tv_arg(tv,i)),pm_type_has_storage)==0) then
-                acc=ior(acc,access_not_passed)
+!!$             elseif(iand(pm_type_flags(coder%context,&
+!!$                  pm_tv_arg(tv,i)),pm_type_has_storage)==0) then
+!!$                acc=ior(acc,access_not_passed)
              endif
-             arg%data%i16(arg%offset+i+nargs-1)=acc
+             arg%data%i16(arg%offset+i+nargs)=acc
              call copy_list_info_for_param_idx(i+nargs-1,acc,arg%data%i16(arg%offset+1:),j,size(rvec)+i)
           enddo
           arg%data%i16(arg%offset+j)=-1
@@ -3976,40 +4308,19 @@ contains
           do i=nret/2+1,nret
              arg%data%i16(arg%offset+i-nret/2)=get_arg_access_info(cnode_arg(args,i))
           enddo
-       case(sym_amp,sym_result,sym_update_list)
+       case(sym_amp)
+          do i=nret+1,nargs+nret
+             call set_access_info(cnode_arg(args,i),access_everything+access_used_by_at)
+          enddo
+       case(sym_result,sym_update_list)
           do i=nret+1,nargs+nret
              call set_access_info(cnode_arg(args,i),access_everything)
           enddo
-       case(sym_update_from_list)
-          any_accessed=.false.
-          do i=1,nret
-             arg=cnode_arg(args,i)
-             any_accessed=any_accessed.or.accessed_after_modify(arg)
-          enddo
-          if(any_accessed) then
-             call access(cnode_arg(args,nargs+nret))
-          endif
+ 
        case(sym_rec)
           call std_access(.false.,3)
-       case(sym_var,sym_var_set_mode,sym_set_mode,sym_change_mode,sym_underscore,&
-            sym_colon,sym_end_loop)
-          continue
        case(sym_type_val)
           if(.not.accessed(cnode_arg(args,1))) call disable
-       case(sym_list)
-          n=find_list_info(list_info_start(),access_info,cnode_get_num(cnode_arg(args,1),var_index))
-          if(n<0) then
-             acc=get_access_info(cnode_arg(args,i))
-             do i=2,nargs
-                call combine_access_info(cnode_arg(args,i),acc,.false.)
-             enddo
-          else
-             do i=2,nargs
-                call combine_access_info(cnode_arg(args,i),access_info(n+i),.false.)
-             enddo
-          endif
-       case(sym_typeof,sym_pm_uninit)
-          continue
        case(sym_move)
           n=nargs/2
           do i=1,n
@@ -4018,6 +4329,9 @@ contains
                      access_used_ever+access_used_now+access_is_var,.false.)
              endif
           enddo
+       case(sym_var,sym_var_set_mode,sym_set_mode,sym_change_mode,sym_underscore,&
+            sym_colon,sym_end_loop,sym_typeof,sym_pm_uninit)
+          continue
        case default
           call std_access(.false.,1)
        end select
@@ -4042,7 +4356,7 @@ contains
          call disable
          return
       endif
-      
+
       readlist=cnode_arg(cnode_arg(args,4),1)
       i=1
       p=readlist
@@ -4075,11 +4389,16 @@ contains
       call access(cnode_arg(args,1))
     end subroutine bprop_if
 
-    recursive subroutine bprop_multi_versions(limitsc,cblock,rtn,res)
+    recursive subroutine bprop_multi_versions(limitsc,cblock,rtn,res,fullres)
       type(pm_ptr),intent(in):: limitsc,cblock,rtn
-      type(pm_ptr),intent(in),optional:: res
-      integer:: i,j,slot1,slot2,sig,rtn_slot,rtn_access
+      type(pm_ptr),intent(in),optional:: res,fullres
+      integer:: i,j,slot1,slot2,sig,rtn_slot,rtn_access,list
       type(pm_ptr):: lrvecs,lrvec,limits
+      if(present(fullres)) then
+         list=find_list_info(list_info_start(),access_info,cnode_get_num(fullres,var_index))
+      else
+         list=-1
+      endif
       sig=rvec(cnode_get_num(callnode,call_index))
       lrvecs=pm_dict_val(coder%context,coder%proc_cache,&
            int(sig,pm_ln))
@@ -4094,14 +4413,20 @@ contains
          rvec(slot1:slot2)=lrvec%data%i(lrvec%offset:lrvec%offset+slot2-slot1)
          access_info(slot1:slot2)=0
          access_info(rtn_slot)=rtn_access
-         if(present(res)) call access(res)
+         if(present(res)) then
+            if(list>0) then
+               access_info(cnode_get_num(res,var_index))=access_info(list+1+j)
+            else
+               call access(res)
+            endif
+         endif
          call bprop_cblock(coder,cblock,access_info,rvec,update)
          if(update) then
             do i=slot1,slot2
                if(access_info(i)==access_deactivated_call.or.&
                     access_info(i)==access_is_var) then
                   lrvec%data%i(lrvec%offset+i-slot1)=sp_sig_deactivated
-                  write(*,*) 'MU-DEACTIVATE',i
+                  if(debug_bprop) write(*,*) 'MU-DEACTIVATE>',i
                else
                   lrvec%data%i(lrvec%offset+i-slot1)=rvec(i)
                endif
@@ -4118,6 +4443,18 @@ contains
       integer(access_kind):: acc
 
       ifirst=merge(num_comm_args+1,2,cnode_flags_set(callnode,call_flags,proccall_is_comm))
+
+      if(cnode_flags_set(callnode,call_flags,call_is_halo_exchange)) then
+!!$         write(*,*) 'Test halo'
+!!$         do i=1,nargs
+!!$            call print_bprop_item(6,get_access_info(cnode_arg(args,i)))
+!!$         enddo
+!!$         write(*,*)'---'
+         if(iand(get_access_info(cnode_arg(args,num_comm_args+1)),access_used_by_at)==0) then
+            call disable
+            return
+         endif
+      endif
 
       sig=rvec(cnode_get_num(callnode,call_index))
       if(sig<0) then
@@ -4145,6 +4482,7 @@ contains
          case(sp_sig_link) 
             call combine_access_info(cnode_arg(args,3),&
                  get_access_info(cnode_arg(args,1)),.false.)
+            call set_final_tags_for_call(args,nargs,2,pm_null_obj,0)
          case(sp_sig_noop)
             continue
          case default
@@ -4191,8 +4529,9 @@ contains
          arg=cnode_arg(args,i)
          arg_accessed=accessed(arg)
          if(debug_bprop) then
-            write(*,*) 'accessed #',i,cnode_get_num(arg,var_index),arg_accessed,cnode_flags_set(arg,var_flags,var_is_reference)
-                 call print_bprop_item(6,get_access_info(arg))
+            write(*,*) 'accessed #',i,cnode_get_num(arg,var_index),arg_accessed,&
+                 cnode_flags_set(arg,var_flags,var_is_reference)
+            call print_bprop_item(6,get_access_info(arg))
          endif
          is_accessed=is_accessed.or.arg_accessed
          all_accessed=all_accessed.and.arg_accessed
@@ -4261,7 +4600,7 @@ contains
          ! Main arguments
          arg_access=cnode_arg(procnode,6)
          totargs=arg_access%data%i16(arg_access%offset)
-         do i=1,nargs-merge(1,0,totargs>nargs)
+         do i=1,nargs
             acc=arg_access%data%i16(arg_access%offset+i)
             arg=cnode_arg(args,i+nret)
             call combine_arg_access_info(arg,acc)
@@ -4432,40 +4771,49 @@ contains
       type(pm_ptr),intent(in):: var
       logical:: ok
       type(pm_ptr):: rvar
-       if(cnode_get_kind(var)==cnode_is_var) then
-          ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
-       else
-          ok=.true.
-       endif
-     end function accessed
-     
-     function accessed_after_modify(var) result(ok)
-       type(pm_ptr),intent(in):: var
-       logical:: ok
-       type(pm_ptr):: rvar
-       if(cnode_get_kind(var)==cnode_is_var) then
-          ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
-          if(.not.ok.and.cnode_flags_set(var,var_flags,var_is_reference)) then
-             rvar=cnode_get(var,var_extra_info)
-             ok=iand(access_info(cnode_get_num(rvar,var_index)),access_used_now)/=0
-          endif
-       else
-          ok=.true.
-       endif
-     end function accessed_after_modify
-     
-     subroutine modify(var)
+      if(cnode_get_kind(var)==cnode_is_var) then
+         ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
+      else
+         ok=.true.
+      endif
+    end function accessed
+
+    function ever_accessed(var) result(ok)
+      type(pm_ptr),intent(in):: var
+      logical:: ok
+      type(pm_ptr):: rvar
+      if(cnode_get_kind(var)==cnode_is_var) then
+         ok=iand(access_info(cnode_get_num(var,var_index)),access_used_ever)/=0
+      else
+         ok=.true.
+      endif
+    end function ever_accessed
+
+    function accessed_after_modify(var) result(ok)
+      type(pm_ptr),intent(in):: var
+      logical:: ok
+      type(pm_ptr):: rvar
+      if(cnode_get_kind(var)==cnode_is_var) then
+         ok=iand(access_info(cnode_get_num(var,var_index)),access_used_now)/=0
+         if(.not.ok.and.cnode_flags_set(var,var_flags,var_is_reference)) then
+            rvar=cnode_get(var,var_extra_info)
+            ok=iand(access_info(cnode_get_num(rvar,var_index)),access_used_now)/=0
+         endif
+      else
+         ok=.true.
+      endif
+    end function accessed_after_modify
+
+    subroutine modify(var)
       type(pm_ptr),intent(in):: var
       integer:: idx
-      idx=cnode_get_num(var,var_index)
-      access_info(idx)=ior(access_is_var,&
-           iand(not(access_used_now+access_used_by_at),access_info(idx)))
-      if(cnode_flags_set(var,var_flags,var_is_reference)) then
-         idx=cnode_get_num(cnode_get(var,var_extra_info),var_index)
+      ! Only a complete assignment resets _used_ flags
+      if(cnode_flags_clear(var,var_flags,var_is_reference)) then
+         idx=cnode_get_num(var,var_index)
          access_info(idx)=ior(access_is_var,&
               iand(not(access_used_now+access_used_by_at),access_info(idx)))
       endif
-      !!! modify any explicit list
+!!! modify any explicit list
     end subroutine modify
 
     subroutine enable
@@ -4494,7 +4842,7 @@ contains
       endif
       if(iand(acc,access_needs_movability)/=0) call tag_associated_param(arg)
     end subroutine combine_arg_access_info
-    
+
     subroutine combine_arg_access_info_at_idx(idx,acc)
       integer,intent(in):: idx
       integer(access_kind),intent(in):: acc
@@ -4504,7 +4852,7 @@ contains
               iand(acc,access_used_ever)/=0)
       endif
     end subroutine combine_arg_access_info_at_idx
-    
+
     subroutine combine_access_info(arg,acc,count_as_access)
       type(pm_ptr),intent(in):: arg
       integer(access_kind),intent(in):: acc
@@ -4553,9 +4901,9 @@ contains
          acc=access_info(cnode_get_num(var,var_index))
          if(acc==access_is_var) then
             acc=ior(acc,access_not_passed)
-         elseif(iand(pm_type_flags(coder%context,&
-              rvec(cnode_get_num(var,var_index))),pm_type_has_storage)==0) then
-            acc=access_not_passed
+!!$         elseif(iand(pm_type_flags(coder%context,&
+!!$              rvec(cnode_get_num(var,var_index))),pm_type_has_storage)==0) then
+!!$            acc=access_not_passed
          endif
          if(debug_bprop) then
             write(*,*) 'GOT',cnode_get_num(var,var_index),acc
@@ -4637,6 +4985,9 @@ contains
       access_info(i+2:i+1+n)=iacc
       access_info(i+2+n)=-1
       idx=i
+      if(debug_bprop) then
+         write(*,*) 'Alloc list>',access_info(start:i+2+n)
+      endif
     end function alloc_list_info
 
     subroutine copy_list_info_for_arg(acc,arr,start,arg_index,arg)
@@ -4650,7 +5001,7 @@ contains
          call copy_list_info_for_arg_idx(acc,arr,start,arg_index,idx)
       endif
     end subroutine copy_list_info_for_arg
-    
+
     subroutine copy_list_info_for_arg_idx(acc,arr,start,arg_index,var_index)
       integer(access_kind),intent(in):: acc
       integer(access_kind),dimension(:),intent(in)::arr
@@ -4659,18 +5010,35 @@ contains
       !write(*,*) '###',arr(1:start+5)
       if(iand(acc,access_is_list)/=0) then
          src=find_list_info(start,arr,arg_index)
-         if(src<0) return
+         if(debug_bprop) then
+            write(*,*) 'LIST ARG>',arg_index,var_index,src
+         endif
          dst=find_list_info(list_info_start(),access_info,var_index)
          if(dst>0) then
-            do i=2,arr(dst+i)+1
-               access_info(dst+i)=ior(access_info(dst+i),arr(src+i))
-            enddo
+            if(src>0) then
+               do i=2,arr(dst+i)+1
+                  access_info(dst+i)=ior(access_info(dst+i),arr(src+i))
+               enddo
+            else
+               do i=2,arr(dst+i)+1
+                  access_info(dst+i)=ior(access_info(dst+i),arr(iand(acc,not(access_is_list+access_not_passed))))
+               enddo
+            endif
+            access_info(var_index)=ior(access_info(var_index),access_is_list)
             return
          endif
-         dst=alloc_list_info(list_info_start(),int(arr(src+1)),var_index,acc)
-         do i=0,arr(src+1)+1
-            access_info(dst+i)=arr(src+i)
-         enddo
+         if(src>0) then
+            dst=alloc_list_info(list_info_start(),int(arr(src+1)),var_index,acc)
+            do i=2,arr(src+1)+1
+               access_info(dst+i)=arr(src+i)
+            enddo
+            access_info(var_index)=ior(access_info(var_index),access_is_list)
+!!$         else
+!!$            
+!!$            do i=2,arr(src+1)+1
+!!$               access_info(dst+i)=iand(acc,not(access_is_list+access_not_passed))
+!!$            enddo
+         endif
       endif
     end subroutine copy_list_info_for_arg_idx
 
@@ -4696,8 +5064,10 @@ contains
       integer:: src,i
       if(iand(acc,access_is_list)/=0) then
          src=find_list_info(list_info_start(),access_info,var_index)
+         if(debug_bprop) then
+            write(*,*) 'COPY LIST INFO FOR PARAM>',par_index,var_index,src
+         endif
          if(src<0) return
-         write(*,*) '<<',access_info(src:src+access_info(src+1)+1)
          arr(start)=par_index
          do i=1,access_info(src+1)+1
             arr(start+i)=access_info(src+i)
@@ -4706,6 +5076,25 @@ contains
          arr(start)=-1
       endif
     end subroutine copy_list_info_for_param_idx
+
+    subroutine copy_list_info(arg1,arg2)
+      type(pm_ptr),intent(in):: arg1,arg2
+      integer:: list1,list2,n,i
+      list1=find_list_info(list_info_start(),access_info,&
+           cnode_get_num(arg1,var_index))
+      if(debug_bprop) then
+         write(*,*) 'COPY LIST INFO>',list1
+      endif
+      if(list1>0) then
+         n=access_info(list1+1)
+         list2=alloc_list_info(list_info_start(),n,&
+              cnode_get_num(arg2,var_index),&
+              access_is_var)
+         do i=1,n
+            access_info(list2+1+i)=ior(access_info(list2+1+i),access_info(list1+1+i))
+         enddo
+      endif
+    end subroutine copy_list_info
     
     function list_info_start() result(n)
       integer:: n
@@ -4722,28 +5111,18 @@ contains
       if(cnode_get_kind(arg)/=cnode_is_var) return
       var=arg
       flags=cnode_get_num(var,var_flags)
-      if(iand(flags,var_is_reference)/=0) then
+      if(iand(flags,var_is_reference+var_is_list_elem)==var_is_reference) then
          var=cnode_get(var,var_extra_info)
          flags=cnode_get_num(var,var_flags)
       endif
-      if(iand(flags,var_is_return)/=0) then
-         if(.not.follow_result_back(coder%context,coder%proc_cache,rvec,&
-              var,new_call,new_call_index,new_var,new_argn)) then
-            if(debug_bprop_tagging) then
-               write(*,*) 'VAR FOLLOWED BACK>',cnode_get_num(new_var,var_index)
-            endif
-            call tag_associated_param(new_var)
-         endif
-         return
-      endif
       if(debug_bprop_tagging) write(*,*) 'VAR_FLAGS_AND_INDEX>',flags,cnode_get_num(var,var_index)
-      if(iand(flags,var_is_param+var_is_key+var_is_key_ptr)/=0) then
+      if(iand(flags,var_is_param+var_is_key+var_is_key_ptr+var_is_varg+var_is_list_elem)/=0) then
          if(debug_bprop_tagging) write(*,*) 'TAGGING>'
          call combine_access_info_at_idx(cnode_get_num(var,var_index),&
               access_needs_movability,.false.)
       endif
     end subroutine tag_associated_param
-    
+
   end subroutine bprop_call
     
   !===================================================
@@ -4970,7 +5349,7 @@ contains
     character(len=2):: join,ampstr
     character(len=1):: procchr,dotchr
     integer:: n,n0,k,nargs,nkeys
-    integer::ampidx,signame,signamebase,tno,dtyp,ttyp
+    integer::ampidx,signame,signamebase,tno,dtyp,ttyp,mode
     type(pm_ptr):: tv,key,val,amp,keyargs,keynames,name
     logical:: iscond
     if(.not.pm_main_process) return
@@ -5041,13 +5420,13 @@ contains
     k=len_trim(string)+1
     if(n0>1) then
        iscond=coder%wstack(base+nkeys+2+2)==coder%true_literal
-       dtyp=coder%wstack(base+nkeys+3)
+       dtyp=pm_type_strip_mode(coder%context,coder%wstack(base+nkeys+3),mode)
        if(dtyp==pm_null) dtyp=0
     else
        iscond=.false.
        dtyp=0
     endif
-    ttyp=coder%wstack(base+nkeys+3)
+    ttyp=pm_type_strip_mode(coder%context,coder%wstack(base+nkeys+3),mode)
     if(ttyp==pm_null) ttyp=0
     call par_context_to_string(coder%context,iscond,.false.,ttyp,dtyp,string,k)
     string(k:k)='('
@@ -5217,7 +5596,5 @@ contains
     include 'fisnull.inc'
 
   end subroutine print_proc_details
-
-
-
+  
 end module pm_infer

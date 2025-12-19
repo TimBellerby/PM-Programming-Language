@@ -542,6 +542,8 @@ contains
        if(any(idx%data%ln(idx%offset:idx%offset+esize)<0.or.&
             idx%data%ln(idx%offset:idx%offset+esize)>&
             len%data%ln(len%offset:len%offset+esize))) then
+          write(*,*) 'ELEM#', idx%data%ln(idx%offset:idx%offset+esize),' vs ',&
+            len%data%ln(len%offset:len%offset+esize)
           ptr=len
           errno=vector_index_error
           return
@@ -1468,34 +1470,65 @@ contains
   !=============================================================================
   ! For any group (defined by import_vec) if any index has a true
   ! in v then set all that group true in w (else false)
+  ! If present posn (which must be pre-allocated) will be filled in with
+  ! index (in total vector, not the subgroup) of first true position
   !=============================================================================
-  function vector_if_needed(context,v,import_vec) result(w)
+  function vector_if_needed(context,v,import_vec,posn) result(w)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,import_vec
+    type(pm_ptr),intent(out),optional:: posn
     type(pm_ptr):: w
     integer(pm_ln):: i,j,k,n
     logical:: ok
     integer:: vk
+    type(pm_root),pointer:: root1,root2
     vk=pm_fast_vkind(v)
     if(vk==pm_tiny_int.or.vk==pm_null) then
        w=v
+       if(present(posn)) posn=pm_null_obj
     elseif(vk==pm_logical) then
-       w=pm_new(context,pm_logical,pm_fast_esize(v)+1)
+       root1=>pm_new_as_root(context,pm_logical,pm_fast_esize(v)+1)
+       w=root1%ptr
+       if(present(posn)) then
+          root2=>pm_new_as_root(context,pm_logical,pm_fast_esize(v)+1)
+          posn=root2%ptr
+       endif
        j=0
        do i=4,pm_fast_esize(import_vec)
           n=import_vec%data%ln(import_vec%offset+i)
-          ok=any(v%data%l(v%offset+j:v%offset+j+n-1))
+          if(present(posn)) then
+             ok=.false.
+             do k=j,j+n-1
+                if(v%data%l(v%offset+k)) then
+                   posn%data%ln(posn%offset+j:posn%offset+j+n-1)=k
+                   ok=.true.
+                   exit
+                endif
+             enddo
+          else
+             ok=any(v%data%l(v%offset+j:v%offset+j+n-1))
+          endif
           w%data%l(w%offset+j:w%offset+j+n-1)=ok
           j=j+n
        enddo
+       call pm_delete_root(context,root1)
+       call pm_delete_root(context,root2)
     else
-       w=pm_new(context,pm_logical,pm_fast_esize(v)+1)
+       root1=>pm_new_as_root(context,pm_logical,pm_fast_esize(v)+1)
+       w=root1%ptr
+       if(present(posn)) then
+          root2=>pm_new_as_root(context,pm_logical,pm_fast_esize(v)+1)
+          posn=root2%ptr
+       endif
        j=0
        k=0
        do i=4,pm_fast_esize(import_vec)
           n=import_vec%data%ln(import_vec%offset+i)
           if(v%data%ln(v%offset+k)<j+n) then
              w%data%l(w%offset+j:w%offset+j+n-1)=.true.
+             if(present(posn)) then
+                posn%data%ln(posn%offset+j:posn%offset+j+n-1)=k
+             endif
              do while(v%data%ln(v%offset+k)<j+n)
                 k=k+1
              enddo
@@ -1504,6 +1537,8 @@ contains
           endif
           j=j+n
        enddo
+       call pm_delete_root(context,root1)
+       call pm_delete_root(context,root2)
     endif
   contains
     include 'fvkind.inc'
@@ -1578,6 +1613,514 @@ contains
   end function vector_export_if_needed
 
   !=============================================================================
+  ! For any group (defined by import_vec) if any index has a true
+  ! in v then next element in w is the index of the first such element
+  !=============================================================================
+  function vector_first_idx(context,v,import_vec) result(w)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v,import_vec
+    type(pm_ptr):: w
+    integer(pm_ln):: i,j,k,m,n
+    logical:: ok
+    integer:: vk
+    type(pm_ptr):: ww
+    type(pm_root),pointer:: root
+    vk=pm_fast_vkind(v)
+    if(vk==pm_tiny_int) then
+       w=v
+    else
+       w=pm_new(context,pm_long,max(1_pm_ln,pm_fast_esize(import_vec)-3))
+       if(vk==pm_null) then
+          k=0
+          j=0
+          do i=4,pm_fast_esize(import_vec)
+             n=import_vec%data%ln(import_vec%offset+i)
+             if(n>0) then
+                w%data%ln(w%offset+k)=j
+                k=k+1
+             endif
+             j=j+n
+          enddo
+       elseif(vk==pm_logical) then
+          j=0
+          k=0
+          do i=4,pm_fast_esize(import_vec)
+             n=import_vec%data%ln(import_vec%offset+i)
+             do m=j,j+n-1
+                if(v%data%l(v%offset+m)) then
+                   w%data%ln(w%offset+k)=m
+                   k=k+1
+                   exit
+                endif
+             enddo
+             j=j+n
+          enddo
+       else
+          j=0
+          k=0
+          m=0
+          do i=4,pm_fast_esize(import_vec)
+             n=import_vec%data%ln(import_vec%offset+i)
+             if(n>0) then
+                if(v%data%ln(v%offset+m)<j+n) then
+                   w%data%ln(w%offset+k)=v%data%ln(v%offset+m)
+                   k=k+1
+                   do while(v%data%ln(v%offset+m)<j+n&
+                        .and.m<=pm_fast_esize(v))
+                      m=m+1
+                   enddo
+                endif
+                j=j+n
+             endif
+          enddo
+       endif
+       if(k<=pm_fast_esize(w)) then
+          root=>pm_add_root(context,w)
+          ww=pm_new(context,pm_long,k)
+          do i=0,k-1
+             ww%data%ln(ww%offset+i)=w%data%ln(w%offset+i)
+          enddo
+          w=ww
+          call pm_delete_root(context,root)
+       endif
+    endif
+  contains
+    include 'fvkind.inc'
+    include 'fesize.inc'
+  end function vector_first_idx
+
+  !=============================================================================
+  ! Build an index vector for the first element in every non-empty group
+  !=============================================================================
+  function vector_zero_idx(context,import_vec) result(w)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: import_vec
+    type(pm_ptr):: w
+    integer(pm_ln):: i,j,k,m,n,sz
+    sz=pm_fast_esize(import_vec)
+    n=count(import_vec%data%ln(import_vec%offset+4:import_vec%offset+sz)>0)
+    w=pm_new(context,pm_long,n+1)
+    j=0
+    k=0
+    do i=4,sz
+       m=import_vec%data%ln(import_vec%offset+i)
+       if(m>0) then
+          w%data%ln(w%offset+j)=k
+          j=j+1
+          k=k+m
+       end if
+    enddo
+  contains
+    include 'fesize.inc'
+  end function vector_zero_idx
+
+  !=============================================================================
+  ! Build a vector by replicating a scalar value
+  !=============================================================================
+  recursive function vector_make_invar(context,v,import_vec,esize) result(ptr)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v,import_vec
+    integer(pm_ln),intent(in):: esize
+    type(pm_ptr):: ptr
+    integer:: tno
+    type(pm_root),pointer:: root
+    integer(pm_ln):: i,k,m,n,siz
+    type(pm_ptr):: p,q,len,off
+    siz=esize+1
+    tno=pm_fast_typeof(v)
+    select case(tno)
+    case(pm_tiny_int:pm_null)
+       ptr=v
+    case(pm_array_type,pm_const_array_type)
+       root=>pm_new_as_root(context,pm_usr,int(pm_array_size,pm_ln))
+       ptr=root%ptr
+       ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
+       ptr%data%ptr(ptr%offset+pm_array_typeof)=&
+            v%data%ptr(v%offset+pm_array_typeof)
+       call pm_ptr_assign(context,ptr,int(pm_array_dom,pm_ln),&
+            vector_make_invar(context,&
+            v%data%ptr(v%offset+pm_array_dom),&
+            import_vec,esize))
+       call pm_ptr_assign(context,ptr,int(pm_array_vect,pm_ln),&
+            vector_make_invar(context,&
+            v%data%ptr(v%offset+pm_array_vect),&
+            import_vec,esize))
+       call pm_ptr_assign(context,ptr,int(pm_array_length,pm_ln),&
+            vector_make_invar(context,&
+            v%data%ptr(v%offset+pm_array_length),&
+            import_vec,esize))
+       call pm_ptr_assign(context,ptr,int(pm_array_offset,pm_ln),&
+            vector_make_invar(context,&
+            v%data%ptr(v%offset+pm_array_offset),&
+            import_vec,esize))
+       call pm_delete_root(context,root)
+    case(pm_elemref_type)
+       root=>pm_new_as_root(context,pm_usr,int(pm_elemref_size,pm_ln))
+       ptr=root%ptr
+       ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
+       ptr%data%ptr(ptr%offset+pm_elemref_typeof)=&
+            v%data%ptr(v%offset+pm_elemref_typeof)
+       call pm_ptr_assign(context,ptr,int(pm_elemref_vect,pm_ln),&
+            vector_make_invar(context,&
+            v%data%ptr(v%offset+pm_elemref_vect),&
+            import_vec,esize))
+       call pm_ptr_assign(context,ptr,int(pm_elemref_idx,pm_ln),&
+            vector_make_invar(context,&
+            v%data%ptr(v%offset+pm_elemref_idx),&
+            import_vec,esize))
+       call pm_ptr_assign(context,ptr,int(pm_elemref_offset,pm_ln),&
+            vector_make_invar(context,&
+            v%data%ptr(v%offset+pm_elemref_offset),&
+            import_vec,esize))
+       call pm_delete_root(context,root)
+    case(pm_rec_type)
+       root=>pm_new_as_root(context,pm_usr,pm_fast_esize(v)+1_pm_ln)
+       ptr=root%ptr
+       ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
+       ptr%data%ptr(ptr%offset+1_pm_p)=v%data%ptr(v%offset+1_pm_p)
+       do i=2,pm_fast_esize(v)
+          call pm_ptr_assign(context,ptr,int(i,pm_ln),&
+               vector_make_invar(context,v%data%ptr(v%offset+i),&
+               import_vec,esize))
+       enddo
+       call pm_delete_root(context,root)
+    case(pm_pointer)
+       ptr=pm_new(context,pm_pointer,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%ptr(ptr%offset+n)=v%data%ptr(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_int)
+       ptr=pm_new(context,pm_int,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%i(ptr%offset+n)=v%data%i(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_long)
+       ptr=pm_new(context,pm_long,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%ln(ptr%offset+n)=v%data%ln(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_longlong)
+       ptr=pm_new(context,pm_longlong,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%lln(ptr%offset+n)=v%data%lln(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_int8)
+       ptr=pm_new(context,pm_int8,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%i8(ptr%offset+n)=v%data%i8(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_int16)
+       ptr=pm_new(context,pm_int16,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%i16(ptr%offset+n)=v%data%i16(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_int32)
+       ptr=pm_new(context,pm_int32,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%i32(ptr%offset+n)=v%data%i32(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_int64)
+       ptr=pm_new(context,pm_int64,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%i64(ptr%offset+n)=v%data%i64(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_single)
+       ptr=pm_new(context,pm_single,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%r(ptr%offset+n)=v%data%r(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_double)
+       ptr=pm_new(context,pm_double,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%d(ptr%offset+n)=v%data%d(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_single_complex)
+       ptr=pm_new(context,pm_single_complex,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%c(ptr%offset+n)=v%data%c(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_double_complex)
+       ptr=pm_new(context,pm_double_complex,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%dc(ptr%offset+n)=v%data%dc(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case(pm_logical)
+       ptr=pm_new(context,pm_logical,siz)
+       n=0
+       do i=4,pm_fast_esize(import_vec)
+          m=n
+          do k=1,import_vec%data%ln(import_vec%offset+i)
+             ptr%data%l(ptr%offset+n)=v%data%l(v%offset+m)
+             n=n+1
+          enddo
+       enddo
+    case default
+       write(*,*) '%%',trim(pm_type_as_string(context,tno)),tno,pm_dref_type
+       call pm_panic('Make vector')
+    end select
+  contains
+    include 'ftypeof.inc'
+    include 'fesize.inc'
+  end function vector_make_invar
+
+  !==============================================================================
+  ! For each group defined by import vec, if the first and second element differ
+  ! then it is assumed that the first element is the new uniform value which is
+  ! then copied to all other elements of the group
+  !==============================================================================
+  recursive subroutine vector_restore_to_invar(context,v,import_vec)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v,import_vec
+    integer(pm_ln):: i,j,k,s
+    integer:: tno
+    tno=pm_fast_typeof(v)
+    select case(tno)
+    case(pm_array_type)
+       call vector_restore_to_invar(context,v%data%ptr(v%offset+pm_array_vect),import_vec)
+       call vector_restore_to_invar(context,v%data%ptr(v%offset+pm_array_dom),import_vec)
+    case(pm_const_array_type)
+        call vector_restore_to_invar(context,v%data%ptr(v%offset+pm_array_vect),import_vec)
+    case(pm_rec_type)
+       do i=2,pm_fast_esize(v)
+          call vector_restore_to_invar(context,v%data%ptr(v%offset+i),import_vec)
+       enddo
+    case(pm_pointer)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(.not.(v%data%ptr(v%offset+j)==v%data%ptr(v%offset+j+1))) then
+                do k=1,s-1
+                   ! Do not worry about GC as no new links can be created
+                   v%data%ptr(v%offset+j+k)=v%data%ptr(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_int)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%i(v%offset+j)/=v%data%i(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%i(v%offset+j+k)=v%data%i(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_long)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%ln(v%offset+j)/=v%data%ln(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%ln(v%offset+j+k)=v%data%ln(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_int8)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%i8(v%offset+j)/=v%data%i8(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%i8(v%offset+j+k)=v%data%i8(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_int16)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%i16(v%offset+j)/=v%data%i16(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%i16(v%offset+j+k)=v%data%i16(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_int32)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%i32(v%offset+j)/=v%data%i32(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%i32(v%offset+j+k)=v%data%i32(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_int64)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%i64(v%offset+j)/=v%data%i64(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%i64(v%offset+j+k)=v%data%i64(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_int128)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%i128(v%offset+j)/=v%data%i128(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%i128(v%offset+j+k)=v%data%i128(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_single)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%r(v%offset+j)/=v%data%r(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%r(v%offset+j+k)=v%data%r(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_double)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%d(v%offset+j)/=v%data%d(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%d(v%offset+j+k)=v%data%d(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_single_complex)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%c(v%offset+j)/=v%data%c(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%c(v%offset+j+k)=v%data%c(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_double_complex)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%dc(v%offset+j)/=v%data%dc(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%dc(v%offset+j+k)=v%data%dc(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    case(pm_logical)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%l(v%offset+j).neqv.v%data%l(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%l(v%offset+j+k)=v%data%l(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
+    end select
+  contains
+    include 'ftypeof.inc'
+    include 'fesize.inc'
+  end subroutine vector_restore_to_invar
+  
+  
+  !=============================================================================
   ! Build a vector by replicating a scalar value
   !=============================================================================
   recursive function make_vector(context,v,j,dispv,dispj,vsize,full_copy) result(ptr)
@@ -1589,8 +2132,7 @@ contains
     type(pm_ptr):: ptr
     integer:: tno
     type(pm_root),pointer:: root
-    integer(pm_p):: i
-    integer(pm_ln):: s,k,m,n,disp,siz
+    integer(pm_ln):: i,s,k,m,n,disp,siz
     type(pm_ptr):: p,q,len,off
     siz=max(vsize,1_pm_ln)
     tno=pm_fast_typeof(v)
@@ -1951,6 +2493,9 @@ contains
     logical,intent(in),optional:: moveit
     type(pm_ptr):: vec1,len1,off1,vec2,len2,off2,v
     integer(pm_ln):: size1,size2,offset1,offset2
+    logical:: move_it
+    move_it=.false.
+    if(present(moveit)) move_it=moveit
     vec1=lhs%data%ptr(lhs%offset+pm_array_vect)
     len1=lhs%data%ptr(lhs%offset+pm_array_length)
     off1=lhs%data%ptr(lhs%offset+pm_array_offset)
@@ -1961,7 +2506,7 @@ contains
     size2=len2%data%ln(len2%offset+iy)
     offset1=off1%data%ln(off1%offset+ix)
     offset2=off2%data%ln(off2%offset+iy)
-    if(present(moveit).and.offset1==0.and.offset2==0) then
+    if(move_it.and.offset1==0.and.offset2==0) then
        call pm_ptr_assign(context,vec1,ix,vec1%data%ptr(vec1%offset+ix))
     elseif(size1==size2) then
        if(size1==0) return
@@ -2145,19 +2690,27 @@ contains
 
   !=============================================================================
   ! Assign lhs <- rhs, masked by ve
+  ! If moveit then arrays and pointer (poly) vectors are assigned by reference
+  ! If invar then array and pointer assignments only happen once
   !=============================================================================
-  recursive subroutine vector_assign(context,lhs,rhs,ve,errno,esize,moveit)
+  recursive subroutine vector_assign(context,lhs,rhs,ve,errno,esize,moveit,invar)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: lhs,rhs,ve
     integer(pm_ln),intent(in):: esize
     integer,intent(inout):: errno
-    logical,intent(in),optional:: moveit
+    logical,intent(in),optional:: moveit,invar
     integer(pm_p):: i
     integer(pm_i16):: tno,tno2
     integer(pm_ln):: j,k
-    type(pm_ptr):: vec1,vec2,off1,off2,len1,len2,idx
+    type(pm_ptr):: vec1,vec2,off1,off2,len1,len2,idx,cp
+    logical:: copied
     type(pm_root),pointer:: root
-
+    logical:: move_it,is_invar
+    move_it=.false.
+    is_invar=.false.
+    if(present(moveit)) move_it=moveit
+    if(present(invar)) is_invar=invar
+    
     if(pm_fast_isnull(lhs)) return
     tno=pm_fast_typeof(lhs)
 !!$    if(full_type(lhs)/=full_type(rhs)) then
@@ -2180,11 +2733,13 @@ contains
           do j=0,esize
              call array_assign(context,lhs,j,rhs,j,errno,moveit)
              if(errno/=0) return
+             if(is_invar) exit
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do j=0,esize
              if(ve%data%l(ve%offset+j)) then
                 call array_assign(context,lhs,j,rhs,j,errno,moveit)
+                if(is_invar) exit
                 if(errno/=0) return
              endif
           enddo
@@ -2193,6 +2748,7 @@ contains
              j=ve%data%ln(ve%offset+k)
              call array_assign(context,lhs,j,rhs,j,errno,moveit)
              if(errno/=0) return
+             if(is_invar) exit
           enddo
        endif
     case(pm_elemref_type)
@@ -2212,26 +2768,45 @@ contains
                rhs%data%ptr(rhs%offset+i),ve,errno,esize)
        enddo
     case(pm_pointer)
+       copied=.false.
        if(pm_fast_vkind(ve)==pm_null) then
           do j=0,esize
-             call pm_ptr_assign(context,lhs,j,&
-                  copy_vector(context,rhs%data%ptr(rhs%offset+j),&
-                  pm_null_obj,0_pm_ln,-1_pm_ln))
+             if(.not.copied) then
+                if(move_it) then
+                   cp=rhs%data%ptr(rhs%offset+j)
+                else
+                   cp=copy_vector(context,rhs%data%ptr(rhs%offset+j),pm_null_obj,0_pm_ln,-1_pm_ln)
+                endif
+                if(is_invar) copied=.true.
+             endif
+             call pm_ptr_assign(context,lhs,j,cp)
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do j=0,esize
              if(ve%data%l(ve%offset+j)) then
-                call pm_ptr_assign(context,lhs,j,&
-                     copy_vector(context,rhs%data%ptr(rhs%offset+j),&
-                     pm_null_obj,0_pm_ln,-1_pm_ln))
+                if(.not.copied) then
+                   if(move_it) then
+                      cp=rhs%data%ptr(rhs%offset+j)
+                   else
+                      cp=copy_vector(context,rhs%data%ptr(rhs%offset+j),pm_null_obj,0_pm_ln,-1_pm_ln)
+                   endif
+                   if(is_invar) copied=.true.
+                endif
+                call pm_ptr_assign(context,lhs,j,cp)
              endif
           enddo
        else
           do k=0,pm_fast_esize(ve)-1
              j=ve%data%ln(ve%offset+k)
-             call pm_ptr_assign(context,lhs,j,&
-                  copy_vector(context,rhs%data%ptr(rhs%offset+j),&
-                  pm_null_obj,0_pm_ln,-1_pm_ln))
+             if(.not.copied) then
+                if(move_it) then
+                   cp=rhs%data%ptr(rhs%offset+j)
+                else
+                   cp=copy_vector(context,rhs%data%ptr(rhs%offset+j),pm_null_obj,0_pm_ln,-1_pm_ln)
+                endif
+                if(is_invar) copied=.true.
+             endif
+             call pm_ptr_assign(context,lhs,j,cp)
           enddo
        endif
     case(pm_int)
@@ -2418,7 +2993,6 @@ contains
     case default
        write(*,*) 'vector assign',trim(pm_type_as_string(context,int(tno))),tno,&
             2595,trim(pm_type_as_string(context,2595))
-       
     end select
   contains
     include 'ftypeof.inc'
@@ -2426,6 +3000,41 @@ contains
     include 'fisnull.inc'
     include 'fvkind.inc'
   end subroutine vector_assign
+
+  !=============================================================================
+  ! For each group defined by import_vecr, assign lhs <- rhs[ix] where ix
+  ! is the first active strand in the group
+  !=============================================================================
+  recursive subroutine vector_assign_uniform(context,lhs,rhs,ve,import_vec,errno,esize,moveit)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: lhs,rhs,ve,import_vec
+    integer(pm_ln),intent(in):: esize
+    integer,intent(inout):: errno
+    logical,intent(in),optional:: moveit
+    type(pm_root),pointer:: root1,root2
+    type(pm_ptr):: mask,ix
+    
+    root1=>pm_add_root(context,pm_null_obj)
+    root2=>pm_add_root(context,pm_null_obj)
+
+    mask=vector_if_needed(context,ve,import_vec,ix)
+    root1%ptr=mask
+    root2%ptr=ix
+
+    if(pm_fast_isnull(ix)) then
+       ! All strands active - simple assignment will work
+       call vector_assign(context,lhs,rhs,ve,errno,esize,moveit,.true.)
+    else
+       call vector_set_elems(context,lhs,ix,rhs,mask,errno,moveit)
+    endif
+    
+    call pm_delete_root(context,root1)
+    call pm_delete_root(context,root2)
+
+  contains
+    include 'fisnull.inc'
+  end subroutine vector_assign_uniform
+    
 
   !=============================================================================
   ! Test element-by_element equality of two vectors: eq <- v1 == v2
@@ -3398,7 +4007,7 @@ contains
              ptr%data%ptr(ptr%offset+i)=v%data%ptr(v%offset+ix%data%ln(ix%offset+i))
           enddo
        else
-          root=>pm_new_as_root(context,pm_usr,3_pm_ln)
+          root=>pm_new_as_root(context,pm_pointer,pm_fast_esize(ix)+1_pm_ln)
           ptr=root%ptr
           do i=0,pm_fast_esize(ix)
              call pm_ptr_assign(context,ptr,i,&
@@ -3521,14 +4130,18 @@ contains
   !=============================================================================
   ! Set elements in a vector  v[ix]=e masked by ve
   !=============================================================================
-  recursive subroutine vector_set_elems(context,v,ix,e,ve,errno)
+  recursive subroutine vector_set_elems(context,v,ix,e,ve,errno,moveit)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: v,ix,e,ve
     integer,intent(inout):: errno
+    logical,intent(in),optional:: moveit
     integer:: tno
     integer(pm_ln):: h,i,j,m,siz
     integer:: k
-    type(pm_ptr):: len,off,avec,len2,off2,avec2
+    type(pm_ptr):: len,off,avec,len2,off2,avec2,cp
+    logical:: move_it
+    move_it=.false.
+    if(present(moveit)) move_it=moveit
     tno=pm_fast_typeof(v)
     if(full_type(e)/=full_type(v)) then
        write(*,*) trim(pm_type_as_string(context,tno)),&
@@ -3543,18 +4156,18 @@ contains
             ix,e%data%ptr(e%offset+pm_array_dom),ve,errno)
        if(pm_fast_isnull(ve)) then
           do i=0,pm_fast_esize(ix)
-             call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno)
+             call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno,moveit)
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do i=0,pm_fast_esize(ix)
              if(ve%data%l(ve%offset+i)) then
-                call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno)
+                call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno,moveit)
              endif
           enddo
        else
           do m=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+m)
-             call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno)
+             call array_assign(context,v,ix%data%ln(ix%offset+i),e,i,errno,moveit)
           enddo
        endif
     case(pm_rec_type)
@@ -3565,24 +4178,39 @@ contains
     case(pm_pointer)
        if(pm_fast_isnull(ve)) then
           do i=0,pm_fast_esize(ix)
+             if(move_it) then
+                cp=e%data%ptr(e%offset+i)
+             else
+                cp=copy_vector(context,e%data%ptr(e%offset+i),&
+                     pm_null_obj,0_pm_ln,-1_pm_ln)
+             endif
              call pm_ptr_assign(context,v,ix%data%ln(ix%offset),&
-                  copy_vector(context,e%data%ptr(e%offset+i),&
-                  pm_null_obj,0_pm_ln,-1_pm_ln))
+                  cp)
           enddo
        elseif(pm_fast_vkind(ve)==pm_logical) then
           do i=0,pm_fast_esize(ix)
              if(ve%data%l(ve%offset+i)) then
+                if(move_it) then
+                   cp=e%data%ptr(e%offset+i)
+                else
+                   cp=copy_vector(context,e%data%ptr(e%offset+i),&
+                        pm_null_obj,0_pm_ln,-1_pm_ln)
+                endif
                 call pm_ptr_assign(context,v,ix%data%ln(ix%offset),&
-                  copy_vector(context,e%data%ptr(e%offset+i),&
-                  pm_null_obj,0_pm_ln,-1_pm_ln))
+                     cp)
              endif
           enddo
        else
           do j=0,pm_fast_esize(ve)-1
              i=ve%data%ln(ve%offset+j)
+             if(move_it) then
+                cp=e%data%ptr(e%offset+i)
+             else
+                cp=copy_vector(context,e%data%ptr(e%offset+i),&
+                     pm_null_obj,0_pm_ln,-1_pm_ln)
+             endif
              call pm_ptr_assign(context,v,ix%data%ln(ix%offset),&
-                  copy_vector(context,e%data%ptr(e%offset+i),&
-                  pm_null_obj,0_pm_ln,-1_pm_ln))
+                  cp)
           enddo
        endif
     case(pm_int)
@@ -5839,9 +6467,7 @@ contains
        call extended_gcd(st1,st2,u,v,gcd)
        jcycle=st2/gcd
        finish=min(actual_finish,start+jcycle*st1-1)
-       write(*,*) 'HERE'
     endif
-    write(*,*) 'jcycle=',jcycle
     first1=((start+al1-l1)/st1)*st1+l1-al1
     first2=((start+al2-l2)/st2)*st2+l2-al2
     bstart1=first1+al1
@@ -5910,7 +6536,6 @@ contains
        j=jcycle
        do while(j+a(kk)<=jfinish)
           do i=1,kk
-             write(*,*) 'doin',j,k,kk,a(i),a(i)+j,'jcycle=',jcycle
              a(k)=a(i)+j
              k=k+1
           enddo

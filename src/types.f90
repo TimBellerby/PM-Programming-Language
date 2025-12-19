@@ -574,7 +574,7 @@ contains
     integer,dimension(3):: arr
     arr(1)=pm_type_new_uninitialised
     arr(2)=0
-    if(etyp==0) then
+    if(etyp<=0) then
        arr(3)=0
     else
        arr(3)=etyp
@@ -718,6 +718,26 @@ contains
   contains
     include 'ftypeof.inc'
   end function pm_new_literal_value_type
+
+  !=================================================
+  ! Get the numerical value for literal or fix int
+  !================================================
+  function pm_type_int_value(context,tno,ok) result(n)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    logical,intent(out):: ok
+    integer(pm_ln):: n
+    type(pm_ptr):: p
+    integer:: tk
+    tk=pm_type_kind(context,tno)
+    if(tk==pm_type_is_literal_value.or.tk==pm_type_is_fix_value) then
+       p=pm_type_val(context,tno)
+       n=p%data%ln(p%offset)
+       ok=.true.
+    else
+       ok=.false.
+    endif
+  end function pm_type_int_value
 
   !==============================================
   ! Create new pending error type
@@ -1078,6 +1098,21 @@ contains
     end select
   end function pm_type_strip_to_basic
 
+
+  !===============================================
+  ! Strip off parameter type 
+  !===============================================
+  function pm_type_strip_param(context,typ) result(typ2)
+    type(pm_context),pointer:: context
+    integer,intent(in):: typ
+    integer:: typ2
+    if(pm_type_kind(context,typ)==pm_type_is_param) then
+       typ2=pm_type_arg(context,typ,1)
+    else
+       typ2=typ
+    endif
+  end function pm_type_strip_param
+  
   !==============================================
   ! Get mode from type (default private)
   !==============================================
@@ -1243,6 +1278,59 @@ contains
        mixed_mode=sym_private
     endif
   end function pm_type_mix_modes
+
+  !=========================================
+  ! Type and mode of an imported value
+  ! - handles tuples with individual modes
+  !=========================================
+  function pm_type_imported(context,tno,ok) result(tno2)
+    type(pm_context),pointer:: context
+    integer,intent(in):: tno
+    logical,intent(out):: ok
+    integer:: tno2
+    type(pm_ptr):: tv
+    integer:: tk,mode
+    ok=.true.
+    tv=pm_type_vect(context,tno)
+    tk=pm_tv_kind(tv)
+    if(tk==pm_type_is_tuple.or.tk==pm_type_is_vtuple) then
+       tno2=remake(pm_tv_numargs(tv))
+    else
+       tno2=import_mode(tno,mode)
+    endif
+  contains
+    
+    function remake(n) result(tno2)
+      integer,intent(in):: n
+      integer:: tno2
+      integer:: arr(n+2)
+      integer:: i,overall_mode,mode
+      arr(1)=pm_tv_flags(tv)
+      arr(2)=pm_tv_name(tv)
+      overall_mode=sym_shared
+      do i=1,n
+         arr(i+2)=import_mode(pm_tv_arg(tv,i),mode)
+         overall_mode=min(overall_mode,mode)
+      enddo
+      tno2=pm_type_add_mode(context,pm_new_type(context,arr),overall_mode)
+    end function remake
+
+    function import_mode(tno,new_mode) result(tno2)
+      integer,intent(in):: tno
+      integer,intent(out):: new_mode
+      integer:: tno2
+      integer:: typ,mode
+      typ=pm_type_strip_mode(context,tno,mode)
+      if(mode==sym_shared) ok=.false.
+      if(iand(pm_type_flags(context,typ),pm_type_has_distributed)/=0) then
+         new_mode=sym_shared
+      else
+         new_mode=sym_invar
+      endif
+      tno2=pm_type_add_mode(context,typ,new_mode)
+    end function import_mode
+      
+  end function pm_type_imported
   
   !===================================
   ! Does mode1 include mode2 ?
@@ -1669,6 +1757,7 @@ contains
           ok=pm_test_type_includes(context,p,pm_tv_arg(u,1),&
                mode,params,base,user,ubase)
        endif
+       return
     case(pm_type_is_bottom)
        ok=.true.
        return
@@ -2680,7 +2769,7 @@ contains
        tk=pm_tv_kind(tv)
        nameval=pm_type_val(context,nametype)
        offset=nameval%data%ln(nameval%offset)
-       if(tk==pm_type_is_rec) then
+       if(tk==pm_type_is_rec.or.tk==pm_type_is_dref) then
           if(islist.or.offset<=0.or.offset>pm_type_numargs(context,tno)) then
              offset=0
           elseif(change) then
@@ -2688,13 +2777,13 @@ contains
              if(names%data%i(names%offset+offset)>0) offset=0
           endif
           if(offset/=0) etype=pm_type_arg(context,tno,offset)
-       elseif(tk==pm_type_is_tuple.or.tk==pm_type_is_dref) then
+          if(offset/=0.and.tk==pm_type_is_dref) offset=offset-1
+       elseif(tk==pm_type_is_tuple) then
           if((.not.islist).or.offset<=0.or.offset>pm_type_numargs(context,tno)) then
              offset=0
           else
              etype=pm_type_arg(context,tno,offset)
           endif
-          if(tk==pm_type_is_dref) offset=offset-1
           return
        else
           offset=0
@@ -2908,6 +2997,9 @@ contains
     end subroutine remake_dref
     
   end function pm_type_replace
+
+  
+  
 
   !================================================================
   ! Create a new type with with all fix values converted

@@ -168,8 +168,11 @@ module pm_vmdefs
   integer,parameter:: op_show = op_misc3 + 20
   integer,parameter:: op_show_stack = op_misc3 + 21
   integer,parameter:: op_must_compute = op_misc3 + 22
+  integer,parameter:: op_restore_invar = op_misc3 + 23
+  integer,parameter:: op_make_invar = op_misc3 + 24
+  integer,parameter:: op_run_invar = op_misc3 + 25
 
-  integer,parameter:: op_comm = op_must_compute + 1
+  integer,parameter:: op_comm = op_run_invar + 1
 
   integer,parameter:: op_this_node = op_comm + 0
   integer,parameter:: op_this_nnode = op_comm + 1
@@ -254,7 +257,8 @@ module pm_vmdefs
   integer,parameter:: op_assign_move = first_assign_op + 11
   integer,parameter:: op_move_if = first_assign_op + 12
   integer,parameter:: op_assign_move_if = first_assign_op + 13
-  integer,parameter:: last_assign_op = first_assign_op+13
+  integer,parameter:: op_link_var = first_assign_op + 14
+  integer,parameter:: last_assign_op = first_assign_op+14
 
   integer,parameter:: op_eq = last_assign_op +1
   integer,parameter:: op_ne = last_assign_op +2
@@ -905,6 +909,9 @@ module pm_vmdefs
   data op_flags(op_show)            /0/
   data op_flags(op_show_stack)      /0/
   data op_flags(op_must_compute)    /op_prints_out/
+  data op_flags(op_restore_invar)   /0/
+  data op_flags(op_make_invar)      /0/
+  data op_flags(op_run_invar)       /op_1_block/
 
   data op_flags(op_this_node)       /0/
   data op_flags(op_this_nnode)      /0/
@@ -988,6 +995,7 @@ module pm_vmdefs
   data op_flags(op_move_if)          /0/
   data op_flags(op_assign_move)      /0/
   data op_flags(op_assign_move_if)   /0/
+  data op_flags(op_link_var)         /0/
 
   data op_flags(op_eq)               /op_is_arith/
   data op_flags(op_ne)               /op_is_arith/
@@ -1628,6 +1636,9 @@ contains
     op_names(op_show)='show'
     op_names(op_show_stack)='show_stack'
     op_names(op_must_compute)='must_compute'
+    op_names(op_restore_invar)='restore_invar'
+    op_names(op_make_invar)='make_invar'
+    op_names(op_run_invar)='run_invar'
 
     op_names(op_this_node)='this_node'
     op_names(op_this_nnode)='this_nnode'
@@ -1711,7 +1722,8 @@ contains
     op_names(op_move_if)='move_if'
     op_names(op_assign_move)='assign_move'
     op_names(op_assign_move_if)='assign_move_if'
-
+    op_names(op_link_var)='link_var'
+    
     op_names(op_eq)='eq'
     op_names(op_ne)='ne'
 

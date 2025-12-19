@@ -32,7 +32,7 @@ module pm_backend
   use pm_memory
   use pm_hash
   use pm_options
-  use pm_lib
+  use pm_lib 
   use pm_symbol
   use pm_types
   use pm_vmdefs
@@ -207,7 +207,8 @@ contains
        call proc_line_module(func,&
             max(int(pc%offset-func%data%ptr(func%offset)%offset)-4,1),line,modl)
        write(*,*) sys_node,pc%offset,op_names(opcode),opcode2,'(',n,' args)',&
-            '@',trim(pm_name_as_string(context,modl)),'#',line,trace_var_kind,.not.ve_is_empty(ve)
+            '@',trim(pm_name_as_string(context,modl)),'#',line,trace_var_kind,.not.ve_is_empty(ve),&
+            'in',trim(pm_name_as_string(context,proc_get_name(func)))
     endif
     if(trace_opargs) then
        write(*,*) 've.kind=',arg(1)%data%vkind,&
@@ -480,6 +481,8 @@ contains
        if(esize==0) then
           v=arg(1)%data%ptr(arg(1)%offset+1)
           j=v%data%ln(v%offset+3)
+       else
+          j=0
        endif
        if(esize/=0.or.j/=0) then
           ve=make_new_ve(pm_null_obj,arg(1))
@@ -487,6 +490,25 @@ contains
           ve=arg(1)
        endif
        call set_arg(2,ve)
+    case(op_run_invar)
+       if(esize==0) then
+          v=arg(1)%data%ptr(arg(1)%offset+1)
+          j=v%data%ln(v%offset+3)
+       else
+          j=0
+       endif
+       if(esize/=0.or.j/=0) then
+          ve=make_new_ve(vector_zero_idx(context,arg(1)%data%ptr(arg(1)%offset+1)),arg(1))
+       else
+          ve=arg(1)
+       endif
+       call set_arg(2,ve)
+    case(op_restore_invar)
+       call vector_restore_to_invar(context,arg(2),arg(1)%data%ptr(arg(1)%offset+1))
+    case(op_make_invar)
+       if(.not.ve_is_empty(ve)) then
+          call set_arg(2,vector_make_invar(context,arg(3),arg(1)%data%ptr(arg(1)%offset+1),esize))
+       endif
     case(op_active)
        ! op_active &vec_out
        v=alloc_arg(pm_logical,2)
@@ -1175,7 +1197,7 @@ contains
             newve,arg(3),fmt_i_width,pm_file_error_string))
 
        ! **** Support for basic operations ******
-    case(op_setref)
+    case(op_setref,op_link_var)
        if(nargs==3) then
           call set_arg(2,arg(3))
        else
@@ -1295,15 +1317,9 @@ contains
        else
           call set_arg(2,copy_vector(context,arg(3),ve,0_pm_ln,esize+1))
        endif
-    case(op_assign)
+    case(op_assign,op_assign_move)
        errno=0
-       call vector_assign(context,arg(2),arg(3),ve,errno,esize)
-       if(errno/=0) then
-          goto 997
-       endif
-    case(op_assign_move)
-       errno=0
-       call vector_assign(context,arg(2),arg(3),ve,errno,esize,moveit=.true.)
+       call vector_assign(context,arg(2),arg(3),ve,errno,esize,moveit=opcode==op_assign_move)
        if(errno/=0) then
           goto 997
        endif
@@ -10367,7 +10383,7 @@ contains
 
 
   ! Parallel loop 
-  function par_loop(context,func,stack,pc,arg,&                 
+  recursive function par_loop(context,func,stack,pc,arg,&                 
        num_args,ve,old_esize,nesting,noexit) result(errno) 
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: func,stack,pc,ve
@@ -10422,7 +10438,7 @@ contains
   ! set ref arg(2) to new ve (index values of ve if ve no null - otherwise simple ve length m)
   ! set ref arg(3) to node (scalar)
   ! set ref arg(4) to index (or index 2 if present)
-  function remote_call_block(context,func,stack,pc,arg,pcoff,&
+  recursive function remote_call_block(context,func,stack,pc,arg,pcoff,&
        node,xdata,v,m,issend,disps) result(errno)
     type(pm_context),pointer:: context
     type(pm_ptr),intent(in):: func,stack,pc

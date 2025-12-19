@@ -1416,7 +1416,7 @@ proc map_seq(x)=x
 proc _rdiv(x,y)=if(y<0=>if(x<0=>x/y,(y-x+1)/y),x>0=>x/y,(x-y+1)/y)
 
 
-type any_seq is range(int),seq(int,int),block_seq // , map_seq
+type any_seq is range(int),seq(int,int),block_seq, map_seq
 
 //  Grids (tuples of sequences)
 type _gdim is any_seq or int
@@ -1448,8 +1448,9 @@ proc _gel(x:_gdim,xx,y,yy)=prepend(element(x,y),_gel(head(xx),tail(xx),head(yy),
 proc _gel(x:int,xx,y,yy)=prepend(x,_gel(head(xx),tail(xx),y,yy))
 proc _gel(x:empty_head,xx,y:empty_head,yy)=null
 proc _gel(x:empty_head,xx,y,yy)=error_type():compile_error("Rank mismatch")
-
-
+proc intersect(x:grid,y:grid)=map($overlap,x,y)
+proc overlap(x:grid,y:grid)=map($overlap,x,y)
+proc overlap(x:grid,y:grid)=u,v where u,v=map($overlap,x,y)
 
 //  **************************************
 //  ARRAYS
@@ -1548,10 +1549,10 @@ proc array(x,d:extent)=_array(x,_mshape(d),size(d))
 proc #(x:any^any)=shape(_array_mshape(x)._extent,null)
 proc _get_array_element(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
 proc _set_array_element(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
-proc _set_array_multi_element(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(_array_mshape(PM__import(a)),t),v)
-proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a),t))
-proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a),t),v)
-proc _set_array_multi_elementz(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(PM__import(_array_mshape(a)),t),v)
+proc _set_array_multi_element%(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(_array_mshape(PM__import%(a)),t),v)
+proc _get_array_elementz(a:any^any,t:tuple(int))=_get_aelem(a,_point2index(_array_mshape(a)._extent,t))
+proc _set_array_elementz(&a:any^any,t:tuple(int),v):PM__setaelem(&a,_point2index(_array_mshape(a)._extent,t),v)
+proc _set_array_multi_elementz%(&a:any^any,t:tuple(int),v):PM__setmaelem(&a,_point2index(PM__import%(_array_mshape(a)._extent),t),v)
 proc _make_subref(a:any^any,t:tuple(int))=_make_subref(a,_point2index(_array_mshape(a),t))
 PM__intrinsic _make_subref(a:any^any,i:int)->(*) : "make_rf"
 PM__endif
@@ -1586,7 +1587,6 @@ PM__intrinsic _get_aelem(x:any^any,y:int)->(=x) : "array_get_elem"
 PM__intrinsic PM__setaelem(&x:any^any,y:int,z:any): "array_set_elem"
 
 */
-
 
 
 type _mshape(ndim:dimension_number,contig:literal(bool)) is rec {_extent:extent(ndim),_m:tuple(int,ndim),_n:int,_o:int,_c:contig}
@@ -1874,47 +1874,52 @@ PM__if_compiling
 
 PM__else
 
-proc PM__for_stmt(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any) <<inline>> {
-    PM__for size(shape) {
-      let shapei=PM__import%(shape)
-      let shapee=#shape
-      let schedule=PM__import%(shapee)
-      let here_in_tile=PM__generate(shapee,size(shape))
-      let here=(#shapei)[here_in_tile]
+proc PM__for_stmt(&PM__inout_a,PM__in_a,shape) yield(&any,any) <<inline>> {
+    PM__for halo,size(shape),rank(shape),null {
+      let shapei=PM__import%(#shape)
+      let schedule=shapei
+      let here_in_tile=PM__generate(#shape,size(shape))
+      let here=shapei[here_in_tile]
       let nullv=null
-      PM__context nullv,nullv,shapei {
-        PM__ref inouts=PM__import%(PM__inouts)
+      PM__ref dcontext=PM__list(shapei,schedule,here_in_tile,here,_nhd_desc(halo,shapei,shapei),null)
+      PM__context nullv,nullv,dcontext {
+        PM__ref inouts=PM__import_list(PM__inouts)
         var inout_a=PM__get_elem(PM__import%(PM__inout_a),here_in_tile)
         PM__yield(&inouts,
-           PM__import%(PM__ins),
+           PM__import_list(PM__ins),
            &inout_a,
-           PM__get_elem(PM__import%(PM__in_a),here_in_tile),
-           PM__get_elem(PM__import%(PM__star_a),here_in_tile) <<inline>>)
+           PM__get_elem(PM__import%(PM__in_a),here_in_tile) <<inline>>)
         PM__export%(&PM__inouts,inouts)
-        PM__set_multi_elem(&PM__inout_a,inout_a,here_in_tile <<PM__ignore>>)
+        PM__set_multi_elem%(&PM__inout_a,inout_a,here_in_tile <<PM__ignore>>)
       }
    }
 }
 
-proc PM__for_stmt(&PM__inout_a,PM__in_a,PM__star_a,shape) yield(&any,any,any)->(any) <<inline>> {
-    var array
-    PM__for size(shape) {
+proc PM__for_stmt(&PM__inout_a,PM__in_a,shape) yield(&any,any)->(any) <<inline>> {
+    var array...
+    PM__for halo,size(shape),rank(shape),null {
       let shapei=PM__import%(shape)
       let schedule=PM__import%(#shape)
       let here_in_tile=PM__generate(shape,size(shape))
       let here=shapei[here_in_tile]
       let nullv=null
       PM__context nullv,nullv,shapei {
-          chan var elements=PM__yield(&PM__inouts,
+          array=PM__export%(_make_array(PM__yield(&PM__inouts,
            PM__import%(PM__ins),
            &PM__inout_a,
-           PM__get_elem(PM__import%(PM__in_a),here_in_tile),
-           PM__get_elem(PM__import%(PM__star_a),here_in_tile) <<inline>>)
-          array=PM__export%(elements')
+           PM__get_elem(PM__import%(PM__in_a),here_in_tile)
+           <<inline,PM__ignore>>),shapei))
       }
     }
     return array
 }
+
+proc region%()=PM__region^*{1}
+proc subregion%()=PM__region^*{2}
+proc here_in_tile%()=PM__region^*{3}
+proc here%()=PM__region^*{4}
+proc halo%()=PM__region^*{5}
+proc loop_iter%()=PM__region^*{6}
 
 proc PM__foreach_stmt(&PM__inout_a,PM__in_a,shape:extent(1)) yield(&any,any) <<inline>> {
     var index=low(shape.1)
@@ -1946,19 +1951,22 @@ proc PM__foreach_stmt(&PM__inout_a,PM__in_a,shape:extent(2)) yield(&any,any) <<i
     }
 }
 
-PM__intrinsic PM__make_chan_var%(x:any)->(*) : "clone_var" chan
-
-proc PM__make_chan_var%[cond](x:priv)=error_type() {
-    compile_error("Cannot initialise ""chan var"" using a ""priv"" value in a conditional context")
+PM__intrinsic PM__make_chan_var%(x:invar)->(*) : "clone_var" chan
+proc PM__make_chan_var%(x:!invar)=error_type() {
+    compile_error("Can only initialise ""chan var"" using an ""invar"" value")
 }
 
-proc PM__assign_sync%(&a:chan,b,ex): PM__assign(&a,b <<PM__ignore>>)
-proc PM__assign_sync%(&a:invar,b,ex): compile_error("Cannot modify an ""invar"" value using a ""sync"" assignment")
-proc PM__assign_sync%(&a:invar,b,ex,...:invar): compile_error("Cannot modify an ""invar"" value using a ""sync"" assignment")
-proc PM__assign_sync%(&a:shrd,b,ex): compile_error("Cannot modify a ""shrd"" value using a ""sync"" assignment")
-proc PM__assign_sync%(&a:shrd,b,ex,...:invar): compile_error("Cannot modify a ""shrd"" value using a ""sync"" assignment")
+
+
+proc PM__assign_sync%(&a:chan,b): PM__assign(&a,b <<PM__ignore>>)
+proc PM__assign_sync%(&a:invar,b): compile_error("Cannot modify an ""invar"" value using a ""sync"" assignment")
+proc PM__assign_sync%(&a:invar,b,...:invar): compile_error("Cannot modify an ""invar"" value using a ""sync"" assignment")
+proc PM__assign_sync%(&a:shrd,b): compile_error("Cannot modify a ""shrd"" value using a ""sync"" assignment")
+proc PM__assign_sync%(&a:shrd,b,...:invar): compile_error("Cannot modify a ""shrd"" value using a ""sync"" assignment")
 PM__intrinsic PM__make_invar_var%(x:invar)->(*) : "clone_var" invar
-proc PM__assign_invar%(&a:invar,b:invar): PM__assign(&a,b <<PM__ignore>>) // need to run shared
+proc PM__assign_invar%(&a:invar,b:invar): PM__assign(&a,b <<PM__ignore>>) // need to run shared for compiler
+
+
 
 PM__intrinsic _make_array(any,any)->(*): "make_array"
 proc PM__dash%(x:chan)=_make_array(x,PM__region)
@@ -1983,8 +1991,8 @@ proc PM__get_elem(x:any^any,h)=_get_array_elementz(x,h)
 proc PM__get_elem(x,h)=element(x,h)
 proc PM__set_elem(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_elem(&x^*{i},y^*{i},h <<PM__ignore>>)}
 proc PM__set_elem(&x:any^any,y,h) {_set_array_elementz(&x,h,y)}
-proc PM__set_multi_elem(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_multi_elem(&x^*{i},y^*{i},h <<PM__ignore>>)}
-proc PM__set_multi_elem(&x:any^any,y,h) {_set_array_multi_elementz(&x,h,y)}
+proc PM__set_multi_elem%(&x:PM__list,y,h):PM__each_index i in num_elements(x){PM__set_multi_elem%(&x^*{i},y^*{i},h <<PM__ignore>>)}
+proc PM__set_multi_elem%(&x:any^any,y,h) {_set_array_multi_elementz%(&x,h,y)}
 
 proc PM__import%(x:PM__list)<<inline>>=PM__each_index(i in num_elements(x):PM__import%(x^*{i}))
 PM__intrinsic PM__import%(x:any)->(*) : "import_val"
@@ -2097,6 +2105,184 @@ proc _dun(x:int,m,n:extent)=n
 proc _dunmap(x:indexed,m:grid_slice or tuple(int),n:extent)=_dun(x.1,m.1,nn) where nn=_dunmap(tail(x),tail(m),n)
 proc _dunmap(x:[indexed_dim or int],m:grid_slice or tuple(int),n:extent)=_dun(x.1,m.1,n)
 */
+
+//  **************************************************
+//  SUPPORT FOR STENCILS (nhd)
+//  **************************************************
+
+type _nhd is rec{_nbhd,_tile,_tilesz,_interior}
+
+proc _nhd_desc(nlist,region,tile)=rec _nhd {
+    _nbhd=env,_tile=t,_tilesz=#t,_interior=overlap(t,tile)} where t=_get_halo(region,tile,env.envelope)  where env=_env(nlist)
+type _envelope is rec{envelope,corner}
+proc _env(x:null)=x
+proc _env(x:PM__list(int,int,int,int))=rec _envelope{envelope=[x^*{1}..x^*{2}],corner=[x^*{3}..x^*{4}]}
+proc _env(xx:PM__list(int,int,int,int,int,int,int,int))=rec _envelope{envelope=[xx^*{1}..xx^*{2},xx^*{3}..xx^*{4}],corner=[xx^*{5}..xx^*{6},xx^*{7}..xx^*{8}]}
+
+proc PM__make_nhd_var%(x,boundary)=PM__ref NHD(x,array(x,halo%()._tile),boundary)^PM__set_mode nhd: print(halo%()._tile)
+proc PM__localise%(x:nhd)=x^{2}[here_in_tile%()]
+proc PM__exchange%(&x){}
+
+proc PM__at%(x,lo,hi)=x^{2}[_at(here_in_tile%().1,lo,hi)]:PM__envelope x,lo,hi
+proc _at(here:int,lo:int,hi:int)=here+lo..here.hi
+proc _at(here:int,lo:int,hi:null)=here+lo
+
+//  Add (anti) halo around tile
+//  Args: mshape / tile / displacement
+//  (mshape not used at the moment - there to cope with other topologies)
+//  Result: expanded tile
+proc _get_halo(d:range(int),t:range(int),i:any_int)=low(t)+ii..high(t)+ii where ii=int(i)
+proc _get_halo(d:range(int),t:seq(int),i:any_int)= low(t)+ii..high(t)+ii by step(t) where ii=int(i)
+proc _get_halo(d:range(int),t:block_seq,i:any_int){
+  return block_seq(low(t)+ii,high(t)+ii,step(t),width(t),0) where ii=int(i)
+}
+proc _get_halo(d:range(int),t:map_seq,i:any_int) {
+  var a=array(0,size(t))
+  for j in a,k in t.array:j=k+i
+  return rec map_seq {
+    array=a
+  }
+}
+proc _get_halo(d:range(int),t:range(int),i:range(any_int))=low(t)+int(low(i))..high(t)+int(high(i))
+proc _get_halo(d:range(int),t:seq(int),i:range(any_int)){
+  var step=step(t)
+  var width=size(i)
+  if width>step {
+    step=1
+    width=1
+  }
+  return block_seq(low(t)+int(low(i)),high(t)+int(high(i)),step,width,0)
+}
+proc _get_halo(d:range(int),t:block_seq,i:range(any_int)){
+  var step=step(t)
+  var width=size(i)+width(t)-1
+  if width>step {
+    step=1
+    width=1
+  }
+  return block_seq(low(t)+int(low(i)),high(t)+int(high(i)),step,width,0)
+}
+/*
+proc _get_halo(d:range(int),t:map_seq,i:range(any_int)) {
+  var a=array(0,[0..size(t)*size(i)-1])
+  var m=0
+  _expand_aseq(&m,t.array,size(t.array),&a,low(i),high(i))
+  return _redim(a,shape(m))
+}
+*/
+proc _get_halo(d:extent,j:grid,i:tuple(any_int or range(any_int)))= map($_get_halo,d,j,i)
+proc _get_halo(d:tuple1d(range(int)),t:grid1d,i:any_int or range(any_int))=_get_halo(d.1,t.1,i)
+proc _get_halo(d,t,i:null)=t
+proc _get_anti_halo(d:range(int),t:range(int),i:any_int)=low(t)-ii..high(t)-ii where ii=int(i)
+proc _get_anti_halo(d:range(int),t:seq(int),i:any_int)= low(t)-ii..high(t)-ii by step(t) where ii=int(i)
+proc _get_anti_halo(d:range(int),t:block_seq,i:any_int){
+  return block_seq(low(t)-ii,high(t)-ii,step(t),width(t)) where ii=int(i)
+}
+proc _get_anti_halo(d:range(int),t:map_seq,i:any_int) {
+  var a=array(0,size(t))
+  for j in a,k in t.array:j=k-i
+  return rec map_seq {
+    array=a
+  }
+}
+proc _get_anti_halo(d:range(int),t:range(int),i:range(any_int))=low(t)-int(high(i))..high(t)-int(low(i))
+proc _get_anti_halo(d:range(int),t:seq(int),i:range(any_int)){
+  var step=step(t)
+  var width=size(i)
+  if width>step {
+    step=1
+    width=1
+  }
+  return block_seq(low(t)-int(high(i)),high(t)-int(low(i)),step,width)
+}
+proc _get_anti_halo(d:range(int),t:block_seq,i:range(any_int)){
+  var step=step(t)
+  var width=size(i)+width(t)-1
+  if width>step {
+    step=1
+    width=1
+  }
+  return block_seq(low(t)+int(low(i)),high(t)+int(high(i)),step,width)
+}
+proc _get_anti_halo(d:range(int),t:map_seq,i:range(any_int)) {
+  var a=array(0,[0..size(t)*size(i)-1])
+  var m=0
+  _expand_aseq(&m,t.array,size(t.array),&a,-high(i),-low(i))
+  return _redim(a,shape(m))
+}
+proc _get_anti_halo(d:extent,j:grid, i:tuple(any_int or range(any_int)))= map($_get_anti_halo,d,j,i)
+proc _get_anti_halo(d:tuple1d(range(int)),t:grid1d,i:any_int or range(any_int))=_get_anti_halo(d.1,t.1,i)
+proc _get_anti_halo(d,t,i:null)=t
+
+
+proc _interior(t:range,n:range)=low(t)+max(0,-low(n))..high(t)-max(0,high(n))
+proc _interior(t:seq,n:range)=1..0 by 1
+proc _interior(tt:block_seq,n:range)=block_seq(low(t)+max(-low(n),0),high(t),width(t),width(t)-max(-low(n),0)-max(high(n),0),0)where t=middle_blocks(tt)
+
+
+proc _get_chunk(t:range,n:range,l:fix(true))=low(t)..low(t)+min(-min(0,low(n))-1,size(t)-1)
+proc _get_chunk(t:range,n:range,l:fix(false))=low(t)+max(size(t)-max(high(n),0),-min(low(n),-1))..high(t)
+proc _get_chunk(t:range,n:range,l:_down)=low(t)+w..low(t)+w+w-1 where w=max(0,-low(n))
+proc _get_chunk(t:range,n:range,l:_up)=high(t)-w-w+1..high(t)-w where w=max(0,high(n))
+proc _get_chunk(tt:block_seq,n:range,l:fix(true))=if(low(n)<0=>block_seq(low(t),high(t),step(t),min(-low(n),width(t)),0),empty(t)) where t=middle_blocks(tt)
+proc _get_chunk(tt:block_seq,n:range,l:fix(false))=if(high(n)>0=>block_seq(low(t)+max(0,width(t)-high(n)),high(t),step(t),min(width(t),high(n)),0),empty(t)) where t=middle_blocks(tt)
+proc _get_chunk(t:grid_dim,n:range,l:_left or _right)=empty(t)
+proc _get_chunk(t:block_seq,n:range,l:_left)=block_seq(low(b),high(b),1,1,0) where b=first_block(t)
+proc _get_chunk(t:block_seq,n:range,l:_right)=block_seq(low(b),high(b),1,1,0) where b=last_block(t)
+proc _chunk(t,n,r,e,l)=if(r>e=>_interior(t,n),r<e=>t,_get_chunk(t,n,l))
+proc _get_chunk(t:tuple1d,n,e,l)=[_chunk(t.1,n.1,1,e,l)]
+proc _get_chunk(t:tuple2d,n,e,l)=[_chunk(t.1,n.1,1,e,l),_chunk(t.2,n.2,2,e,l)]
+proc _get_chunk(t:tuple3d,n,e,l)=[_chunk(t.1,n.1,1,e,l),_chunk(t.2,n.2,2,e,l),_chunk(t.3,n.3,3,e,l)]
+proc _get_chunk(t:tuple4d,n,e,l)=[_chunk(t.1,n.1,1,e,l),_chunk(t.2,n.2,2,e,l),_chunk(t.3,n.3,3,e,l),_chunk(t.4,n.4,4,e,l)]
+proc _get_chunk(t:tuple5d,n,e,l)=[_chunk(t.1,n.1,1,e,l),_chunk(t.2,n.2,2,e,l),_chunk(t.3,n.3,3,e,l),_chunk(t.4,n.4,4,e,l),_chunk(t.5,n.5,5,e,l)]
+proc _get_chunk(t:tuple6d,n,e,l)=[_chunk(t.1,n.1,1,e,l),_chunk(t.2,n.2,2,e,l),_chunk(t.3,n.3,3,e,l),_chunk(t.4,n.4,4,e,l),_chunk(t.5,n.5,5,e,l),_chunk(t.6,n.6,6,e,l)]
+proc _get_chunk(t:tuple7d,n,e,l)=[_chunk(t.1,n.1,1,e,l),_chunk(t.2,n.2,2,e,l),_chunk(t.3,n.3,3,e,l),_chunk(t.4,n.4,4,e,l),_chunk(t.5,n.5,5,e,l),_chunk(t.6,n.6,6,e,l),_chunk(t.7,n.7,7,e,l)]
+proc chunks(t:tuple(range(any_int)),n:extent)=rank(t)*2+1
+proc chunks(t:tuple(range(any_int) or block_seq),n:extent)=rank(t)*4+1
+proc chunks(t:grid,n:extent)=2
+proc _cr(i,n):test "Index out of range in ""get_chunk"""=>i>=0 and i<=n
+proc chunk(t:tuple(range(any_int)),n:extent,i:int) {
+  _cr(i,rank(t)*2)
+  var r=n
+  if i==0: r=map($_interior,t,n) elseif i&1==0: r=_get_chunk(t,n,(i+1)/2,fix(true)) else: r=_get_chunk(t,n,(i+1)/2,fix(false))
+  return r
+}
+    
+type _left is unique
+type _right is unique
+type _up is unique
+type _down is unique
+proc chunk(t:tuple(range(any_int) or block_seq),n:extent,i:int) {
+  _cr(i,rank(t)*4)
+  var r=t
+  if i==0:r=map($_interior,t,n) else: switch (i-1)&3 {
+    case 0:r=_get_chunk(t,n,(i+3)/4,fix(true))
+    case 1:r=_get_chunk(t,n,(i+3)/4,fix(false))
+    case 2:r=_get_chunk(t,n,(i+3)/4,_left)
+    default:r=_get_chunk(t,n,(i+3)/4,_right)
+  }
+  return r
+}
+proc chunk(t:grid,n:extent,i:int) {
+  _cr(i,1)
+  var r=#t
+  if i==0:r=empty(#t)
+  return r
+}
+proc chunk(t:grid,n:extent,i:int,b:null)=chunk(t,n,i)
+proc chunk(t:grid,n:extent,i:int,b:extent)=intersect(chunk(t,n,i),b)
+proc inside_edge(t:tuple(range(any_int)),n:extent,i:int,low:fix(bool))=_get_chunk(t,n,i,low)
+proc outside_edge(t:tuple(range(any_int)),n:extent,i:int,low:fix(bool))=_get_chunk(map($_exterior,t,n),n,i,low)
+proc outside_edge_wrapped(t:tuple(range(any_int)),n:extent,i:int,low:fix(true))=_get_chunk(map($_exterior,t,n),n,i,_up)
+proc outside_edge_wrapped(t:tuple(range(any_int)),n:extent,i:int,low:fix(false))=_get_chunk(map($_exterior,t,n),n,i,_down)
+proc _exterior(t:range(int),n:range(int))=low(t)+min(low(n),0)..high(t)+max(high(n),0)
+proc _get_external_chunk(t:tuple(range(any_int)),n:extent,i:int) {
+  var r=t
+  tt=map($_exterior,t,n)
+  if i==0: r=#tt elseif i&1==0: r=_get_chunk(tt,n,(i+1)/2,_up) else: r=_get_chunk(tt,n,(i+1)/2,_down)
+  return r
+}
+
 
 //  **************************************************
 //  SUPPORT FOR OTHER LANGUAGE FEATURES
@@ -2259,7 +2445,7 @@ proc PM__get_ref(x:any,j:PM__list) {
 }
 proc PM__get_ref(x:a_poly,j:PM__list(proc,any)) {
     PM__set_dotdotdot(j^*{2})
-    let r
+    let r...
     any x {r=PM__get_ref(x,j^*{1}.(x,... <<PM__ref>>))}
     return r
 }
@@ -2283,16 +2469,19 @@ proc PM__subs(x,...)=[x,...]
 proc PM__subs(x:tuple)=x
 
 PM__intrinsic PM__clone(x:any)->(*) : "clone"
-PM__intrinsic PM__make_var(x:any)->(*) : "clone_var" priv
+PM__intrinsic PM__make_var(x:any)->(*) : "clone_var" 
 PM__intrinsic PM__make_const(x:any)->(*) : "clone_var"
-proc PM__make_var(x,y)=PM__make_var(x as y)
-proc PM__make_const(x,y)=PM__make_const(x as y)
+proc PM__make_var(x,y)<<inline>>=PM__make_var(x as y)
+proc PM__make_const(x,y)<<inline>>=PM__make_const(x as y)
 PM__intrinsic PM__make_const(x:literal(int),y:<literal(int)>)->(*): "clone_var"
 PM__intrinsic PM__make_const(x:literal(real),y:<literal(real)>)->(*): "clone_var"
 PM__intrinsic PM__make_const(x:literal(string),y:<literal(string)>)->(*): "clone_var"
 PM__intrinsic PM__make_const(x:literal(bool),y:<literal(bool)>)->(*): "clone_var"
+PM__intrinsic PM__link_var(any)->(*): "link_var"
+PM__intrinsic PM__move(any)->(*): "link_var"
 
 proc PM__localise%(x)=x
+
 //PM__intrinsic PM__localise%(x:any)->(*): "clone_var" 
 PM__intrinsic same_type(x:any,y:any)->(*) : "same_type_fold"
 PM__intrinsic same_rec(x:any,y:any)->(*) : "same_rec_fold"

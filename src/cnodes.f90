@@ -141,16 +141,19 @@ module pm_cnodes
   integer,parameter:: var_is_multi_access=256
   integer,parameter:: var_is_key=512
   integer,parameter:: var_is_varg=1024
-  integer,parameter:: var_is_par_var=2048
-  integer,parameter:: var_is_maybe_idx=4096
-  integer,parameter:: var_is_where=8192
-  integer,parameter:: var_is_reference=16384
-  integer,parameter:: var_is_key_ptr=32768
-  integer,parameter:: var_is_comm=65536
-  integer,parameter:: var_is_temp=131072
-  integer,parameter:: var_is_return=262144
-  integer,parameter:: var_is_list_elem=524288
-  integer,parameter:: var_is_param_move=1048576
+  integer,parameter:: var_is_par_var=2**11
+  integer,parameter:: var_is_maybe_idx=2**12
+  integer,parameter:: var_is_where=2**13
+  integer,parameter:: var_is_reference=2**14
+  integer,parameter:: var_is_key_ptr=2**15
+  integer,parameter:: var_is_comm=2**16
+  !integer,parameter:: var_is_temp=2**17
+  !integer,parameter:: var_is_return=2**18
+  integer,parameter:: var_is_list=2**19
+  integer,parameter:: var_is_list_param=2**20
+  integer,parameter:: var_is_list_elem=2**21
+  integer,parameter:: var_is_param_move=2**22
+  
 
   ! Offsets into proc & builtin nodes
   integer,parameter:: pr_ptype=cnode_args+0
@@ -214,83 +217,9 @@ module pm_cnodes
   integer(access_kind),parameter:: access_may_detag=1024
   integer(access_kind),parameter:: access_needs_movability=2048
   integer(access_kind),parameter:: access_everything=&
-       access_is_var+access_used_ever+access_used_now+access_used_by_at
+       access_is_var+access_used_ever+access_used_now
   
 contains
-
-  !=========================================================
-  ! Given a result variable cnode - return the call, arg#
-  ! and cnode of any argument liked to the result through
-  ! returning a reference to that argument
-  !
-  ! If result will be always movable then returns true
-  ! and may not set new_call etc.
-  !=========================================================
-  function follow_result_back(context,cache,rv,var,new_call,&
-       new_call_index,new_var,new_argn) result(movable)
-    type(pm_context),pointer:: context
-    type(pm_ptr),intent(in):: cache
-    integer,intent(in),dimension(:):: rv
-    type(pm_ptr),intent(in):: var
-    type(pm_ptr),intent(out):: new_call,new_var
-    integer,intent(out):: new_call_index,new_argn
-    logical:: movable
-    integer:: n,new_proc_sig,nargs,i
-    type(pm_ptr):: args,new_proc,key_names,keys
-
-    movable=.false.
-    
-    ! - first find call that returned the value
-    new_call=cnode_get(var,var_extra_info)
-    new_call_index=cnode_get_num(new_call,call_index)
-    n=-cnode_get_num(var,var_name)
-    new_proc_sig=rv(new_call_index)
-    if(new_proc_sig==sp_sig_link) then
-       new_var=cnode_arg(cnode_get(new_call,call_args),2)
-       new_argn=2
-       return
-    elseif(new_proc_sig<0) then
-       movable=.true.
-       return
-    endif
-    
-    ! - now find the proc that was called from there
-    new_proc=pm_dict_val(context,cache,int(new_proc_sig,pm_ln))
-    if(cnode_get_kind(new_proc)==cnode_is_autoconv_sig) then
-       new_proc=pm_dict_val(context,cache,&
-            int(cnode_num_arg(new_proc,cnode_numargs(new_proc)),pm_ln))
-    endif
-
-    ! Builtin, so assume movable value is returned
-    if(cnode_get_kind(new_proc)/=cnode_is_resolved_proc) then
-       movable=.true.
-       return
-    endif
-    new_proc=cnode_arg(new_proc,1)
-
-    ! - now find the argument # (if any) which the returned value references
-    new_argn=cnode_get_num(new_proc,cnode_args+pr_node_size+n-1)
-    if(new_argn==0) then
-       movable=.true.
-       return
-    endif
-    
-    ! Now detetermine the referenced argument
-    args=cnode_get(new_call,call_args)
-    nargs=cnode_numargs(args)
-    if(new_argn<0) then
-       key_names=pm_name_val(context,cnode_get_num(new_call,call_key_names))
-       keys=cnode_get(new_call,call_keys)
-       do i=1,cnode_numargs(keys)
-          if(key_names%data%i(key_names%offset+i-1)==-new_argn) then
-             new_var=cnode_arg(keys,i)
-             new_argn=i+cnode_numargs(args)
-          endif
-       enddo
-    else
-       new_var=cnode_arg(args,new_argn+cnode_get_num(new_call,call_nret))
-    endif
-  end function follow_result_back
 
   !========================================================================
   ! Check arg #idx of call in callnode is a final use of a variable/param
@@ -706,9 +635,6 @@ contains
             cnode_get_num(cnode,pr_nargs),',nret=',nret,&
             ',ncalls=',cnode_get_num(cnode,pr_ncalls),']'
         call print_cblock_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_get(cnode,pr_cblock),4)
-        if(nret>0) then
-           write(iunit,'(A,32i3)') '   RetRef:',(cnode_get_num(cnode,i),i=cnode_args+pr_node_size,cnode_args+pr_node_size+nret-1)
-        endif
     endif
     write(iunit,'(a)') '  }'
   contains
@@ -735,7 +661,7 @@ contains
     type(pm_ptr),intent(in):: rvec,sig_cache,proc_cache,cnode
     integer:: signo,name,i,j,k,nret,nargs,modl,line
     type(pm_ptr):: p,args,amps,keys,keynames
-    character(len=120):: str,location
+    character(len=256):: str,location
 
     args=cnode_get(cnode,call_args)
     nargs=cnode_numargs(args)
@@ -1081,6 +1007,9 @@ contains
           if(iand(flags,call_is_unlabelled)/=0) then
              call append_to_line(iunit,str,i,'u',.false.,depth)
           endif
+          if(iand(flags,call_is_halo_exchange)/=0) then
+             call append_to_line(iunit,str,i,'h',.false.,depth)
+          endif
        endif
        call append_to_line(iunit,str,i,'>',.false.,depth)
     end if
@@ -1136,7 +1065,7 @@ contains
     enddo
     i=list%data%i16(list%offset)+1
     do while(list%data%i16(list%offset+i)>0)
-       write(iunit,'(a,i4,a)') 'List #',list%data%i16(list%offset+i),'{'
+       write(iunit,'(a,i4,a,i4,a)') 'List #',list%data%i16(list%offset+i),'*',list%data%i16(list%offset+i+1), '{'
        do j=1,list%data%i16(list%offset+i+1)
           call print_bprop_item(iunit,list%data%i16(list%offset+i+j+1))
        enddo

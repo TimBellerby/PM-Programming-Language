@@ -156,6 +156,8 @@ module pm_ast
   integer,parameter:: call_needs_uninit =     2**19
   integer,parameter:: call_converts_uninit =  2**20
   integer,parameter:: call_keep_literals =    2**21
+  integer,parameter:: call_is_halo_exchange = 2**22
+  integer,parameter:: call_returns_private =  2**23
 
   
 contains

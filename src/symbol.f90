@@ -183,7 +183,7 @@ module pm_symbol
   integer,parameter:: sym_sync = last_decl + 12      
   integer,parameter:: sym_while = last_decl + 13
   integer,parameter:: sym_return = last_decl + 14
-  integer,parameter:: sym_also = last_decl + 15   !!!!
+  integer,parameter:: sym_swap = last_decl + 15 
   integer,parameter:: sym_do = last_decl + 16
   integer,parameter:: sym_yield = last_decl + 17
   integer,parameter:: sym_test = last_decl + 18
@@ -244,7 +244,10 @@ module pm_symbol
   integer,parameter:: sym_pm_chan = last_resv + 32
   integer,parameter:: sym_pm_chan_always = last_resv + 33
   integer,parameter:: sym_pm_list = last_resv + 34
-  integer,parameter:: last_stmt = sym_pm_list
+  integer,parameter:: sym_pm_invar = last_resv + 35
+  integer,parameter:: sym_pm_envelope = last_resv + 36
+  integer,parameter:: sym_pm_import_list = last_resv + 37
+  integer,parameter:: last_stmt = sym_pm_import_list
   integer,parameter:: num_sym = last_stmt
 
   ! Non-reserved words that the compiler needs to know about
@@ -356,9 +359,11 @@ module pm_symbol
   integer,parameter:: sym_simple_list_elem = node0 + 58
   integer,parameter:: sym_update_list = node0 + 59
   integer,parameter:: sym_update_from_list = node0 + 60
+  integer,parameter:: sym_link_var = node0 + 61
+  integer,parameter:: sym_also = node0 + 62
 
   ! Misc. other symbols that need to be referenced by the compiler
-  integer,parameter:: hook = node0 + 61
+  integer,parameter:: hook = node0 + 63
   integer,parameter:: sym_pval_as = hook
   integer,parameter:: sym_pm_system = hook+1
   integer,parameter:: sym_get_element = hook+2
@@ -701,6 +706,7 @@ module pm_symbol
   data sym_names(sym_sync)             /'sync'/
   data sym_names(sym_while)            /'while'/
   data sym_names(sym_return)           /'return'/
+  data sym_names(sym_swap)             /'swap'/
   data sym_names(sym_do)               /'do'/
   data sym_names(sym_yield)            /'yield'/
   data sym_names(sym_test)             /'test'/
@@ -758,6 +764,9 @@ module pm_symbol
   data sym_names(sym_pm_chan)          /'PM__chan'/
   data sym_names(sym_pm_chan_always)   /'PM__chan_always'/
   data sym_names(sym_pm_list)          /'PM__list'/
+  data sym_names(sym_pm_invar)         /'PM__invar'/
+  data sym_names(sym_pm_envelope)      /'PM__envelope'/
+  data sym_names(sym_pm_import_list)   /'PM__import_list'/
   
   !===============================================================
 
@@ -833,7 +842,6 @@ module pm_symbol
   data sym_names(sym_export_param)     /'PM__export_param'/
   data sym_names(sym_export_as_new)    /'<export-as-new>'/
   data sym_names(sym_amp_error)        /'<amp-error>'/
-  data sym_names(sym_also)             /'<also>'/
   data sym_names(sym_pval)             /'PM__pval'/
   data sym_names(sym_pval_as)          /'PM__pval_as'/
   data sym_names(sym_invar_assign)     /'PM__invar_assign'/
@@ -841,6 +849,9 @@ module pm_symbol
   data sym_names(sym_simple_list_elem) /'<simple_list_elem>'/
   data sym_names(sym_update_list)      /'<update-list>'/
   data sym_names(sym_update_from_list) /'<update-from-list>'/
+  data sym_names(sym_link_var)         /'PM__link_var'/
+  data sym_names(sym_also)             /'<also>'/
+  
   data sym_names(sym_change_mode)      /'<change_mode>'/
   data sym_names(sym_dot_amp)          /'<dot-amp>'/
   data sym_names(sym_type_val)         /'<type-val>'/
