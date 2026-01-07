@@ -524,7 +524,7 @@ contains
              if(xbase>=0) call hide_where_vars(coder,xbase+1,xtop)
              call make_change_list_updates(coder,cblock,node,p)
           endif
-       case(sym_for,sym_forall)
+       case(sym_for)
           call trav_for_stmt(coder,cblock,list,node,0)
        case(sym_each,sym_foreach_invar)
           call trav_foreach_stmt(coder,cblock,list,node)
@@ -1421,8 +1421,6 @@ contains
       k=node_sym(node)
       if(k==sym_amp) then
          fn=sym_check_iter_amp
-      elseif(k==sym_mult) then
-         fn=sym_check_iter_star
       else
          fn=sym_check_iter
       endif
@@ -1616,7 +1614,7 @@ contains
     
     ! Remaining parameter variables
     if(present(iters)) then
-       flags0=var_is_maybe_idx
+       flags0=var_is_maybe_chan_idx
        if(iter_amps) then
           call make_sys_var(coder,cblock2,node,&
                sym_amp_iter_args,flags0+var_is_param+var_is_ref+var_is_var+var_is_shadowed)
@@ -2886,7 +2884,7 @@ contains
       endif
 
       call make_var(coder,cblock,node,name,&
-           ior(flags,var_is_var+var_is_maybe_idx))
+           ior(flags,var_is_var+var_is_maybe_chan_idx))
       call swap_code(coder)
       
       if(.not.pm_fast_isnull(bounds)) then
@@ -3321,14 +3319,14 @@ contains
        vflags=flags
        if(has_mode)then
           if(mode==sym_nhd) then
-             vflags=ior(vflags,var_is_maybe_idx)
+             vflags=ior(vflags,var_is_maybe_chan_idx)
           endif
        endif
 
        rvar=top_code(coder)
        if(iand(flags,var_is_var)==0) then
           if(cnode_get_kind(rvar)==cnode_is_var) then
-             vflags=ior(vflags,iand(cnode_get_num(rvar,var_flags),var_is_maybe_idx))
+             vflags=ior(vflags,iand(cnode_get_num(rvar,var_flags),var_is_maybe_chan_idx))
           endif
        endif
        
@@ -3594,7 +3592,7 @@ contains
        enddo
        if(check_args_for_idx(n)) then
           call make_comm_sys_call_rtn(coder,cblock,node,sym,n,1)
-          call cnode_set_flags(top_code(coder),var_flags,var_is_maybe_idx)
+          call cnode_set_flags(top_code(coder),var_flags,var_is_maybe_chan_idx)
        else
           call make_sys_call_rtn(coder,cblock,node,&
                sym,n,1)
@@ -3808,7 +3806,7 @@ contains
       integer:: i
       do i=coder%vtop-n+1,coder%vtop
          if(cnode_get_kind(coder%vstack(i))==cnode_is_var) then
-            if(cnode_flags_set(coder%vstack(i),var_flags,var_is_maybe_idx)) then
+            if(cnode_flags_set(coder%vstack(i),var_flags,var_is_maybe_chan_idx)) then
                ok=.true.
                return
             endif
@@ -5802,10 +5800,10 @@ contains
                      if(pm_mode_includes(&
                           pm_type_arg(coder%context,param_type,(i+1)/2),&
                           sym_indexed)) then
-                        flags=ior(flags,var_is_maybe_idx)
+                        flags=ior(flags,var_is_maybe_chan_idx)
                      endif
                   else
-                     flags=ior(flags,var_is_maybe_idx)
+                     flags=ior(flags,var_is_maybe_chan_idx)
                   endif
                endif
                name=node_num_arg(p,i)
@@ -5833,10 +5831,10 @@ contains
                         if(pm_mode_includes(&
                              pm_type_arg(coder%context,param_type,(i+1)/2),&
                              sym_indexed)) then
-                           flags=ior(flags,var_is_maybe_idx)
+                           flags=ior(flags,var_is_maybe_chan_idx)
                         endif
                      else
-                        flags=ior(flags,var_is_maybe_idx)
+                        flags=ior(flags,var_is_maybe_chan_idx)
                      endif
                   endif
                endif
@@ -5864,7 +5862,7 @@ contains
       type(pm_ptr):: p,typ,cblock2
       integer:: i,n,base,newbase,vname,vbase,vsbase,wbase,tno,flags0
 
-      flags0=merge(var_is_maybe_idx,0,iscomm)
+      flags0=merge(var_is_maybe_chan_idx,0,iscomm)
 
       p=node_get(node,proc_keys)
       if(pm_fast_isnull(p)) then
@@ -6179,7 +6177,7 @@ contains
 
     integer:: i,j,k,flags,flags0,nargs,name
     type(pm_ptr):: amp
-    flags0=var_is_param+var_is_maybe_idx
+    flags0=var_is_param+var_is_maybe_chan_idx
     nargs=node_numargs(paramlist)
     if(amps==0) then
        do i=1,nargs,step
@@ -7507,7 +7505,7 @@ contains
 
   !=======================================================
   ! Check the top nargs values on vstack and convert
-  ! any maybe_idx values to strand-privare values
+  ! any maybe_idx values to strand-private values
   !========================================================
   recursive subroutine localise_args(coder,cblock,node,nargs)
     type(code_state),intent(inout):: coder
@@ -7528,7 +7526,7 @@ contains
     type(pm_ptr),intent(inout):: var
     if(pm_fast_vkind(var)==pm_pointer) then
        if(cnode_get_kind(var)==cnode_is_var) then
-          if(cnode_flags_set(var,var_flags,var_is_maybe_idx)) then
+          if(cnode_flags_set(var,var_flags,var_is_maybe_chan_idx)) then
              call code_val(coder,var)
              call make_comm_sys_call_rtn(coder,cblock,node,sym_localise,1,1)
              var=pop_code(coder)
@@ -7578,7 +7576,7 @@ contains
 
     if(iscomm) then
        do i=1,abs(nret)
-          call cnode_set_flags(coder%vstack(ret0+i),var_flags,var_is_maybe_idx)
+          call cnode_set_flags(coder%vstack(ret0+i),var_flags,var_is_maybe_chan_idx)
        enddo
     endif
     

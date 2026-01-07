@@ -1609,9 +1609,7 @@ contains
           do i=n+1,nargs
              coder%stack(get_slot(i))=pm_new_uninitialised_type(coder%context,arg_type_with_mode(i))
           enddo
-       case(sym_start_loop)
-          coder%stack(get_slot(2))=pm_logical
-       case(sym_underscore,sym_colon,sym_end_loop)
+       case(sym_underscore,sym_colon)
           continue
        case(first_pragma:last_pragma)
           if(sig==sym_infer_type.or.sig==sym_infer_type_and_stack) then
@@ -4330,7 +4328,7 @@ contains
              endif
           enddo
        case(sym_var,sym_var_set_mode,sym_set_mode,sym_change_mode,sym_underscore,&
-            sym_colon,sym_end_loop,sym_typeof,sym_pm_uninit)
+            sym_colon,sym_typeof,sym_pm_uninit)
           continue
        case default
           call std_access(.false.,1)

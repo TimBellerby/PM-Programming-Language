@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2024
+! Copyright (c) Tim Bellerby, 2026
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -645,7 +645,7 @@ contains
     case('#')                 ! Alternative %:
        sym=sym_hash
     case('^')                 ! Only used for internal system purposes
-       if(.not.(parser%modl==parser%sysmodl)) then
+       if(.not.(parser%modl==parser%sysmodl.or.pm_opts%allow_caret)) then
           call parse_error(parser,'Error: Unexpected character "'//c//'"')
           goto 5
        elseif(peekchar()=='^') then
@@ -3041,7 +3041,7 @@ contains
     endif
     
     if(vsym/=sym_nhd) call make_node(parser,vsym,n+2)
-    if(nu==n.and.vsym/=sym_assignment) then
+    if(nu==n) then
        call parse_error(parser,&
             'A "'//trim(sym_names(vsym))//&
             '" statement must define at least one object')
@@ -3759,7 +3759,7 @@ contains
           if(do_stmt(parser)) goto 999
        case(sym_test)
           if(test_stmt(parser)) goto 999
-       case(sym_for,sym_forall)
+       case(sym_for)
           if(for_stmt(parser)) goto 999
        case(sym_each)
           if(for_each_stmt(parser)) goto 999

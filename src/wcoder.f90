@@ -42,7 +42,7 @@ module pm_wcode
   use pm_infer
   implicit none
 
-  logical,parameter:: debug_wcode=.true.
+  logical,parameter:: debug_wcode=.false.
   logical,parameter:: debug_wcode_wc=.false.
   logical,parameter:: debug_tagging=.false.
   
@@ -1503,14 +1503,6 @@ contains
     case(sym_fix,sym_literal,sym_caret,sym_change_mode)
        call link_to_val(wcd,callnode,cnode_arg(args,1),wcd%base,&
             cnode_arg(args,2),wcd%base,rv,ve)
-    case(sym_sync_assign)
-       if(.not.pm_is_compiling) then
-          call wc_call(wcd,callnode,op_setref,0,3,1,ve)
-          call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
-          call wc(wcd,&
-               -pm_max_stack-&
-               add_const(wcd,pm_type_val(wcd%context,check_arg_type(wcd,args,rv,1))))
-       endif
     case(sym_pm_set_dotdotdot)
        wcd%xbase=wcd%top
        tno=get_arg_type(wcd,cnode_arg(args,2),rv)
@@ -2431,9 +2423,9 @@ contains
              call wcode_error(wcd,callnode,'Internal Error: failed autoconversion while inlining')
           endif
 
-          write(*,*) 'ARG>',trim(pm_name_as_string(wcd%context,cnode_get_num(p,var_name)))
-
-          write(*,*) -nkeys,totargs,'>>',conv
+!!$          write(*,*) 'ARG>',trim(pm_name_as_string(wcd%context,cnode_get_num(p,var_name)))
+!!$
+!!$          write(*,*) -nkeys,totargs,'>>',conv
 
           if(conv(npar)>0) then
              ! Result of auto-conversion
@@ -3179,7 +3171,7 @@ contains
     do i=start,finish,step
        sym=-cnode_get_num(wcd%costack(cs,i)%p,call_sig)
        select case(sym)
-       case(sym_if,sym_for,sym_do,sym_loop)
+       case(sym_if,sym_for,sym_do)
           continue
        case(sym_sync_while)
           call combine_loops(wcd,i,finish,step,wcd%costack(cs,i)%p,out_ve,&
@@ -3226,7 +3218,7 @@ contains
        p=wcd%costack(cs,j)%p
        sig2=-cnode_get_num(p,call_sig)       
        select case(sig2)
-       case(sym_if,sym_for,sym_do,sym_loop)
+       case(sym_if,sym_for,sym_do)
           cycle
        case(sym_colon)
           args=cnode_get(p,call_args)

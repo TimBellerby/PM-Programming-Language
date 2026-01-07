@@ -142,7 +142,7 @@ module pm_cnodes
   integer,parameter:: var_is_key=512
   integer,parameter:: var_is_varg=1024
   integer,parameter:: var_is_par_var=2**11
-  integer,parameter:: var_is_maybe_idx=2**12
+  integer,parameter:: var_is_maybe_chan_idx=2**12
   integer,parameter:: var_is_where=2**13
   integer,parameter:: var_is_reference=2**14
   integer,parameter:: var_is_key_ptr=2**15
@@ -902,7 +902,7 @@ contains
           endif
           if(cnode_flags_set(cnode,var_flags,var_is_comm)) then
              call append_to_line(iunit,str,i,'^',.false.,depth)
-          elseif(cnode_flags_set(cnode,var_flags,var_is_maybe_idx)) then
+          elseif(cnode_flags_set(cnode,var_flags,var_is_maybe_chan_idx)) then
              call append_to_line(iunit,str,i,'#',.false.,depth)
           elseif(cnode_flags_set(cnode,var_flags,var_is_reference)) then
              call append_to_line(iunit,str,i,'{',.false.,depth)

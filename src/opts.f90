@@ -58,6 +58,7 @@ module pm_options
      logical:: out_typelist
      logical:: print_timings
      logical:: hide_sysmod
+     logical:: allow_caret
 
      logical:: schedule
 
@@ -114,6 +115,7 @@ contains
     pm_opts%out_debug_files=.false.
     pm_opts%old_files=.false.
     pm_opts%run_bprop=.true.
+    pm_opts%allow_caret=.false.
 
     pm_opts%schedule=.false.
     
@@ -280,6 +282,7 @@ contains
     write(*,*) '  -Dshow-details    Show extra details of types'
     write(*,*) '  -Dshow-hidden     Show hidden procedure parameters'
     write(*,*) '  -Dno-bprop        Do not run BPROP pass'
+    write(*,*) '  -Dallow-caret     Allow "^" outside of system module'
     write(*,*) '  -D                Activate all debugging options listed below.'
     write(*,*) '  -Dfiles           Output files from each compiler stage.'
     write(*,*) '  -Dtimings         Output time taken by each compilation stage.'
@@ -353,6 +356,8 @@ contains
              pm_opts%hide_sysmod=.false.
           elseif(arg=='-Dold-files') then
              pm_opts%old_files=.true.
+          elseif(arg=='-Dallow-caret') then
+             pm_opts%allow_caret=.true.
           elseif(pm_main_process) then
              write(*,*) 'Not a valid compiler debugging (-D) option:',trim(arg)
              call usage()
