@@ -1983,6 +1983,19 @@ contains
           endif
           j=j+s
        enddo
+    case(pm_longlong)
+       j=0
+       do i=4,pm_fast_esize(import_vec)
+          s=import_vec%data%ln(import_vec%offset+i)
+          if(s>1) then
+             if(v%data%lln(v%offset+j)/=v%data%lln(v%offset+j+1)) then
+                do k=1,s-1
+                   v%data%lln(v%offset+j+k)=v%data%lln(v%offset+j)
+                enddo
+             endif
+          endif
+          j=j+s
+       enddo
     case(pm_int8)
        j=0
        do i=4,pm_fast_esize(import_vec)
@@ -2508,6 +2521,14 @@ contains
     offset2=off2%data%ln(off2%offset+iy)
     if(move_it.and.offset1==0.and.offset2==0) then
        call pm_ptr_assign(context,vec1,ix,vec1%data%ptr(vec1%offset+ix))
+    elseif(pm_fast_isnull(vec1%data%ptr(vec1%offset+ix))) then
+       call pm_ptr_assign(context,vec1,ix,&
+            copy_vector(context,&
+            vec2%data%ptr(vec2%offset+iy),&
+            pm_null_obj,&
+            offset2,&
+            size2))
+       len1%data%ln(len1%offset+ix)=size2
     elseif(size1==size2) then
        if(size1==0) return
        call vector_copy_range(context,&
@@ -2539,6 +2560,7 @@ contains
   contains
     include 'fesize.inc'
     include 'ftypeof.inc'
+    include 'fisnull.inc'
   end subroutine array_assign
   
   !=============================================================================
@@ -3614,7 +3636,7 @@ contains
   ! start, start+step, .., 
   ! Each index repeated elsize times
   ! The sequence truncated to siz elements
-  ! and truncated to start first elements in
+  ! and truncated to start first elements into seq
   !=============================================================================
   function vector_iota_trunc(context,&
        elsize,start,end,step,first,siz,import_vec) result(ptr)
@@ -3944,6 +3966,229 @@ contains
     include 'fesize.inc'
   end subroutine vector_indices
 
+  !=============================================================================
+  ! Expand idx value v using vector of here values h 
+  !=============================================================================
+  recursive function vector_expand_idx(context,v,ve,tno) result(ptr)
+    type(pm_context),pointer:: context
+    type(pm_ptr),intent(in):: v,ve
+    integer,intent(in):: tno
+    type(pm_ptr):: ptr
+
+    type(pm_ptr):: mv,cv,dv,newv,j,iv,h
+    integer(pm_ln):: i,k,n,m,c,d
+    type(pm_root),pointer:: root
+    integer(pm_ln),parameter:: disp=4
+    integer:: tk
+
+    write(*,*) '>>>>',trim(pm_type_as_string(context,tno))
+   
+    tk=pm_type_kind(context,tno)
+    if(tk==pm_type_is_rec) then
+       ! v is tuple of idx dim values
+       root=>pm_new_as_root(context,pm_usr,pm_fast_esize(v)+1_pm_ln)
+       ptr=root%ptr
+       ptr%data%ptr(ptr%offset)=v%data%ptr(v%offset)
+       ptr%data%ptr(ptr%offset+1_pm_p)=v%data%ptr(v%offset+1_pm_p)
+       do i=2,pm_fast_esize(v)-1
+          call pm_ptr_assign(context,ptr,i,&
+               vector_expand_idx(context,v%data%ptr(v%offset+i),ve,pm_type_arg(context,tno,int(i)-1)))
+       enddo
+       call pm_delete_root(context,root)
+    elseif(pm_fast_vkind(v)/=pm_usr) then
+       ptr=import_vector(context,v,ve%data%ptr(ve%offset+1))
+    else
+       ptr=v%data%ptr(v%offset+7)
+       if(.not.pm_fast_isnull(ptr)) return
+       mv=v%data%ptr(v%offset+3)
+       iv=ve%data%ptr(ve%offset+1)
+       j=v%data%ptr(v%offset+6)
+       cv=v%data%ptr(v%offset+4)
+       dv=v%data%ptr(v%offset+2)
+       ptr=pm_new(context,int(tno,pm_p),1+pm_fast_esize(j))
+       n=0
+       do i=0,pm_fast_esize(iv)-disp
+          if(pm_fast_vkind(mv)==pm_int64) then
+             m=mv%data%i64(mv%offset+i)
+          else
+             m=mv%data%ln(mv%offset+i)
+          endif
+          if(pm_fast_vkind(cv)==pm_int64) then
+             c=cv%data%i64(cv%offset+i)
+          else
+             c=cv%data%ln(cv%offset+i)
+          endif
+          if(pm_fast_vkind(dv)==pm_int64) then
+             d=dv%data%i64(dv%offset+i)
+          else
+             d=dv%data%ln(dv%offset+i)
+          endif
+          select case(tno)
+          case(pm_int)
+             if(d/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i(ptr%offset+n)=(j%data%ln(j%offset+n)*m+c)/d
+                   n=n+1
+                enddo
+             elseif(m/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i(ptr%offset+n)=j%data%ln(j%offset+n)*m+c
+                   n=n+1
+                enddo
+             elseif(c/=0) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i(ptr%offset+n)=j%data%ln(j%offset+n)+c
+                   n=n+1
+                enddo
+             else
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i(ptr%offset+n)=j%data%ln(j%offset+n)
+                   n=n+1
+                enddo
+             endif
+          case(pm_long)
+             if(d/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%ln(ptr%offset+n)=(j%data%ln(j%offset+n)*m+c)/d
+                   n=n+1
+                enddo
+             elseif(m/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%ln(ptr%offset+n)=j%data%ln(j%offset+n)*m+c
+                   n=n+1
+                enddo
+             elseif(c/=0) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%ln(ptr%offset+n)=j%data%ln(j%offset+n)+c
+                   n=n+1
+                enddo
+             else
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%ln(ptr%offset+n)=j%data%ln(j%offset+n)
+                   n=n+1
+                enddo
+             endif
+          case(pm_longlong)
+             if(d/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%lln(ptr%offset+n)=(j%data%ln(j%offset+n)*m+c)/d
+                   n=n+1
+                enddo
+             elseif(m/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%lln(ptr%offset+n)=j%data%ln(j%offset+n)*m+c
+                   n=n+1
+                enddo
+             elseif(c/=0) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%lln(ptr%offset+n)=j%data%ln(j%offset+n)+c
+                   n=n+1
+                enddo
+             else
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%lln(ptr%offset+n)=j%data%ln(j%offset+n)
+                   n=n+1
+                enddo
+             endif
+          case(pm_int8)
+             if(d/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i8(ptr%offset+n)=(j%data%ln(j%offset+n)*m+c)/d
+                   n=n+1
+                enddo
+             elseif(m/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i8(ptr%offset+n)=j%data%ln(j%offset+n)*m+c
+                   n=n+1
+                enddo
+             elseif(c/=0) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i8(ptr%offset+n)=j%data%ln(j%offset+n)+c
+                   n=n+1
+                enddo
+             else
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i8(ptr%offset+n)=j%data%ln(j%offset+n)
+                   n=n+1
+                enddo
+             endif
+          case(pm_int16)
+             if(d/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i16(ptr%offset+n)=(j%data%ln(j%offset+n)*m+c)/d
+                   n=n+1
+                enddo
+             elseif(m/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i16(ptr%offset+n)=j%data%ln(j%offset+n)*m+c
+                   n=n+1
+                enddo
+             elseif(c/=0) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i16(ptr%offset+n)=j%data%ln(j%offset+n)+c
+                   n=n+1
+                enddo
+             else
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i16(ptr%offset+n)=j%data%ln(j%offset+n)
+                   n=n+1
+                enddo
+             endif
+          case(pm_int32)
+             if(d/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i32(ptr%offset+n)=(j%data%ln(j%offset+n)*m+c)/d
+                   n=n+1
+                enddo
+             elseif(m/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i32(ptr%offset+n)=j%data%ln(j%offset+n)*m+c
+                   n=n+1
+                enddo
+             elseif(c/=0) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i32(ptr%offset+n)=j%data%ln(j%offset+n)+c
+                   n=n+1
+                enddo
+             else
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i32(ptr%offset+n)=j%data%ln(j%offset+n)
+                   n=n+1
+                enddo
+             endif
+          case(pm_int64)
+             if(d/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i64(ptr%offset+n)=(j%data%ln(j%offset+n)*m+c)/d
+                   n=n+1
+                enddo
+             elseif(m/=1) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i64(ptr%offset+n)=j%data%ln(j%offset+n)*m+c
+                   n=n+1
+                enddo
+             elseif(c/=0) then
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i64(ptr%offset+n)=j%data%ln(j%offset+n)+c
+                   n=n+1
+                enddo
+             else
+                do k=1,iv%data%ln(iv%offset+i+disp)
+                   ptr%data%i64(ptr%offset+n)=j%data%ln(j%offset+n)
+                   n=n+1
+                enddo
+             endif
+          end select
+       enddo
+       call pm_ptr_assign(context,v,7_pm_ln,ptr)
+    endif
+  contains
+    include 'ftypeof.inc'
+    include 'fesize.inc'
+    include 'fisnull.inc'
+    include 'fvkind.inc'
+  end function vector_expand_idx
+  
   !=============================================================================
   ! Get elements from a vector (indices start at 0)
   !=============================================================================
@@ -4732,7 +4977,7 @@ contains
        write(*,*) spaces(1:depth*2),'...'
     endif
     k=pm_fast_typeof(v)
-    write(*,*) 'k=',k
+!!$    write(*,*) 'k=',k
     select case(k)
     case(pm_array_type,pm_const_array_type)
        p=v%data%ptr(v%offset+pm_array_vect)

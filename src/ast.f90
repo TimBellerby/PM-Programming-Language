@@ -142,22 +142,26 @@ module pm_ast
        + proc_is_file + proc_prints_out
 
   ! Flags for proc calls
-  integer,parameter:: call_is_invar=          256
-  integer,parameter:: call_ignore_rules=      512
-  integer,parameter:: call_is_fixed =         2**10
-  integer,parameter:: call_is_assign_call =   2**11
-  integer,parameter:: call_is_vararg =        2**12
+  integer,parameter:: call_is_invar         = 256
+  integer,parameter:: call_ignore_rules     = 512
+  integer,parameter:: call_is_fixed         = 2**10
+  integer,parameter:: call_is_assign_call   = 2**11
+  integer,parameter:: call_is_vararg        = 2**12
   integer,parameter:: call_inline_when_compiling = 2**13
-  integer,parameter:: call_has_move_args =    2**14
-  integer,parameter:: call_is_cond =          2**15
-  integer,parameter:: call_is_no_touch =      2**16
-  integer,parameter:: call_is_unlabelled =    2**17
-  integer,parameter:: call_takes_uninit =     2**18
-  integer,parameter:: call_needs_uninit =     2**19
-  integer,parameter:: call_converts_uninit =  2**20
-  integer,parameter:: call_keep_literals =    2**21
+  integer,parameter:: call_has_move_args    = 2**14
+  integer,parameter:: call_is_cond          = 2**15
+  integer,parameter:: call_is_no_touch      = 2**16
+  integer,parameter:: call_is_unlabelled    = 2**17
+  integer,parameter:: call_takes_uninit     = 2**18
+  integer,parameter:: call_needs_uninit     = 2**19
+  integer,parameter:: call_converts_uninit  = 2**20
+  integer,parameter:: call_keep_literals    = 2**21
   integer,parameter:: call_is_halo_exchange = 2**22
-  integer,parameter:: call_returns_private =  2**23
+  integer,parameter:: call_returns_private  = 2**23
+  integer,parameter:: call_is_get_ref_value = 2**24
+  integer,parameter:: call_takes_idx        = 2**25
+  integer,parameter:: call_keeps_idx        = 2**26
+  integer,parameter:: call_is_read_list     = 2**27
 
   
 contains
@@ -254,13 +258,31 @@ contains
     if(pm_debug_checks) then
        call check_ptr_node(node)
        if(n<0.or.node_args+n-1>pm_fast_esize(node)) &
-            call pm_panic('node_arg - n out of range')
+            call pm_panic('node_num_arg - n out of range')
     endif
     p=node%data%ptr(node%offset+node_args+n-1)
     num=p%offset
   contains
     include 'fesize.inc'
   end function node_num_arg
+
+  !======================================================
+  ! Set n-th argument of a node to a number
+  ! (that argument should already be be tiny-int)
+  !======================================================
+  subroutine node_set_num_arg(node,n,num)
+    type(pm_ptr),intent(in):: node
+    integer,intent(in):: n
+    integer:: num
+    if(pm_debug_checks) then
+       call check_ptr_node(node)
+       if(n<0.or.node_args+n-1>pm_fast_esize(node)) &
+            call pm_panic('node_set_num_arg - n out of range')
+    endif
+    node%data%ptr(node%offset+node_args+n-1)%offset=num
+  contains
+    include 'fesize.inc'
+  end subroutine node_set_num_arg
 
   !======================================================
   ! Return n-th slot in a node (not the same as argument)

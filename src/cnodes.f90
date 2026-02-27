@@ -147,8 +147,8 @@ module pm_cnodes
   integer,parameter:: var_is_reference=2**14
   integer,parameter:: var_is_key_ptr=2**15
   integer,parameter:: var_is_comm=2**16
-  !integer,parameter:: var_is_temp=2**17
-  !integer,parameter:: var_is_return=2**18
+  integer,parameter:: var_is_chan=2**17
+  integer,parameter:: var_is_nhd=2**18
   integer,parameter:: var_is_list=2**19
   integer,parameter:: var_is_list_param=2**20
   integer,parameter:: var_is_list_elem=2**21
@@ -197,6 +197,14 @@ module pm_cnodes
 
   integer,parameter:: sp_sig_deactivated=-huge(1)
 
+  ! Auto-conversion nodes
+  integer,parameter:: autoconv_to_poly=1
+  integer,parameter:: autoconv_to_embedded=2
+  integer,parameter:: autoconv_from_invar=3
+  integer,parameter:: autoconv_from_nhd=4
+  integer,parameter:: autoconv_from_idx=5
+  integer,parameter:: autoconv_call_is_shared=6
+
   ! Access codes
   ! Note - if change access_kind then need to
   ! check for and change any %data%i8 accesses
@@ -211,7 +219,7 @@ module pm_cnodes
   integer(access_kind),parameter:: access_used_by_at=16
   integer(access_kind),parameter:: access_may_be_used=32
   integer(access_kind),parameter:: access_may_be_at=64
-  integer(access_kind),parameter:: access_holds_result=128
+  !integer(access_kind),parameter:: access_holds_result=128
   integer(access_kind),parameter:: access_not_passed=256
   integer(access_kind),parameter:: access_is_list=512
   integer(access_kind),parameter:: access_may_detag=1024
@@ -661,7 +669,7 @@ contains
     type(pm_ptr),intent(in):: rvec,sig_cache,proc_cache,cnode
     integer:: signo,name,i,j,k,nret,nargs,modl,line
     type(pm_ptr):: p,args,amps,keys,keynames
-    character(len=256):: str,location
+    character(len=160):: str,location
 
     args=cnode_get(cnode,call_args)
     nargs=cnode_numargs(args)
@@ -1050,7 +1058,7 @@ contains
        i=i+n
     endif
     if(break.or.i>len(str)) then
-       write(iunit,'(a)') str(1:i)
+       write(iunit,'(a)') str(1:min(i,len(str)))
        i=1
     endif
   end subroutine append_to_line
@@ -1115,10 +1123,10 @@ contains
        str(n:n+6)='maybeat'
        n=n+8
     endif
-    if(iand(item,access_holds_result)/=0) then
-       str(n:n+5)='result'
-       n=n+7
-    endif
+!!$    if(iand(item,access_holds_result)/=0) then
+!!$       str(n:n+5)='result'
+!!$       n=n+7
+!!$    endif
     if(iand(item,access_not_passed)/=0) then
        str(n:n+5)='nopass'
        n=n+7

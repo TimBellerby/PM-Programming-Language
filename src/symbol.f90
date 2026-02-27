@@ -3,7 +3,7 @@
 !
 ! Released under the MIT License (MIT)
 !
-! Copyright (c) Tim Bellerby, 2024
+! Copyright (c) Tim Bellerby, 2026
 !
 ! Permission is hereby granted, free of charge, to any person obtaining a copy
 ! of this software and associated documentation files (the "Software"), to deal
@@ -134,7 +134,8 @@ module pm_symbol
   integer,parameter:: sym_when = last_operator + 11
   integer,parameter:: sym_bounds = last_operator + 12
   integer,parameter:: sym_typeof = last_operator + 13
-  integer,parameter:: last_expr = sym_typeof
+  integer,parameter:: sym_extend = last_operator + 14
+  integer,parameter:: last_expr = sym_extend
   integer,parameter:: last_word = last_expr
 
   ! Modes
@@ -150,10 +151,13 @@ module pm_symbol
   integer,parameter:: sym_mixed       =  last_word + 8
   integer,parameter:: sym_uniform     =  last_word + 9
   integer,parameter:: sym_invar       =  last_word + 10
-  integer,parameter:: sym_shared      =  last_word + 11
+  integer,parameter:: sym_outer_invar =  last_word + 11
+  integer,parameter:: sym_shared      =  last_word + 12
+  integer,parameter:: sym_outer_shared=  last_word + 13
+  integer,parameter:: sym_outer       =  last_word + 14
   
   integer,parameter:: last_mode  =   sym_shared
-  integer,parameter:: last_key =   sym_shared
+  integer,parameter:: last_key =   sym_outer
   
   ! Declaration keywords
   integer,parameter:: sym_package = last_key +1
@@ -195,15 +199,16 @@ module pm_symbol
   integer,parameter:: sym_where = last_decl + 25
   integer,parameter:: sym_repeat = last_decl + 26
   integer,parameter:: sym_edge = last_decl + 27
+  integer,parameter:: sym_once = last_decl + 28
 
   ! Some important compound reserved words
-  integer,parameter:: sym_if_invar = last_decl + 28
-  integer,parameter:: sym_while_invar = last_decl + 29
-  integer,parameter:: sym_until_invar = last_decl + 30
-  integer,parameter:: sym_foreach_invar = last_decl + 31
-  integer,parameter:: sym_switch_invar = last_decl + 32
-  integer,parameter:: sym_any_invar= last_decl + 33
-  integer,parameter:: sym_sync_while = last_decl + 34
+  integer,parameter:: sym_if_invar = last_decl + 29
+  integer,parameter:: sym_while_invar = last_decl + 30
+  integer,parameter:: sym_until_invar = last_decl + 31
+  integer,parameter:: sym_foreach_invar = last_decl + 32
+  integer,parameter:: sym_switch_invar = last_decl + 33
+  integer,parameter:: sym_any_invar= last_decl + 34
+  integer,parameter:: sym_sync_while = last_decl + 35
   integer,parameter:: last_resv = sym_sync_while
 
   ! Names used by internal system
@@ -247,13 +252,14 @@ module pm_symbol
   integer,parameter:: sym_pm_import_list = last_resv + 37
   integer,parameter:: sym_cast = last_resv + 38
   integer,parameter:: sym_pm_typeof   =   last_resv + 39
-  integer,parameter:: last_stmt = sym_pm_typeof
+  integer,parameter:: sym_pm_write_list = last_resv + 40
+  integer,parameter:: last_stmt = sym_pm_write_list
   integer,parameter:: num_sym = last_stmt
 
   ! Non-reserved words that the compiler needs to know about
   integer,parameter:: sym_array = num_sym + 1
   integer,parameter:: sym_matrix = num_sym + 2
-  integer,parameter:: sym_idx = num_sym + 3
+  integer,parameter:: sym_pm_idx = num_sym + 3
   integer,parameter:: sym_tuple = num_sym + 4
 
   ! These are for/par statement attributes
@@ -379,11 +385,14 @@ module pm_symbol
   integer,parameter:: sym_pm_foreach_invar_stmt=hook1 + 16
   integer,parameter:: sym_pm_for_stmt = hook1 + 17
   integer,parameter:: sym_pm_over_stmt = hook1 + 18
-  integer,parameter:: sym_pm_par_stmt = hook1 + 19
-  integer,parameter:: sym_lhs = hook1 + 20
-  integer,parameter:: sym_rhs = hook1 + 21
+  integer,parameter:: sym_pm_edge_stmt = hook1 + 19
+  integer,parameter:: sym_pm_par_stmt = hook1 + 20
+  integer,parameter:: sym_lhs = hook1 + 21
+  integer,parameter:: sym_rhs = hook1 + 22
+  integer,parameter:: sym_get_val = hook1 + 23
+  integer,parameter:: sym_pm_read_list = hook1 + 24
 
-  integer,parameter:: hook2 = hook1 + 21
+  integer,parameter:: hook2 = hook1 + 24
   
   integer,parameter:: sym_make_var= hook2 + 1
   integer,parameter:: sym_make_chan_var = hook2 + 2
@@ -412,8 +421,9 @@ module pm_symbol
   integer,parameter:: sym_export_local =hook2 + 24
   integer,parameter:: sym_export_param = hook2 + 25
   integer,parameter:: sym_import_param = hook2 + 26
+  integer,parameter:: sym_make_private = hook2 + 27
  
-  integer,parameter:: hook4= hook2 + 26
+  integer,parameter:: hook4= hook2 + 27
   
   integer,parameter:: sym_set_elem = hook4 + 1
   integer,parameter:: sym_active = hook4 + 2
@@ -555,6 +565,7 @@ module pm_symbol
   data sym_names(sym_when)             /'when'/
   data sym_names(sym_bounds)           /'bounds'/
   data sym_names(sym_typeof)           /'typeof'/
+  data sym_names(sym_extend)           /'extend'/
 
   data sym_names(sym_local)            /'lcl'/
   data sym_names(sym_global)           /'gbl'/
@@ -567,8 +578,11 @@ module pm_symbol
   data sym_names(sym_mixed)            /'mixd'/
   data sym_names(sym_uniform)          /'unif'/
   data sym_names(sym_invar)            /'invar'/
+  data sym_names(sym_outer_invar)      /'{outer} invar'/
   data sym_names(sym_shared)           /'shrd'/
-
+  data sym_names(sym_outer_shared)     /'{outer} shrd'/
+  data sym_names(sym_outer)            /'{outer shrd}'/
+  
   ! Declaration keywords
   data sym_names(sym_package)          /'package'/
   data sym_names(sym_use)              /'use'/
@@ -606,6 +620,7 @@ module pm_symbol
   data sym_names(sym_where)            /'where'/
   data sym_names(sym_repeat)           /'repeat'/
   data sym_names(sym_edge)             /'edge'/
+  data sym_names(sym_once)             /'once'/
   
   data sym_names(sym_switch_invar)     /'switch invar'/
   data sym_names(sym_if_invar)         /'if invar'/
@@ -614,7 +629,6 @@ module pm_symbol
   data sym_names(sym_foreach_invar)    /'foreach invar'/
   data sym_names(sym_any_invar)        /'any invar'/
   data sym_names(sym_sync_while)       /'sync while'/
-
   
   data sym_names(sym_pm_send)          /'PM__send'/
   data sym_names(sym_pm_recv)          /'PM__recv'/
@@ -655,12 +669,13 @@ module pm_symbol
   data sym_names(sym_pm_import_list)   /'PM__import_list'/
   data sym_names(sym_cast)             /'PM__cast'/
   data sym_names(sym_pm_typeof)        /'PM__typeof'/
+  data sym_names(sym_pm_write_list)    /'PM__write_list'/
   
   !===============================================================
 
   data sym_names(sym_array)            /'array'/
   data sym_names(sym_matrix)           /'matrix'/
-  data sym_names(sym_idx)              /'indexed'/
+  data sym_names(sym_pm_idx)           /'PM__idx'/
   data sym_names(sym_tuple)            /'tuple'/
  
 
@@ -707,7 +722,7 @@ module pm_symbol
   data sym_names(sym_for_stmt)         /'<for-stmt>'/
   data sym_names(sym_dot_ref)          /'<dot-ref>'/
   data sym_names(sym_result)           /'<result>'/
-  data sym_names(sym_sub)              /'[]'/
+  data sym_names(sym_sub)              /'<subscript>'/
   data sym_names(sym_method_call)      /'<method-call>'/
   data sym_names(sym_array_former)     /'<array-former>'/
   data sym_names(sym_matrix_former)    /'<matrix-former>'/
@@ -725,7 +740,7 @@ module pm_symbol
   data sym_names(sym_update_list)      /'<update-list>'/
   data sym_names(sym_update_from_list) /'<update-from-list>'/
   data sym_names(sym_also)             /'<also>'/
-  data sym_names(sym_change_mode)      /'<change_mode>'/
+  data sym_names(sym_change_mode)      /'<change-mode>'/
   data sym_names(sym_dot_amp)          /'<dot-amp>'/
   data sym_names(sym_type_val)         /'<type-val>'/
   data sym_names(sym_dot_call)         /'<dot-call>'/
@@ -735,7 +750,7 @@ module pm_symbol
   data sym_names(sym_call)             /'<call>'/
   data sym_names(sym_check_par_state)  /'<check-par-state>'/
   data sym_names(sym_assign_list)      /'<assign-list>'/
-  data sym_names(sym_assign_or_init)   /'<assign_or_init>'/
+  data sym_names(sym_assign_or_init)   /'<assign-or-init>'/
 
   ! Misc. symbols referenced by compiler
   
@@ -777,10 +792,12 @@ module pm_symbol
   data sym_names(sym_pm_foreach_invar_stmt) /'PM__foreach_invar_stmt'/
   data sym_names(sym_pm_for_stmt)      /'PM__for_stmt'/
   data sym_names(sym_pm_over_stmt)     /'PM__over_stmt'/
+  data sym_names(sym_pm_edge_stmt)     /'PM__edge_stmt'/
   data sym_names(sym_pm_par_stmt)      /'PM__par_stmt'/
   data sym_names(sym_lhs)              /'PM__lhs'/
   data sym_names(sym_rhs)              /'PM__rhs_and_val'/
-
+  data sym_names(sym_get_val)          /'PM__get_val'/
+  data sym_names(sym_pm_read_list)     /'PM__read_list'/
   
   data sym_names(sym_make_var)         /'PM__make_var'/
   data sym_names(sym_make_chan_var)    /'PM__make_chan_var'/
@@ -808,6 +825,7 @@ module pm_symbol
   data sym_names(sym_export_local)     /'PM__export_lcl'/
   data sym_names(sym_export_param)     /'PM__export_param'/
   data sym_names(sym_import_param)     /'PM__import_param'/
+  data sym_names(sym_make_private)     /'PM__make_priv'/
 
   data sym_names(sym_set_elem)         /'PM__setaelem'/
   data sym_names(sym_active)           /'PM__active'/
@@ -841,9 +859,6 @@ module pm_symbol
   data sym_names(sym_topology)         /'PM__topology'/
   data sym_names(sym_mask)             /'PM__mask'/
   data sym_names(sym_region)           /'PM__region'/
-
-
-  
 
   data sym_names(sym_infer_stack)      /'infer_stack'/
   data sym_names(sym_infer_type)       /'infer_type'/
@@ -1051,6 +1066,48 @@ contains
   contains
     include 'fvkind.inc'
   end function pm_name_stem
+
+
+  !==========================================
+  ! Return first element of name vector
+  !==========================================
+  function pm_name_first(context,m) result(name)
+    type(pm_context),pointer:: context
+    integer,intent(in):: m
+    integer:: name
+    type(pm_ptr):: val
+    integer:: vkind
+    val=pm_name_val(context,m)
+    vkind=pm_fast_vkind(val)
+    if(pm_debug_checks.and.vkind/=pm_int) then
+       call pm_panic('pm_name_first')
+    endif
+    name=val%data%i(val%offset)
+    if(pm_debug_checks.and.name<0) call pm_panic('pm_name_first - name<0')
+  contains
+    include 'fvkind.inc'
+  end function pm_name_first
+
+  !===============================================
+  ! Return module of qualified name name1::name2
+  !==========================================
+  function pm_name_module(context,m) result(name)
+    type(pm_context),pointer:: context
+    integer,intent(in):: m
+    integer:: name
+    type(pm_ptr):: val
+    integer:: vkind
+    val=pm_name_val(context,m)
+    vkind=pm_fast_vkind(val)
+    if(pm_debug_checks.and.vkind/=pm_int) then
+       call pm_panic('pm_name_module')
+    endif
+    name=-val%data%i(val%offset)
+    if(pm_debug_checks.and.name<0) call pm_panic('pm_name_mode - name<0')
+  contains
+    include 'fvkind.inc'
+  end function pm_name_module
+  
 
   !===================================
   ! Returns name as a string

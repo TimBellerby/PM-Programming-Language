@@ -171,8 +171,6 @@ contains
     else
        trace_var_changed=.false.
     endif
-    
-
    
     oparg=pc%data%i16(pc%offset+3_pm_p)
     arg(1)=stack%data%ptr(stack%offset+oparg)
@@ -258,60 +256,13 @@ contains
     pc%offset=pc%offset+n+3_pm_p
     
     ! Empty ve
-    if(pm_fast_vkind(ve)==pm_tiny_int) then
-
-       call pm_panic('Old empty ve')
-       if(pm_debug_level>3) then
-          write(*,*) 'NULLIFIED OP>',op_names(opcode)
+    if(pm_debug_checks) then
+       if(pm_fast_vkind(ve)==pm_tiny_int) then
+          call pm_panic('Old empty ve')
+          if(pm_debug_level>3) then
+             write(*,*) 'NULLIFIED OP>',op_names(opcode)
+          endif
        endif
-       
-!!$       ! Opcode that should not be skipped
-!!$       select case(opcode)
-!!$       case(op_and_ve:op_andnot_jmp_any,op_do_at)
-!!$          call set_arg(2,arg(1))
-!!$       case(op_jmp_any_ve_par)
-!!$          if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-!!$          ok=sync_loop_end(.false.)
-!!$          if(ok) then
-!!$             pc%offset=pc%offset+opcode2-pm_jump_offset
-!!$          endif
-!!$       case(op_clone_ve)
-!!$          stack%data%ptr(stack%offset+opcode2)=arg(1)
-!!$       case(op_jmp)
-!!$          pc%offset=pc%offset+opcode2-pm_jump_offset
-!!$       case(op_skip_comms)
-!!$          !write(*,*) 'SKIP COMMS (empty)>>',esize
-!!$          if(esize==1) pc%offset=pc%offset+opcode2-pm_jump_offset
-!!$       case(op_head_node)
-!!$          if(par_frame(par_depth)%shared_node/=0) pc%offset=pc%offset+opcode2-pm_jump_offset
-!!$       case(op_remote_call:op_bcast_call,&
-!!$            op_dref,op_par_loop_end,op_chan,op_export,&
-!!$            op_export_param,op_pop_node,op_sync_mess,op_import_val,op_return)
-!!$          !write(*,*) 'unskip',op_names(opcode)
-!!$          goto 20
-!!$       case(op_recv_req_call,op_recv_assn_call)
-!!$          call set_arg(2,arg(1))
-!!$       case(op_skip_empty)
-!!$          if(opcode2>0) then
-!!$             if(sync_status(pc,pm_node_running)==pm_node_error) goto 777
-!!$             ok=sync_loop_end(.false.)
-!!$             if(ok) then
-!!$                call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
-!!$             else
-!!$                call set_arg(2,make_new_ve(empty_vector,arg(3)))
-!!$             endif
-!!$          else
-!!$             call set_arg(2,make_new_ve(pm_null_obj,arg(3)))
-!!$          endif
-!!$       case(op_comm_call)
-!!$          if(pm_fast_vkind(arg(1)%data%ptr(arg(1)%offset))/=pm_tiny_int) goto 20
-!!$       end select
-!!$       if(pm_debug_level>3) then
-!!$          write(*,*) 'SKIPPING>',opcode,&
-!!$               op_names(opcode),opcode2,opcode3,&
-!!$               'pc=',pc%offset,'esize=',esize
-!!$       endif
-!!$       goto 10
     endif
 
     20 continue
@@ -1329,7 +1280,7 @@ contains
        if(errno/=0) then
           goto 997
        endif
-    case(op_rec)
+    case(op_rec,op_list)
        v=pm_fast_newusr(context,pm_rec_type,int(nargs,pm_p))
        call set_arg(2,v)
        v%data%ptr(v%offset+1_pm_p)=&
@@ -1502,7 +1453,8 @@ contains
     case(op_indices)
        v=alloc_arg(pm_long,2)
        call vector_indices(arg(1)%data%ptr(arg(1)%offset+1),v)
-       
+    case(op_expand_idx)
+       call set_arg(2,vector_expand_idx(context,arg(3),arg(1),opcode2))
     case(op_import_val)
        call set_arg(2,import_vector(context,&
             arg(3),arg(1)%data%ptr(arg(1)%offset+1)))

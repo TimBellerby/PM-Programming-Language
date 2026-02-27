@@ -109,13 +109,14 @@ module pm_vmdefs
   integer,parameter:: op_check_logical = op_misc + 25
   integer,parameter:: op_chan_array_elem = op_misc + 26
   integer,parameter:: op_chan_array_vect = op_misc + 27
-  integer,parameter:: op_list_concat = op_misc + 28
-  integer,parameter:: op_list_splice = op_misc + 29
-  integer,parameter:: op_substr = op_misc + 30
-  integer,parameter:: op_string_ge = op_misc + 31
-  integer,parameter:: op_string_gt = op_misc + 32
-  integer,parameter:: op_string_fmt = op_misc + 33
-  integer,parameter:: op_string_len = op_misc + 34
+  integer,parameter:: op_list = op_misc + 28
+  integer,parameter:: op_list_concat = op_misc + 29
+  integer,parameter:: op_list_splice = op_misc + 30
+  integer,parameter:: op_substr = op_misc + 31
+  integer,parameter:: op_string_ge = op_misc + 32
+  integer,parameter:: op_string_gt = op_misc + 33
+  integer,parameter:: op_string_fmt = op_misc + 34
+  integer,parameter:: op_string_len = op_misc + 35
 
   integer,parameter:: op_misc2=op_string_len
 
@@ -143,8 +144,9 @@ module pm_vmdefs
   integer,parameter:: op_wshare = op_misc2 + 22
   integer,parameter:: op_block_cyclic = op_misc2 + 23
   integer,parameter:: op_array_set_multi_elem = op_misc2 + 24
+  integer,parameter:: op_expand_idx = op_misc2 + 25
 
-  integer,parameter:: op_misc3 = op_array_set_multi_elem
+  integer,parameter:: op_misc3 = op_expand_idx
 
   integer,parameter:: op_get_esize = op_misc3 + 1
   integer,parameter:: op_pack = op_misc3 + 2
@@ -855,6 +857,7 @@ module pm_vmdefs
   data op_flags(op_extract_first)   /0/
   data op_flags(op_chan_array_elem) /0/
   data op_flags(op_chan_array_vect) /0/
+  data op_flags(op_list)            /0/
   data op_flags(op_list_concat)     /0/
   data op_flags(op_list_splice)     /0/
   data op_flags(op_substr)          /0/
@@ -894,6 +897,7 @@ module pm_vmdefs
   data op_flags(op_advance)         /0/
   data op_flags(op_advance_and)     /0/
   data op_flags(op_init_loop)       /0/
+  data op_flags(op_expand_idx)      /0/
 
   data op_flags(op_intersect_seq)   /0/
   data op_flags(op_intersect_aseq)  /0/
@@ -1582,6 +1586,7 @@ contains
     op_names(op_extract_first)='extract_first'
     op_names(op_chan_array_elem)='chan_array_elem'
     op_names(op_chan_array_vect)='chan_array_vect'
+    op_names(op_list)="list"
     op_names(op_list_concat)='list_concat'
     op_names(op_list_splice)='list_splice'
     op_names(op_substr)='substr'
@@ -1621,6 +1626,7 @@ contains
     op_names(op_advance)='advance'
     op_names(op_advance_and)='advance_and'
     op_names(op_init_loop)='init_loop'
+    op_names(op_expand_idx)='expand_idx'
 
     op_names(op_intersect_seq)='intersect_seq'
     op_names(op_intersect_aseq)='intersect_aseq'
