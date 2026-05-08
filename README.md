@@ -4,15 +4,7 @@
 
 ## Overview
 
-The PM Programming Language is designed to facilitate the creation
-of numerical models on parallel systems. It combines concepts of
-parallelisation and vectorisation into a unified model using a 'strand'
-as a basic unit of parallelisation. A strand is a very lightweight
-entity that does not require its own stack and can map to a single execution 
-of a loop body. Strands are used in both data and task parallelism and can communicate
-with other strands, including those running on other nodes. PM uses a modified form of
-the Partitioned Global Address Space approach which builds synchronisation into basic operations 
-and excludes race conditions.
+PM (Parallel Models) is a distributed‑first programming language for building high‑performance numerical models on modern HPC systems. It provides a natural way to express algorithms while making data distribution, communication, and parallel behaviour explicit and predictable. PM translates the realities of MPI/OpenMP/OpenACC programming into clear language constructs, offering deterministic semantics, portable performance, and compiler‑optimised data layout — all without sacrificing clarity or control.
 
 The PM compiler currently cross-compiles to Fortran+MPI. More target language/library
 combinations are planned, including Fortran-MPI-OpenMP and accelerator support (initially
@@ -47,7 +39,7 @@ raise an issue.
   - Revised compiler structure
   - Major improvements in generated code 
 
-  * __PM 0.5.1__  (expected Jan-Feb 2026)
+  * __PM 0.5.1__  (expected Jun/Jul 2026)
     -  PM interpreter
     -  PM to Fortan 2003/MPI transpiler
 
