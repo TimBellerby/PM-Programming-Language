@@ -1268,17 +1268,31 @@ contains
        else
           call set_arg(2,copy_vector(context,arg(3),ve,0_pm_ln,esize+1))
        endif
-    case(op_assign,op_assign_move)
+    case(op_assign,op_assign_move,op_assign_move_if)
        errno=0
-       call vector_assign(context,arg(2),arg(3),ve,errno,esize,moveit=opcode==op_assign_move)
+       ok=opcode==op_assign_move
+       if(opcode==op_assign_move_if) ok=arg(4)%data%l(arg(4)%offset)
+       call vector_assign(context,arg(2),arg(3),ve,errno,esize,moveit=ok)
        if(errno/=0) then
           goto 997
        endif
-    case(op_assign_move_if)
-       errno=0
-       call vector_assign(context,arg(2),arg(3),ve,errno,esize,moveit=arg(4)%data%l(arg(4)%offset))
-       if(errno/=0) then
-          goto 997
+    case(op_merge_init,op_merge_init_move,op_merge_init_move_if)
+       ok=opcode==op_merge_init_move
+       if(opcode==op_merge_init_move_if) ok=arg(5)%data%l(arg(5)%offset)
+       if(pm_fast_isnull(arg(3))) then
+          if(.not.ve_is_empty(ve)) then
+             if(ok) then
+                call set_arg(2,arg(4))
+             else
+                call set_arg(2,copy_vector(context,arg(4),ve,0_pm_ln,esize+1))
+             endif
+          endif
+       else
+          errno=0
+          call vector_assign(context,arg(3),arg(4),ve,errno,esize,moveit=ok)
+          if(errno/=0) then
+             goto 997
+          endif
        endif
     case(op_rec,op_list)
        v=pm_fast_newusr(context,pm_rec_type,int(nargs,pm_p))
@@ -1352,7 +1366,7 @@ contains
        else
           if(pm_fast_vkind(arg(3))/=pm_usr) then
              if(.not.ve_is_empty(ve)) then
-                write(*,*) 'Internal error (not struct or rec) on',sys_node,opcode2
+                write(*,*) 'Internal error (not a rec) on',sys_node,opcode2
                 call pm_dump_tree(context,6,arg(3),2)
                 goto 999
              endif
@@ -1455,6 +1469,8 @@ contains
        call vector_indices(arg(1)%data%ptr(arg(1)%offset+1),v)
     case(op_expand_idx)
        call set_arg(2,vector_expand_idx(context,arg(3),arg(1),opcode2))
+    case(op_undefined)
+       call set_arg(2,vector_from_type(context,opcode2,esize+1))       
     case(op_import_val)
        call set_arg(2,import_vector(context,&
             arg(3),arg(1)%data%ptr(arg(1)%offset+1)))
@@ -1513,6 +1529,8 @@ contains
        call set_arg(3,new2)
        ve=make_new_ve(newve,arg(1))
        call set_arg(2,ve)
+    case(op_deref_ptr)
+       call set_arg(2,deref_ptr(context,arg(3),arg(4),ve,esize))
     case(op_skip_any)
        if(ve_is_empty(ve)) pc%offset=pc%offset+opcode2-pm_jump_offset
     case(op_as)
@@ -1542,7 +1560,10 @@ contains
        call set_arg(2,array_pack(context,arg(3),opcode2,arg(4),arg(5),arg(6)))
 !!$    case(op_advance)
 !!$       call set_arg(2,advance(context,arg(3),arg(4)))
-      
+
+    case(op_sum_reduce)
+       call set_arg(2,vector_sum(context,arg(3),ve,arg(1)%data%ptr(arg(1)%offset+1)))
+    
     case(op_get_dims)
        n=(nargs-2)/2
        call alloc_args_to_long(2,n+1)

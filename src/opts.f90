@@ -49,6 +49,7 @@ module pm_options
      logical:: print_immediate
      logical:: show_hidden
      logical:: run_bprop
+     logical:: show_deactivated
      logical:: lib_path_set
      character(len=pm_max_filename_size):: lib_path
      logical:: checks_to_run_set
@@ -105,6 +106,7 @@ contains
     pm_opts%show_all_ref=.false.
     pm_opts%print_immediate=.false.
     pm_opts%show_hidden=.false.
+    pm_opts%show_deactivated=.false.
     pm_opts%lib_path_set=.false.
     pm_opts%checks_to_run_set=.false.
     
@@ -279,14 +281,15 @@ contains
 
   subroutine help_d
     write(*,*) '  OPTIONS FOR DEBUGGING THE COMPILER ITSELF'
-    write(*,*) '  -Dshow-details    Show extra details of types'
-    write(*,*) '  -Dshow-hidden     Show hidden procedure parameters'
-    write(*,*) '  -Dno-bprop        Do not run BPROP pass'
-    write(*,*) '  -Dallow-caret     Allow "^" outside of system module'
-    write(*,*) '  -D                Activate all debugging options listed below.'
-    write(*,*) '  -Dfiles           Output files from each compiler stage.'
-    write(*,*) '  -Dtimings         Output time taken by each compilation stage.'
-    write(*,*) '  -Dtype-list       Output a list of all types used by the system.'
+    write(*,*) '  -Dshow-details      Show extra details of types'
+    write(*,*) '  -Dshow-hidden       Show hidden procedure parameters'
+    write(*,*) '  -Dshow-deactivated  Show deactivated calls'
+    write(*,*) '  -Dno-bprop          Do not run BPROP pass'
+    write(*,*) '  -Dallow-caret       Allow "^" outside of system module'
+    write(*,*) '  -D                  Activate all debugging options listed below.'
+    write(*,*) '  -Dfiles             Output files from each compiler stage.'
+    write(*,*) '  -Dtimings           Output time taken by each compilation stage.'
+    write(*,*) '  -Dtype-list         Output a list of all types used by the system.'
     call pm_stop(' ')
   end subroutine help_d
   
@@ -335,6 +338,8 @@ contains
              pm_opts%show_details=.true.
           elseif(arg=='-Dshow-hidden') then
              pm_opts%show_hidden=.true.
+          elseif(arg=='-Dshow-deactivated') then
+             pm_opts%show_deactivated=.true.
           elseif(arg=='-Dno-bprop') then
              pm_opts%run_bprop=.false.
           elseif(arg=='-D') then

@@ -236,6 +236,8 @@ contains
        call fix(str(41:))
        str=trim(adjustl(str(1:40)))//trim(adjustl(str(41:80)))//'i_cpx256'
        return
+    case(pm_null)
+       str='NULL'
     case default
        str='????'//trim(pm_int_as_string(pm_fast_vkind(v)))//'????'
     end select

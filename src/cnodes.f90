@@ -203,7 +203,8 @@ module pm_cnodes
   integer,parameter:: autoconv_from_invar=3
   integer,parameter:: autoconv_from_nhd=4
   integer,parameter:: autoconv_from_idx=5
-  integer,parameter:: autoconv_call_is_shared=6
+  integer,parameter:: autoconv_from_chan=6
+  integer,parameter:: autoconv_call_is_shared=7
 
   ! Access codes
   ! Note - if change access_kind then need to
@@ -579,7 +580,7 @@ contains
           enddo
           write(iunit,'(a)') '}'
        case(cnode_is_arglist)
-          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'{'
+          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//'] {'
           do i=3,cnode_numargs(cnode),2
              write(iunit,'(a)') '  '//&
                   trim(pm_name_as_string(context,&
@@ -592,16 +593,14 @@ contains
           enddo
           write(iunit,'(a)') '}'
        case(cnode_is_any_sig)
-          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'Any{'
+          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//'] Multi-resolution {'
           do i=1,cnode_numargs(cnode)
              call pm_dump_tree(context,iunit,cnode_arg(cnode,i),2)
           enddo
           write(iunit,'(a)') '}'
        case(cnode_is_autoconv_sig)
-          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//']'//'Auto {'
-          do i=1,cnode_numargs(cnode)
-             call pm_dump_tree(context,iunit,cnode_arg(cnode,i),2)
-          enddo
+          write(iunit,'(a)') '['//trim(pm_int_as_string(n))//'] Auto-convert {'
+          call print_autoconv(context,iunit,cnode,2)
           write(iunit,'(a)') '}'
        case(cnode_is_builtin)
           write(iunit,'(a)') '['//trim(pm_int_as_string(n))//'] {'
@@ -609,10 +608,12 @@ contains
                sig_cache,proc_cache,cnode)
           write(iunit,'(a)') '}'
        case default
-          write(iunit,'("????",i5)') kind
+          write(iunit,'("Unknown-cnode-kind#",i5)') kind
        end select
     else
+       write(iunit,'(a)') 'Signature value is not a cnode {'
        call pm_dump_tree(context,iunit,cnode,1)
+       write(iunit,'(a)') '}'
     endif
   contains
     include 'fesize.inc'
@@ -667,7 +668,8 @@ contains
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,depth
     type(pm_ptr),intent(in):: rvec,sig_cache,proc_cache,cnode
-    integer:: signo,name,i,j,k,nret,nargs,modl,line
+    integer:: signo,name,i,j,k,nret,nargs,modl,line,resolved_sig
+    logical:: has_resolved_sig
     type(pm_ptr):: p,args,amps,keys,keynames
     character(len=160):: str,location
 
@@ -676,12 +678,14 @@ contains
     nret=cnode_get_num(cnode,call_nret)
     amps=cnode_get(cnode,call_amp)
     amps=pm_name_val(context,int(amps%offset))
+    has_resolved_sig=.false.
     
     signo=cnode_get_num(cnode,call_sig)
     str=' '
     if(.not.pm_fast_isnull(rvec)) then
        k=rvec%data%i(rvec%offset+cnode_get_num(cnode,call_index))
        if(k==sp_sig_deactivated) then
+          if(.not.pm_opts%show_deactivated)  return
           str='[--]'
        endif
     endif
@@ -696,6 +700,9 @@ contains
                 goto 10
              elseif(signo==-sym_pm_each_index) then
                 call multi_version(k,nret+2,nret+3)
+                goto 10
+             elseif(signo==-sym_vcast) then
+                call multi_version(k,5,6)
                 goto 10
              else
                 call append_to_line(iunit,str,i,&
@@ -762,6 +769,8 @@ contains
           else
              str=repeat(' ',depth)//trim(str)//'call '//'['//trim(pm_int_as_string(k))//']'&
                   //pm_name_as_string(context,name)
+             has_resolved_sig=.true.
+             resolved_sig=k
           endif
        endif
        i=len_trim(str)
@@ -821,6 +830,13 @@ contains
     str(len(str)-len_trim(location)+1:)=location
     write(iunit,'(a)') str
 
+    if(has_resolved_sig) then
+       p=pm_dict_val(context,proc_cache,int(resolved_sig,pm_ln))
+       if(cnode_get_kind(p)==cnode_is_autoconv_sig) then
+          call print_autoconv(context,iunit,p,depth+2)
+       endif
+    endif
+    
   contains
     include 'fesize.inc'
     include 'fisnull.inc'
@@ -835,11 +851,12 @@ contains
       slot2=slots%data%i(slots%offset+1)
       rvs=pm_dict_val(context,proc_cache,&
             int(csig,pm_ln))
-      do j=1,nret
+      do j=1,merge(1,nret,cnode_numargs(rvs)==0)
          call print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode_arg(args,j),depth,str,i)
          i=i+1
       enddo
-      call append_to_line(iunit,str,i,'<- ',.false.,depth)
+      if(nret>0) call append_to_line(iunit,str,i,'<- ',.false.,depth)
+      if(cnode_numargs(rvs)==0.and..not.pm_opts%show_deactivated) return
       do j=nret+1,nargs
          if(j==block_arg) then
             call append_to_line(iunit,str,i,'#'//trim(pm_int_as_string(cnode_numargs(rvs)))//'{ ',.false.,depth)
@@ -862,6 +879,66 @@ contains
     
   end subroutine print_call_cnode
 
+  subroutine print_autoconv(context,iunit,cnode,depth)
+    type(pm_context),pointer:: context
+    integer,intent(in):: iunit,depth
+    type(pm_ptr),intent(in):: cnode
+    character(len=160):: str,str2
+    type(pm_ptr):: arg
+    integer::i,j,cv,idx,tno
+    str=' '
+    i=depth
+    str(i:i)='{'
+    do j=1,cnode_numargs(cnode)-1
+       if(j>1) call append_to_line(iunit,str,i,',',.false.,depth)
+       arg=cnode_arg(cnode,j)
+       cv=arg%data%i(arg%offset)
+       idx=arg%data%i(arg%offset+1)
+       tno=arg%data%i(arg%offset+2)
+       select case(cv)
+       case(autoconv_to_embedded)
+          call append_to_line(iunit,str,i,'EMBED#',.false.,depth)
+       case(autoconv_to_poly)
+          call append_to_line(iunit,str,i,'POLY#',.false.,depth)
+       case(autoconv_from_invar)
+          call append_to_line(iunit,str,i,'INVAR#',.false.,depth)
+       case(autoconv_from_idx)
+          call append_to_line(iunit,str,i,'IDX#',.false.,depth)
+       case(autoconv_from_nhd)
+          call append_to_line(iunit,str,i,'NHD#',.false.,depth)
+       case(autoconv_from_chan)
+          call append_to_line(iunit,str,i,'CHAN#',.false.,depth)
+       case default
+          call append_to_line(iunit,str,i,'????#',.false.,depth)
+       end select
+       call append_to_line(iunit,str,i,trim(pm_int_as_string(idx))//'->[',.false.,depth)
+       call append_to_line(iunit,str,i,trim(pm_type_as_string(context,tno))//']',.false.,depth)
+    enddo
+    idx=cnode_num_arg(cnode,cnode_numargs(cnode))
+    if(idx==sp_sig_link) then
+       str2='[link]'
+    elseif(idx==sp_sig_dup) then
+       str2='[dup]'
+    elseif(idx==sp_sig_noop) then
+       str2='[noop]'
+    elseif(idx==sp_sig_setval) then
+       str2='[setval]'
+    elseif(idx==sp_sig_init) then
+       str2='[init]'
+    elseif(idx==sp_sig_assign) then
+       str2='[assign]'
+    elseif(idx==sp_sig_deactivated) then
+       str2='[]'
+    elseif(idx<0) then
+       str2='!![-'//trim(pm_int_as_string(-idx))//']'
+    else
+       str2='['//trim(pm_int_as_string(idx))//']'
+    endif
+    call append_to_line(iunit,str,i,'}->'//trim(str2),.false.,depth)
+    write(iunit,'(a)') str
+  end subroutine print_autoconv
+
+  
   recursive subroutine print_value_cnode(context,iunit,rvec,sig_cache,proc_cache,cnode,depth,str,i)
     type(pm_context),pointer:: context
     integer,intent(in):: iunit,depth
@@ -1017,6 +1094,9 @@ contains
           endif
           if(iand(flags,call_is_halo_exchange)/=0) then
              call append_to_line(iunit,str,i,'h',.false.,depth)
+          endif
+          if(iand(flags,call_is_vret)/=0) then
+             call append_to_line(iunit,str,i,'r',.false.,depth)
           endif
        endif
        call append_to_line(iunit,str,i,'>',.false.,depth)

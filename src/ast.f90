@@ -108,29 +108,32 @@ module pm_ast
   integer,parameter:: proccall_is_inline=     16
   integer,parameter:: proccall_is_no_inline=  32
   integer,parameter:: proccall_is_yield=      64
-
   integer,parameter:: proccall_is_lhs=        128
+  
   integer,parameter:: proc_is_cond=           256
   integer,parameter:: proc_is_uncond=         512
-  integer,parameter:: proc_run_complete=      2**10
-  integer,parameter:: proc_run_local=         2**11
-  integer,parameter:: proc_run_shared=        2**12
-  integer,parameter:: proc_run_always=        2**13
-  integer,parameter:: proc_is_open=           2**14
-  integer,parameter:: proc_is_abstract=       2**15
-  integer,parameter:: proc_is_generator =     2**16
-  integer,parameter:: proc_needs_type =       2**17
-  integer,parameter:: proc_is_recursive =     2**18
-  integer,parameter:: proc_unfinished =       2**19
+  integer,parameter:: proc_is_within=         2**10
+  integer,parameter:: proc_run_complete=      2**11
+  integer,parameter:: proc_run_local=         2**12
+  integer,parameter:: proc_run_shared=        2**13
+  integer,parameter:: proc_run_always=        2**14
+  integer,parameter:: proc_is_open=           2**15
+  integer,parameter:: proc_is_abstract=       2**16
+  integer,parameter:: proc_is_generator =     2**17
+  integer,parameter:: proc_needs_type =       2**18
+  integer,parameter:: proc_uses_amps =        2**19
+  integer,parameter:: proc_is_recursive =     2**20
+  integer,parameter:: proc_unfinished =       2**21
   
-  integer,parameter:: proc_is_impure =        2**20
-  integer,parameter:: proc_is_not_inlinable = 2**21
-  integer,parameter:: proc_has_for =          2**22
-  integer,parameter:: proc_is_not_pure_each = 2**23
-  integer,parameter:: proc_has_vkeys =        2**24
-  integer,parameter:: proc_is_dcomm =         2**25
-  integer,parameter:: proc_is_file =          2**26
-  integer,parameter:: proc_prints_out =       2**27
+  integer,parameter:: proc_is_impure =        2**22
+  integer,parameter:: proc_is_not_inlinable = 2**23
+  integer,parameter:: proc_has_for =          2**24
+  integer,parameter:: proc_is_not_pure_each = 2**25
+  integer,parameter:: proc_has_vkeys =        2**26
+  integer,parameter:: proc_is_dcomm =         2**27
+  integer,parameter:: proc_is_file =          2**28
+  integer,parameter:: proc_prints_out =       2**29
+  integer,parameter:: proc_is_vret =          2**30
 
   ! Proc flags that can be taken as taints
   integer,parameter:: proc_taints = proc_is_impure &
@@ -162,6 +165,7 @@ module pm_ast
   integer,parameter:: call_takes_idx        = 2**25
   integer,parameter:: call_keeps_idx        = 2**26
   integer,parameter:: call_is_read_list     = 2**27
+  integer,parameter:: call_is_vret          = 2**28
 
   
 contains

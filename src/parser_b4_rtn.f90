@@ -67,8 +67,6 @@ module pm_parser
      integer,dimension(max_parse_stack):: vline,vchar
      integer:: vtop
      type(pm_ptr):: op_names
-     integer:: proc_nret
-     logical:: proc_vret
      integer:: error_count
      type(pm_reg),pointer:: reg
   end type parse_state
@@ -3022,9 +3020,8 @@ contains
   !======================================================
   ! if statement
   !======================================================
-  recursive function if_stmt(parser,has_return) result(iserr)
+  recursive function if_stmt(parser) result(iserr)
     type(parse_state),intent(inout):: parser
-    integer,intent(inout),optional:: has_return
     logical:: iserr
     integer:: n,sym,line
     iserr=.true.
@@ -3038,29 +3035,16 @@ contains
     endif
     do
        call xexpr(parser)
-       if(block_or_single_stmt(parser,sym_if,0,line,has_return=has_return)) return
+       if(block_or_single_stmt(parser,sym_if,0,line)) return
        n=n+1
-       if(present(has_return)) then
-          if(has_return>0.and.has_return/=n) then
-             call parse_error(parser,'Either all branches of the "if" statement must end in "return" or none do')
-             has_return=-1
-          endif
-       endif
        if(parser%sym/=sym_elseif) exit
        call scan(parser)
     enddo
     if(parser%sym==sym_else) then
        call scan(parser)
-       if(block_or_single_stmt(parser,sym_if,0,line,has_return=has_return)) return
-
+       if(block_or_single_stmt(parser,sym_if,0,line)) return
     else
        call push_null_val(parser)
-    endif
-    if(present(has_return)) then
-       if(has_return>0.and.has_return/=n+1) then
-          call parse_error(parser,'Either all branches of the "if" statement must end in "return" or none do')
-          has_return=-1
-       endif
     endif
     do while(n>1)
        call make_node(parser,sym_if,3)
@@ -3070,65 +3054,6 @@ contains
     call make_node(parser,sym,3)
     iserr=.false.
   end function if_stmt
-
-   !==========================================================
-  ! switch [ xexpr ] { case xexprlist : statement_list ... }
-  !==========================================================
-  recursive function switch_stmt(parser,has_return) result(iserr)
-    type(parse_state),intent(inout):: parser
-    integer,intent(inout),optional:: has_return
-    logical:: iserr
-    integer:: n,line,sym
-    iserr=.true.
-    sym=sym_switch
-    line=get_sym_line(parser)
-    call scan(parser)
-    if(parser%sym==sym_invar) then
-       call scan(parser)
-       sym=sym_switch_invar
-    endif
-    if(parser%sym/=sym_open_brace) then
-       call xexpr(parser)
-       if(expect(parser,sym_open_brace)) return
-    else
-       call make_node(parser,sym_true,0)
-       call scan(parser)
-    endif
-    n=0
-    do while(parser%sym==sym_case)
-       call scan(parser)
-       call xexprlist(parser,sym=sym_case)
-       if(expect(parser,sym_colon)) return
-       call stmt_list(parser,has_return=has_return)
-       n=n+2
-       if(present(has_return)) then
-          if(has_return>0.and.has_return/=n/2) then
-             call parse_error(parser,'Either all branches of the "switch" statement must end in "return" or none do')
-             has_return=-1
-          endif
-       endif
-    enddo
-    if(n==0) then
-       call parse_error(parser,'No "case" clauses in "switch" statement')
-       return
-    endif
-    if(parser%sym==sym_default) then
-       call scan(parser)
-       if(expect(parser,sym_colon)) return
-       call stmt_list(parser,has_return=has_return)
-    else
-       call push_null_val(parser)
-    endif
-    if(present(has_return)) then
-       if(has_return>0.and.has_return/=n/2+1) then
-          call parse_error(parser,'Either all branches of the "switch" statement must end in "return" or none do')
-          has_return=-1
-       endif
-    endif
-    call make_node(parser,sym_switch,n+2)
-    if(close_block(parser,sym_switch,0,line)) return
-    iserr=.false.
-  end function switch_stmt
 
   !=========================================================================
   ! { [ invar | chan ] (var | let ) { name | _ } [ : type ] , } [ = expr ]
@@ -3277,7 +3202,51 @@ contains
     if(expect(parser,sym_close_attr)) return
   end function var_attr
 
- 
+  !==========================================================
+  ! switch [ xexpr ] { case xexprlist : statement_list ... }
+  !==========================================================
+  recursive function switch_stmt(parser) result(iserr)
+    type(parse_state),intent(inout):: parser
+    logical:: iserr
+    integer:: n,line,sym
+    iserr=.true.
+    sym=sym_switch
+    line=get_sym_line(parser)
+    call scan(parser)
+    if(parser%sym==sym_invar) then
+       call scan(parser)
+       sym=sym_switch_invar
+    endif
+    if(parser%sym/=sym_open_brace) then
+       call xexpr(parser)
+       if(expect(parser,sym_open_brace)) return
+    else
+       call make_node(parser,sym_true,0)
+       call scan(parser)
+    endif
+    n=0
+    do while(parser%sym==sym_case)
+       call scan(parser)
+       call xexprlist(parser,sym=sym_case)
+       if(expect(parser,sym_colon)) return
+       call stmt_list(parser)
+       n=n+2
+    enddo
+    if(n==0) then
+       call parse_error(parser,'No "case" clauses in "switch" statement')
+       return
+    endif
+    if(parser%sym==sym_default) then
+       call scan(parser)
+       if(expect(parser,sym_colon)) return
+       call stmt_list(parser)
+    else
+       call push_null_val(parser)
+    endif
+    call make_node(parser,sym_switch,n+2)
+    if(close_block(parser,sym_switch,0,line)) return
+    iserr=.false.
+  end function switch_stmt
 
   !==============================================================================
   ! any name [ = expr ] ( : stmt |  { stmts }  | { case typelist : stmts ... } )
@@ -3595,12 +3564,12 @@ contains
        n=2
        do
           if(expr(parser)) return
-          if(parser%sym==sym_else) then
+          if(parser%sym==sym_cond) then
              call scan(parser)
              if(expr(parser)) return
-             call swap_vals(parser)
           else
              call push_null_val(parser)
+             call swap_vals(parser)
           endif
           n=n+2
           if(parser%sym/=sym_comma) exit
@@ -3804,16 +3773,14 @@ contains
   !======================================================
   ! List of statements
   !======================================================
-  recursive subroutine stmt_list(parser,single,num_to_include,toplevel,has_return)
+  recursive subroutine stmt_list(parser,single,num_to_include)
     type(parse_state),intent(inout):: parser
-    logical,intent(in),optional:: single,toplevel
+    logical,intent(in),optional:: single
     integer,intent(in),optional:: num_to_include
-    integer,intent(inout),optional:: has_return
     logical:: ok
-    integer:: k,name,sym,label,line,pos,last_k,last_k_sym,nested_return
+    integer:: k,name,sym,label,line,pos
     type(pm_ptr):: p
     k=0
-    last_k=huge(1)
     if(present(num_to_include)) k=num_to_include
     do
        sym=parser%sym
@@ -3867,35 +3834,9 @@ contains
           
           ! Statements that are actually part of the language
        case(sym_if)
-           if(present(has_return).or.present(toplevel)) then
-             nested_return=0
-             if(if_stmt(parser,nested_return)) goto 999
-             if(nested_return>0) then
-                if(present(toplevel)) then
-                   call make_rtn_vars
-                endif
-                last_k=k+1
-                if(has_return>=0) has_return=has_return+1
-                last_k_sym=sym_if
-             endif
-          else
-             if(if_stmt(parser)) goto 999
-          endif
+          if(if_stmt(parser)) goto 999
        case(sym_switch)
-          if(present(has_return).or.present(toplevel)) then
-             nested_return=0
-             if(switch_stmt(parser,nested_return)) goto 999
-             if(nested_return>0) then
-                if(present(toplevel)) then
-                   call make_rtn_vars
-                endif
-                last_k=k+1
-                if(has_return>=0) has_return=has_return+1
-                last_k_sym=sym_switch
-             endif
-          else
-             if(switch_stmt(parser)) goto 999
-          endif
+          if(switch_stmt(parser)) goto 999
        case(sym_while)
           if(while_stmt(parser)) goto 999
        case(sym_repeat)
@@ -3940,18 +3881,8 @@ contains
        case(sym_dollar)
           if(proc_val_call()) goto 999
        case(sym_return)
-          if(present(toplevel)) then
-             call make_node(parser,sym_list,k)
-             return
-          else
-
-             if(present(has_return)) then
-                if(has_return>=0) has_return=has_return+1
-             else
-                call parse_error(parser,'You cannot have a "return" statement here')
-             endif
-             if(return_stmt()) goto 999
-          endif
+          call make_node(parser,sym_list,k)
+          return
        case(sym_yield,sym_pm_yield)
           if(yield(parser,sym==sym_yield)) goto 999
           call make_node(parser,sym_yield,1)
@@ -3997,13 +3928,6 @@ contains
        end select
        k=k+1
        if(present(single)) exit
-       if(k>last_k) then
-          if(last_k_sym==sym_return) then
-             call parse_error(parser,'Cannot follow a "return" with another statement')
-          else
-             call parse_error(parser,'Cannot follow a "'//trim(sym_names(last_k_sym))//' containing "return" with another statement')
-          endif
-       endif
        if(parser%sym==sym_semi) then
           call scan(parser)
        else if(.not.parser%atstart) then
@@ -4024,32 +3948,6 @@ contains
 
   contains
 
-    function return_stmt() result(iserr)
-      logical:: iserr
-      integer:: n
-      iserr=.true.
-      call scan(parser)
-      if(exprlist(parser)) return
-      call push_null_val(parser)
-      if(subexpr(parser)) return
-      call push_num_val(parser,merge(-parser%proc_nret,parser%proc_nret,parser%proc_vret))
-      call make_node(parser,sym_return,3)
-      iserr=.false.
-    end function return_stmt
-
-    subroutine make_rtn_vars
-      integer:: i,n
-      n=parser%proc_nret
-      do i=1,n
-         call push_sym_val(parser,sym_return0+i)
-      enddo
-      call push_null_val(parser)
-      call push_num_val(parser,0)
-      call make_node(parser,sym_const,n+2)
-      k=k+1
-      call swap_vals(parser)
-    end subroutine make_rtn_vars
-    
     ! $op(args) or $op.(args)
     recursive function proc_val_call() result(iserr)
       logical:: iserr
@@ -4098,9 +3996,7 @@ contains
       endif
       iserr=.false.
     end function pragma
-    
-
-    
+     
      ! *****************************************************************
      ! The following statements are for **internal** compiler use only:
      !******************************************************************
@@ -4315,18 +4211,17 @@ contains
   !======================================================
   ! :statement | { statement list }
   !======================================================
-  recursive function block_or_single_stmt(parser,name1,name2,line,has_return) result(iserr)
+  recursive function block_or_single_stmt(parser,name1,name2,line) result(iserr)
     type(parse_state),intent(inout):: parser
     integer,intent(in):: name1,name2,line
-    integer,intent(inout),optional:: has_return
     logical:: iserr
     iserr=.true.
     if(parser%sym==sym_colon) then
        call scan(parser)
-       call stmt_list(parser,single=.true.,has_return=has_return)
+       call stmt_list(parser,single=.true.)
     else
        if(expect(parser,sym_open_brace)) return
-       call stmt_list(parser,has_return=has_return)
+       call stmt_list(parser)
        if(close_block(parser,name1,name2,line)) return
     endif
     iserr=.false.
@@ -5040,20 +4935,19 @@ contains
   ! Comma separated list of types
   ! any of which may be omitted
   !======================================================
-  recursive function opt_moded_typ_list(parser,modes_ok,m,varg) result(iserr)
+  recursive function opt_moded_typ_list(parser,m,varg) result(iserr)
     type(parse_state),intent(inout):: parser
-    logical,intent(in):: modes_ok
     integer,intent(out):: m
-    logical,intent(inout),optional:: varg
+    logical,intent(out),optional:: varg
     logical:: iserr
     iserr=.true.
     m=0
     do
        if(parser%sym==sym_comma.or.&
-            parser%sym==sym_dotdotdot.or.parser%sym==sym_close) then
+            parser%sym==sym_dotdotdot) then
           call push_null_val(parser)
        else
-          if(moded_typ(parser,modes_ok,.false.)) return
+          if(moded_typ(parser,.true.,.false.)) return
        endif
        m=m+1
        if(present(varg).and.parser%sym==sym_dotdotdot) then
@@ -5384,17 +5278,16 @@ contains
   !======================================================
   ! Procedure declaration
   !======================================================
-  function proc_decl(parser,ext) result(iserr)
+  function proc_decl(parser) result(iserr)
     type(parse_state),intent(inout):: parser
-    logical,intent(in),optional:: ext
     logical:: iserr
     type(pm_ptr),target::ptr,dom,dparams,rtypes,dot_name,dot_type
     type(pm_ptr):: p,params,link
     type(pm_reg),pointer:: reg
     integer:: name,callname,this,thispar
     integer:: nret,base,flags,sbase,scount,m,nreduce,sym
-    integer:: line,pos,nerrors,open_sym,close_sym,retsym,has_return
-    logical:: ampargs,iscall,iscomm,ismethod,isshared,islocal,ischan,have_rtn,vret
+    integer:: line,pos,nerrors,open_sym,close_sym,retsym
+    logical:: ampargs,iscall,iscomm,ismethod,isshared,islocal,ischan,have_rtn
     nerrors=parser%error_count
     reg=>pm_register(parser%context,'proc',ptr,dom,dparams,rtypes,dot_name,dot_type)
     iserr=.true.
@@ -5410,8 +5303,6 @@ contains
     open_sym=sym_open
     close_sym=sym_close
 
-    if(present(ext)) flags=ior(flags,proc_is_open)
-    
     ! Line and position of procedure start
     call get_sym_pos(parser,line,pos)
     call scan(parser)
@@ -5494,12 +5385,14 @@ contains
     call push_num_val(parser,-777)        ! nret
 
     ! Return types ->(typelist)
-    vret=.false.
     if(parser%sym==sym_arrow) then
        call scan(parser)
        if(expect(parser,sym_open)) goto 999
-       if(opt_moded_typ_list(parser,iscomm,nret,varg=vret)) goto 999
-       if(vret) flags=ior(flags,proc_is_vret)
+       if(parser%sym==sym_close) then
+          nret=0
+       else
+          if(moded_typ_list(parser,iscomm,nret)) goto 999
+       endif
        if(expect(parser,sym_close)) return
        call make_node(parser,sym_list,nret)
        rtypes=top_val(parser)
@@ -5507,7 +5400,7 @@ contains
     else
        have_rtn=.false.
        call push_null_val(parser)
-       nret=0
+       nret=-1
     endif
 
     if(parser%sym==sym_yield) then
@@ -5536,6 +5429,13 @@ contains
     else
        call push_null_val(parser)
     endif
+
+    ! ... flags extensibility beyond module
+    if(parser%sym==sym_dotdotdot) then
+       call scan(parser)
+       flags=ior(flags,proc_is_open)
+    endif
+
 
     ! => [&] ref OR = expr OR  [ check expr ] block
     if(parser%sym==sym_cond) then
@@ -5580,7 +5480,7 @@ contains
        
     elseif(parser%sym==sym_assign) then
 
-       if(have_rtn) then
+       if(nret/=-1) then
           call parse_error(parser,'Cannot have "proc ... ->(type) = expression"')
           call more_error(parser%context,&
                'If you define a result type you need to use a "return" statement instead')
@@ -5622,38 +5522,24 @@ contains
              call make_node(parser,sym_list,0)
              if(return_stmt()) goto 999
           else
-             parser%proc_nret=nret
-             parser%proc_vret=vret
-             has_return=0
-             call stmt_list(parser,single=.true.,toplevel=.true.,has_return=has_return)
-             if(has_return==0) then
-                if(nret>0) then
-                   call parse_error(parser,&
-                        "Missing return statement")
-                   nret=0
-                endif
-             else
-                if(nret>0) call dummy_return_stmt
+             call stmt_list(parser,single=.true.)
+             if(nret>0) then
+                call parse_error(parser,&
+                     "Missing return statement")
              endif
+             nret=0
           endif
        elseif(parser%sym==sym_open_brace) then
           call scan(parser)
-          parser%proc_nret=nret
-          parser%proc_vret=vret
-          has_return=0
-          call stmt_list(parser,toplevel=.true.,has_return=has_return)
+          call stmt_list(parser)
           if(parser%sym==sym_return) then
              if(return_stmt()) goto 999
           else
-             if(has_return==0) then
-                if(nret>0) then
-                   call parse_error(parser,&
-                        "Missing return statement")
-                   nret=0
-                endif
-             else
-                if(nret>0) call dummy_return_stmt
+             if(nret>0) then
+                call parse_error(parser,&
+                     "Missing return statement")
              endif
+             nret=0
           endif
           if(close_block(parser,sym_proc,name,line)) goto 999
        else
@@ -5819,6 +5705,7 @@ contains
          if(subexpr(parser)) return
          nret=1
       else
+         if(expect(parser,sym_assign)) return
          if(parser%sym==sym_caret) then
             call scan(parser)
             retsym=sym_caret
@@ -5826,32 +5713,21 @@ contains
             retsym=sym_result
          endif
          if(exprlist(parser,m)) return
-         if(nret<0) then
-            nret=m
-         endif
          call push_null_val(parser)
          if(subexpr(parser)) return
          call make_node(parser,retsym,2)
+         if(nret<0) then
+            nret=m
+         elseif(nret/=m) then
+            call parse_error(parser,&
+                 "Different number of return values and return types")
+         endif
       endif
 
       parser%vstack(parser%vtop-2)=parser%vstack(parser%vtop)
       parser%vtop=parser%vtop-1
       iserr=.false.
     end function  return_stmt
-
-    ! return RTN1, RTN2  etc.
-    subroutine dummy_return_stmt() 
-      integer:: i
-      do i=1,nret
-         call push_sym_val(parser,sym_return0+i)
-         call make_node(parser,sym_name,1)
-      enddo
-      call make_node(parser,sym_list,nret)
-      call push_null_val(parser)
-      call make_node(parser,sym_vresult,2)
-      parser%vstack(parser%vtop-2)=parser%vstack(parser%vtop)
-      parser%vtop=parser%vtop-1
-    end subroutine  dummy_return_stmt
 
   end function proc_decl
 
@@ -6224,9 +6100,8 @@ contains
   !======================================================
   ! Type declaration
   !======================================================
-  function typ_decl(parser,ext) result(iserr)
+  function typ_decl(parser) result(iserr)
     type(parse_state):: parser
-    logical,intent(in),optional:: ext
     logical:: iserr
     integer:: sym,m,n,name,basename,namein,base,nextra
     type(pm_ptr),target:: ptr
@@ -6299,8 +6174,6 @@ contains
                 call scan(parser)
              else
                 call make_node(parser,sym_list,0)
-                sym=sym_dotdotdot
-                if(present(ext)) sym=sym_extensible
                 goto 10
              endif
           endif
@@ -6314,16 +6187,12 @@ contains
              endif
              if(expect(parser,sym_dotdotdot)) return
              sym=sym_dotdotdot
-             if(present(ext)) sym=sym_extensible
           endif
        endif
     else
        call push_null_val(parser)
     endif
 10  continue
-    if(present(ext).and.sym/=sym_extensible) then
-       call parse_error(parser,'"ext" can only be applied to "type ,..."')
-    endif
     call make_node(parser,sym,type_num_args+nextra)
     if(debug_parser) then
        write(*,*) 'TYPEDECL>----------------'
@@ -6670,15 +6539,6 @@ contains
     num_tests=0
     do
        select case(parser%sym)
-       case(sym_extensible)
-          call scan(parser)
-          if(parser%sym==sym_proc) then
-             if(proc_decl(parser,ext=.true.)) goto 999
-          elseif(parser%sym==sym_type) then
-             if(typ_decl(parser,ext=.true.)) goto 999
-          else
-             call parse_error(parser,'Expecting "proc" or "type"')
-          endif
        case(sym_proc)
           if(proc_decl(parser)) goto 999
        case(sym_type)

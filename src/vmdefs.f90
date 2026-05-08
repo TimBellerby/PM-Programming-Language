@@ -80,8 +80,9 @@ module pm_vmdefs
   integer,parameter:: op_get_tag = index_op + 17
   integer,parameter:: op_get_size = index_op + 18
   integer,parameter:: op_make_type_val = index_op + 19
+  integer,parameter:: op_deref_ptr= index_op + 20
 
-  integer,parameter:: op_misc = op_make_type_val
+  integer,parameter:: op_misc = index_op + 20
   integer,parameter:: op_import= op_misc + 1
   integer,parameter:: op_export= op_misc + 2
   integer,parameter:: op_export_param = op_misc +3
@@ -145,8 +146,9 @@ module pm_vmdefs
   integer,parameter:: op_block_cyclic = op_misc2 + 23
   integer,parameter:: op_array_set_multi_elem = op_misc2 + 24
   integer,parameter:: op_expand_idx = op_misc2 + 25
+  integer,parameter:: op_undefined = op_misc2 + 26
 
-  integer,parameter:: op_misc3 = op_expand_idx
+  integer,parameter:: op_misc3 = op_undefined
 
   integer,parameter:: op_get_esize = op_misc3 + 1
   integer,parameter:: op_pack = op_misc3 + 2
@@ -260,7 +262,10 @@ module pm_vmdefs
   integer,parameter:: op_move_if = first_assign_op + 12
   integer,parameter:: op_assign_move_if = first_assign_op + 13
   integer,parameter:: op_link_var = first_assign_op + 14
-  integer,parameter:: last_assign_op = first_assign_op+14
+  integer,parameter:: op_merge_init = first_assign_op + 15
+  integer,parameter:: op_merge_init_move = first_assign_op + 16
+  integer,parameter:: op_merge_init_move_if = first_assign_op + 17
+  integer,parameter:: last_assign_op = first_assign_op+17
 
   integer,parameter:: op_eq = last_assign_op +1
   integer,parameter:: op_ne = last_assign_op +2
@@ -691,7 +696,19 @@ module pm_vmdefs
   integer,parameter:: op_conj_dc = op_start_dc+38
   integer,parameter:: op_stop_dc = op_start_dc+44
 
-  integer,parameter:: op_start_comp=op_stop_dc
+  integer,parameter:: op_start_reduce=op_stop_dc
+  integer,parameter:: op_sum_reduce = op_start_reduce+1
+  integer,parameter:: op_prod_reduce = op_start_reduce+2
+  integer,parameter:: op_iand_reduce = op_start_reduce+3
+  integer,parameter:: op_ior_reduce = op_start_reduce+4
+  integer,parameter:: op_ieor_reduce = op_start_reduce+5
+  integer,parameter:: op_land_reduce = op_start_reduce+6
+  integer,parameter:: op_lor_reduce = op_start_reduce+7
+  integer,parameter:: op_max_reduce = op_start_reduce+8
+  integer,parameter:: op_min_reduce = op_start_reduce+9
+  integer,parameter:: op_stop_reduce = op_start_reduce+9
+  
+  integer,parameter:: op_start_comp=op_stop_reduce
   integer,parameter:: op_do_loop=op_start_comp+1
   integer,parameter:: op_mask=op_start_comp+2
   integer,parameter:: op_if=op_start_comp+3
@@ -786,6 +803,7 @@ module pm_vmdefs
   integer,parameter:: op_has_comm_block=131072+op_1_block
   integer,parameter:: op_has_loop_block=262144+op_1_block
   integer,parameter:: op_allocates=524288
+  integer,parameter:: op_is_reduce=1048576
 
   integer,parameter:: op_is_gate_and_jump=op_is_gate+op_is_jump
   integer,parameter:: op_is_comm_1_block=op_is_comm+op_1_block
@@ -827,6 +845,7 @@ module pm_vmdefs
   data op_flags(op_get_tag)         /0/   ! Obsolete
   data op_flags(op_get_size)        /0/
   data op_flags(op_make_type_val)   /op_takes_type/
+  data op_flags(op_deref_ptr)       /0/
   data op_flags(op_import)          /0/
   data op_flags(op_export)          /0/
   data op_flags(op_export_param)    /0/
@@ -898,6 +917,7 @@ module pm_vmdefs
   data op_flags(op_advance_and)     /0/
   data op_flags(op_init_loop)       /0/
   data op_flags(op_expand_idx)      /0/
+  data op_flags(op_undefined)       /0/
 
   data op_flags(op_intersect_seq)   /0/
   data op_flags(op_intersect_aseq)  /0/
@@ -1000,6 +1020,9 @@ module pm_vmdefs
   data op_flags(op_assign_move)      /0/
   data op_flags(op_assign_move_if)   /0/
   data op_flags(op_link_var)         /0/
+  data op_flags(op_merge_init)       /0/
+  data op_flags(op_merge_init_move)  /0/
+  data op_flags(op_merge_init_move_if) /0/
 
   data op_flags(op_eq)               /op_is_arith/
   data op_flags(op_ne)               /op_is_arith/
@@ -1371,6 +1394,16 @@ module pm_vmdefs
   data op_flags(op_imag_c)           /op_is_arith/
   data op_flags(op_conj_c)           /op_is_arith/
 
+  data op_flags(op_sum_reduce)       /op_is_reduce/
+  data op_flags(op_prod_reduce)      /op_is_reduce/
+  data op_flags(op_iand_reduce)      /op_is_reduce/
+  data op_flags(op_ior_reduce)       /op_is_reduce/
+  data op_flags(op_ieor_reduce)      /op_is_reduce/
+  data op_flags(op_land_reduce)      /op_is_reduce/
+  data op_flags(op_lor_reduce)       /op_is_reduce/
+  data op_flags(op_max_reduce)       /op_is_reduce/
+  data op_flags(op_min_reduce)       /op_is_reduce/
+  
   data op_flags(op_add_dc)           /op_is_arith/
   data op_flags(op_sub_dc)           /op_is_arith/
   data op_flags(op_mult_dc)          /op_is_arith/
@@ -1556,6 +1589,7 @@ contains
     op_names(op_get_tag)='get_tag'
     op_names(op_get_size)='get_size'
     op_names(op_make_type_val)='make_type_val'
+    op_names(op_deref_ptr)='op_deref_ptr'
     op_names(op_import)='import'
     op_names(op_export)='export'
     op_names(op_export_param)='export_param'
@@ -1627,6 +1661,7 @@ contains
     op_names(op_advance_and)='advance_and'
     op_names(op_init_loop)='init_loop'
     op_names(op_expand_idx)='expand_idx'
+    op_names(op_undefined)='undefined'
 
     op_names(op_intersect_seq)='intersect_seq'
     op_names(op_intersect_aseq)='intersect_aseq'
@@ -1729,6 +1764,9 @@ contains
     op_names(op_assign_move)='assign_move'
     op_names(op_assign_move_if)='assign_move_if'
     op_names(op_link_var)='link_var'
+    op_names(op_merge_init)='merge_init'
+    op_names(op_merge_init_move)='merge_init_move'
+    op_names(op_merge_init_move_if)='merge_init_move_if'
     
     op_names(op_eq)='eq'
     op_names(op_ne)='ne'
@@ -2138,6 +2176,16 @@ contains
     op_names(op_tanh_dc)='tanh_dc'
     op_names(op_imag_dc)='imag_dc'
     op_names(op_conj_dc)='conj_dc'
+
+    op_names(op_sum_reduce)='sum_reduce'
+    op_names(op_prod_reduce)='prod_reduce'
+    op_names(op_iand_reduce)='iand_reduce'
+    op_names(op_ior_reduce)='ior_reduce'
+    op_names(op_ieor_reduce)='ieor_reduce'
+    op_names(op_land_reduce)='land_reduce'
+    op_names(op_lor_reduce)='lor_reduce'
+    op_names(op_max_reduce)='max_reduce'
+    op_names(op_min_reduce)='min_reduce'
 
     op_names(op_do_loop)='do_loop'
     op_names(op_mask)='mask'    

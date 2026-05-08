@@ -1386,7 +1386,7 @@ contains
             'Free=',context%free_block_count
     endif
    
-    if(pm_debug_level>0) call pm_verify_heap(context)
+    if(pm_debug_level>3) call pm_verify_heap(context)
 
     major_cycle=force_major_cycle.or.context%tick>max_ticks
     10 continue

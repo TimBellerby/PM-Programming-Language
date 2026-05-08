@@ -104,7 +104,19 @@ module pm_parlib
   integer,parameter:: pm_comm_mess_len=200
   type(pm_ptr),private,target:: print_first,print_last
   type(pm_reg),private,pointer:: q_reg
+
+
+  integer, parameter :: max_cache = 32
   
+  type comm_entry
+     integer :: r0, r1, n
+     integer :: comm = MPI_COMM_NULL
+     integer :: age  = 0
+  end type comm_entry
+  
+  type(comm_entry), save :: comm_cache(max_cache)
+  integer, save :: comm_cache_age = 0
+
 contains
 
   ! Initialise PM MPI subsystem
@@ -142,6 +154,7 @@ contains
     typ_for_pm(pm_single_complex)=MPI_COMPLEX
     typ_for_pm(pm_double_complex)=MPI_DOUBLE_COMPLEX
     typ_for_pm(pm_logical)=MPI_LOGICAL
+    typ_for_pm(pm_string)=MPI_CHARACTER
 
     large_typ_for_pm = MPI_DATATYPE_NULL
     large_typ_size = -1
@@ -171,11 +184,105 @@ contains
     type(pm_context),pointer:: context
     integer:: error
     call mpi_finalize(error)
-    if(error/=MPI_SUCCESS) &
-         call pm_panic('Cannot finalise mpi')
+    if(error/=MPI_SUCCESS) then
+       call pm_panic('Cannot finalise mpi')
+    endif
     call pm_delete_register(context,q_reg)
   end subroutine finalise_par
 
+  !  Find cached comm with ranks r0, r1..r1+n-1
+  function find_in_comm_cache(r0, r1, n) result(cache_slot)
+    integer, intent(in) :: r0, r1, n
+    integer:: cache_slot
+    integer :: i
+    
+    cache_slot = 0
+    do i = 1, max_cache
+       if (comm_cache(i)%comm /= MPI_COMM_NULL) then
+          if (comm_cache(i)%r0 == r0 .and. comm_cache(i)%r1 == r1 .and. comm_cache(i)%n == n) then
+             cache_slot = i
+             return
+          end if
+       end if
+    end do
+  end function find_in_comm_cache
+  
+  ! Insert comm for <r0,t1,N> into cache
+  function insert_into_comm_cache(r0, r1, n, comm) result(cache_slot)
+    integer, intent(in) :: r0, r1, n, comm
+    integer:: cache_slot
+    integer :: i, ierror, lru_idx, oldest_age
+
+    do i = 1, max_cache
+       if (comm_cache(i)%comm == MPI_COMM_NULL) then
+          comm_cache(i)%r0 = r0
+          comm_cache(i)%r1 = r1
+          comm_cache(i)%n  = n
+          comm_cache(i)%comm = comm
+          comm_cache(i)%age = comm_cache_age
+          cache_slot = i
+          return
+       end if
+    end do
+
+    oldest_age = comm_cache(1)%age
+    lru_idx = 1
+    do i = 2, max_cache
+       if (comm_cache(i)%age < oldest_age) then
+          oldest_age = comm_cache(i)%age
+          lru_idx = i
+       end if
+    end do
+
+    call MPI_Comm_free(comm_cache(lru_idx)%comm,ierror)
+
+    comm_cache(lru_idx)%r0 = r0
+    comm_cache(lru_idx)%r1 = r1
+    comm_cache(lru_idx)%n  = n
+    comm_cache(lru_idx)%comm = comm
+    comm_cache(lru_idx)%age = comm_cache_age
+
+    cache_slot = lru_idx
+  end function insert_into_comm_cache
+
+  ! Get a subgoup communicator convering ranks r0,r1..r1+N-1 from cache
+  function get_subgroup_comm(r0, r1, n) result(comm_out)
+    integer, intent(in)  :: r0, r1, n
+    integer :: comm_out
+
+    integer :: ierror, myrank, world_group
+    integer :: idx, new_group, comm_new,i
+    integer, allocatable :: ranks(:)
+
+    call MPI_Comm_rank(MPI_COMM_WORLD, myrank, ierror)
+
+    if (myrank == r0 .or. (myrank >= r1 .and. myrank < r1+n)) then
+       idx = find_in_comm_cache(r0, r1, n)
+       if (idx /= 0 ) then
+          comm_cache(idx)%age = comm_cache_age
+          comm_cache_age = comm_cache_age + 1
+          comm_out = comm_cache(idx)%comm
+          return
+       end if
+       call MPI_Comm_group(MPI_COMM_WORLD, world_group, ierror)
+       allocate(ranks(n+1))
+       ranks = [r0,(r1 + i, i=0,n-1)]
+       call MPI_Group_incl(world_group, n+1, ranks, new_group, ierror)
+       call MPI_Comm_create(MPI_COMM_WORLD, new_group, comm_new, ierror)
+       call MPI_Group_free(new_group, ierror)
+       call MPI_Group_free(world_group, ierror)
+       deallocate(ranks)
+       idx = insert_into_comm_cache(r0, r1, n, comm_new)
+       comm_cache(idx)%age = comm_cache_age
+       comm_cache_age = comm_cache_age + 1
+       comm_out = comm_cache(idx)%comm
+    else
+       comm_out = MPI_COMM_NULL
+    end if
+    
+  end function get_subgroup_comm
+
+  
   ! Get cartesian dimensions 
   subroutine get_dims(shared_nnode,ndims,dims_inout)
     integer,intent(in):: ndims
@@ -462,6 +569,10 @@ contains
        call get_mpi_type(pm_logical,pm_fast_esize(v)+1_pm_ln,tno,m)
        call mpi_bcast(v%data%l(v%offset),m,&
             tno,node,comm,errno)
+    case(pm_string)
+       call get_mpi_type(pm_string,pm_fast_esize(v)+1_pm_ln,tno,m)
+       call mpi_bcast(v%data%s(v%offset),m,&
+            tno,node,comm,errno)
     end select
     if(debug_par) then
        write(*,*) 'BCAST DONE'
@@ -569,6 +680,11 @@ contains
     case(pm_logical)
        call get_mpi_disp_type(pm_logical,off,offstart,noff,tno)
        call mpi_bcast(v%data%l(v%offset),1,&
+            tno,node,comm,errno)
+       call mpi_type_free(tno,errno)
+    case(pm_string)
+       call get_mpi_disp_type(pm_string,off,offstart,noff,tno)
+       call mpi_bcast(v%data%s(v%offset),1,&
             tno,node,comm,errno)
        call mpi_type_free(tno,errno)
     end select
@@ -727,14 +843,14 @@ contains
     case(pm_single_complex)
        ptr=pm_new(context,pm_single_complex,esize+1)
        if(this_node) ptr%data%c(ptr%offset:ptr%offset+esize)=&
-            v%data%r(v%offset:v%offset+esize)
+            v%data%c(v%offset:v%offset+esize)
        call get_mpi_type(pm_single_complex,esize+1_pm_ln,tno,m)
        call mpi_bcast(ptr%data%c(ptr%offset),m,&
             tno,node,comm,errno)
     case(pm_double_complex)
        ptr=pm_new(context,pm_double_complex,esize+1)
        if(this_node) ptr%data%dc(ptr%offset:ptr%offset+esize)=&
-            v%data%d(v%offset:v%offset+esize)
+            v%data%dc(v%offset:v%offset+esize)
        call get_mpi_type(pm_double_complex,esize+1_pm_ln,tno,m)
        call mpi_bcast(ptr%data%dc(ptr%offset),m,&
             tno,node,comm,errno)
@@ -744,6 +860,13 @@ contains
             v%data%l(v%offset:v%offset+esize)
        call get_mpi_type(pm_logical,esize+1_pm_ln,tno,m)
        call mpi_bcast(ptr%data%l(ptr%offset),m,&
+            tno,node,comm,errno)
+    case(pm_string)
+       ptr=pm_new(context,pm_string,esize+1)
+       if(this_node) ptr%data%s(ptr%offset:ptr%offset+esize)=&
+            v%data%s(v%offset:v%offset+esize)
+       call get_mpi_type(pm_string,esize+1_pm_ln,tno,m)
+       call mpi_bcast(ptr%data%s(ptr%offset),m,&
             tno,node,comm,errno)
     end select
     if(debug_mess) then
@@ -945,7 +1068,7 @@ contains
        if(this_node) ptr%data%dc(ptr%offset:ptr%offset+esize)=&
             v%data%dc(v%offset+off%data%ln(off%offset+offstart:off%offset+offstart+noff-1))
        call get_mpi_type(pm_double_complex,nout,tno,m)
-       call mpi_bcast(ptr%data%d(ptr%offset),m,&
+       call mpi_bcast(ptr%data%dc(ptr%offset),m,&
             tno,node,comm,errno)
     case(pm_logical)
        ptr=pm_new(context,pm_logical,nout)
@@ -953,6 +1076,13 @@ contains
             v%data%l(v%offset+off%data%ln(off%offset+offstart:off%offset+offstart+noff-1))
        call get_mpi_type(pm_logical,nout,tno,m)
        call mpi_bcast(ptr%data%l(ptr%offset),m,&
+            tno,node,comm,errno)
+    case(pm_string)
+       ptr=pm_new(context,pm_string,nout)
+       if(this_node) ptr%data%s(ptr%offset:ptr%offset+esize)=&
+            v%data%s(v%offset+off%data%ln(off%offset+offstart:off%offset+offstart+noff-1))
+       call get_mpi_type(pm_string,nout,tno,m)
+       call mpi_bcast(ptr%data%s(ptr%offset),m,&
             tno,node,comm,errno)
     end select
     if(debug_mess) then
@@ -1114,6 +1244,10 @@ contains
        call get_mpi_type(pm_logical,esize+1_pm_ln,tno,m)
        call mpi_recv(v%data%l(v%offset),m,&
             tno,node,mess_tag,comm,MPI_STATUS_IGNORE,errno)
+    case(pm_string)
+       call get_mpi_type(pm_string,esize+1_pm_ln,tno,m)
+       call mpi_recv(v%data%s(v%offset),m,&
+            tno,node,mess_tag,comm,MPI_STATUS_IGNORE,errno)
     end select
   contains
     include 'ftypeof.inc'
@@ -1259,6 +1393,11 @@ contains
     case(pm_logical)
        call get_mpi_disp_type(pm_logical,off,offstart,noff,tno)
        call mpi_recv(v%data%l(v%offset),1,&
+            tno,node,mess_tag,comm,MPI_STATUS_IGNORE,errno)
+       call mpi_type_free(tno,errno)
+    case(pm_string)
+       call get_mpi_disp_type(pm_string,off,offstart,noff,tno)
+       call mpi_recv(v%data%s(v%offset),1,&
             tno,node,mess_tag,comm,MPI_STATUS_IGNORE,errno)
        call mpi_type_free(tno,errno)
     end select
@@ -1438,6 +1577,11 @@ contains
        call get_mpi_type(pm_logical,esize+1_pm_ln,tno,m)
        call mpi_recv(ptr%data%l(ptr%offset),m,&
             tno,node,mess_tag,comm,MPI_STATUS_IGNORE,errno)
+    case(pm_string)
+       ptr=pm_new(context,pm_string,esize+1)
+       call get_mpi_type(pm_string,esize+1_pm_ln,tno,m)
+       call mpi_recv(ptr%data%s(ptr%offset),m,&
+            tno,node,mess_tag,comm,MPI_STATUS_IGNORE,errno)
     case default
 !!$       write(*,*) 'HDR==',hdr
 !!$       call pm_panic('recv_val')
@@ -1561,6 +1705,11 @@ contains
        call mpi_isend(v%data%l(v%offset),m,&
             tno,node,mess_tag,comm,mess,errno)
        call push_message(mess)
+    case(pm_string)
+       call get_mpi_type(pm_string,esize+1_pm_ln,tno,m)
+       call mpi_isend(v%data%s(v%offset),m,&
+            tno,node,mess_tag,comm,mess,errno)
+       call push_message(mess)
     end select
   contains
     include 'ftypeof.inc'
@@ -1663,6 +1812,11 @@ contains
     case(pm_logical)
        call get_mpi_type(pm_logical,esize+1_pm_ln,tno,m)
        call mpi_irecv(v%data%l(v%offset),m,&
+            tno,node,mess_tag,comm,mess,errno)
+       call push_message(mess)
+    case(pm_string)
+       call get_mpi_type(pm_string,esize+1_pm_ln,tno,m)
+       call mpi_irecv(v%data%s(v%offset),m,&
             tno,node,mess_tag,comm,mess,errno)
        call push_message(mess)
     end select
@@ -1794,6 +1948,11 @@ contains
     case(pm_logical)
        call get_mpi_type(pm_int,esize+1_pm_ln,tno,m)
        call mpi_isend(v%data%l(v%offset+start),m,&
+            tno,node,mess_tag,comm,mess,errno)
+       call push_message(mess)
+    case(pm_string)
+       call get_mpi_type(pm_string,esize+1_pm_ln,tno,m)
+       call mpi_isend(v%data%s(v%offset+start),m,&
             tno,node,mess_tag,comm,mess,errno)
        call push_message(mess)
     end select
@@ -1936,6 +2095,13 @@ contains
             tno,node,mess_tag,comm,mess,errno)
        call push_message(mess)
        call mpi_type_free(tno,errno)
+    case(pm_string)
+       call get_mpi_disp_type(pm_string,off,offstart,noff,tno)
+       call mpi_isend(v%data%s(v%offset),1,&
+            tno,node,mess_tag,comm,mess,errno)
+       call push_message(mess)
+       call mpi_type_free(tno,errno)
+       
     case default
 !       if(hdr%hdr(1)==4) call pm_panic('isend_val_disp')
     end select
@@ -2064,6 +2230,12 @@ contains
     case(pm_logical)
        call get_mpi_disp_type(pm_logical,off,offstart,noff,tno)
        call mpi_isend(v%data%l(v%offset),1,&
+            tno,node,mess_tag,comm,mess,errno)
+       call push_message(mess)
+       call mpi_type_free(tno,errno)
+    case(pm_string)
+       call get_mpi_disp_type(pm_string,off,offstart,noff,tno)
+       call mpi_isend(v%data%s(v%offset),1,&
             tno,node,mess_tag,comm,mess,errno)
        call push_message(mess)
        call mpi_type_free(tno,errno)
@@ -2207,6 +2379,12 @@ contains
             tno,node,mess_tag,comm,mess,errno)
        call push_message(mess)
        call mpi_type_free(tno,errno)
+    case(pm_string)
+       call get_mpi_disp_type(pm_string,off,offstart,noff,tno)
+       call mpi_irecv(v%data%s(v%offset),1,&
+            tno,node,mess_tag,comm,mess,errno)
+       call push_message(mess)
+       call mpi_type_free(tno,errno)
     end select
   contains
     include 'ftypeof.inc'
@@ -2299,6 +2477,10 @@ contains
     case(pm_logical)
        call get_mpi_type(pm_int,esize+1_pm_ln,tno,m)
        call mpi_rsend(v%data%l(v%offset),m,&
+            tno,node,mess_tag,comm,errno)
+    case(pm_string)
+       call get_mpi_type(pm_string,esize+1_pm_ln,tno,m)
+       call mpi_rsend(v%data%s(v%offset),m,&
             tno,node,mess_tag,comm,errno)
     end select
   contains
@@ -2403,6 +2585,11 @@ contains
     case(pm_logical)
        call get_mpi_disp_type(pm_logical,off,offstart,noff,tno)
        call mpi_rsend(v%data%l(v%offset),1,&
+            tno,node,mess_tag,comm,errno)
+       call mpi_type_free(tno,errno)
+    case(pm_string)
+       call get_mpi_disp_type(pm_string,off,offstart,noff,tno)
+       call mpi_rsend(v%data%s(v%offset),1,&
             tno,node,mess_tag,comm,errno)
        call mpi_type_free(tno,errno)
     end select
@@ -4265,6 +4452,14 @@ contains
        call get_mpi_type(pm_double_complex,n,mtype,m)
        call mpi_file_read_all(handle,buffer%data%dc(buffer%offset+j),&
             m,mtype,mpi_status_ignore,ierr)
+    case(pm_logical)
+       call get_mpi_type(pm_logical,n,mtype,m)
+       call mpi_file_read_all(handle,buffer%data%l(buffer%offset+j),&
+            m,mtype,mpi_status_ignore,ierr)
+    case(pm_string)
+       call get_mpi_type(pm_string,n,mtype,m)
+       call mpi_file_read_all(handle,buffer%data%s(buffer%offset+j),&
+            m,mtype,mpi_status_ignore,ierr)
     end select
 
   contains
@@ -4325,6 +4520,14 @@ contains
        case(pm_double_complex)
           call get_mpi_type(pm_double_complex,n,mtype,m)
           call mpi_file_write(handle,buffer%data%dc(buffer%offset+j),&
+               m,mtype,mpi_status_ignore,ierr)
+       case(pm_logical)
+          call get_mpi_type(pm_logical,n,mtype,m)
+          call mpi_file_write(handle,buffer%data%l(buffer%offset+j),&
+               m,mtype,mpi_status_ignore,ierr)
+       case(pm_string)
+          call get_mpi_type(pm_double_complex,n,mtype,m)
+          call mpi_file_write(handle,buffer%data%s(buffer%offset+j),&
                m,mtype,mpi_status_ignore,ierr)
        end select
        if(ierr==mpi_success) call mpi_file_get_position(handle,off,ierr)
@@ -4436,6 +4639,14 @@ contains
     case(pm_double_complex)
        call get_mpi_type(pm_double_complex,noff,mtype,m)
        call mpi_file_write_all(handle,buffer%data%dc(buffer%offset),&
+            m,mtype,mpi_status_ignore,ierr)
+    case(pm_logical)
+       call get_mpi_type(pm_logical,noff,mtype,m)
+       call mpi_file_write_all(handle,buffer%data%l(buffer%offset),&
+            m,mtype,mpi_status_ignore,ierr)
+    case(pm_string)
+       call get_mpi_type(pm_string,noff,mtype,m)
+       call mpi_file_write_all(handle,buffer%data%s(buffer%offset),&
             m,mtype,mpi_status_ignore,ierr)
     end select
     if(ierr/=mpi_success) return
