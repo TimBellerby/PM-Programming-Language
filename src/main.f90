@@ -46,12 +46,14 @@ program pm
   type(pm_context),pointer:: context
   
   character(len=pm_max_filename_size):: module_name
-  type(pm_ptr),target:: root_module,module_dict,visibility
+  type(pm_ptr),target:: root_module,module_dict,visibility,sysmodl
   type(pm_ptr),target:: prog_code,proc_cache,code_cache,poly_cache,typeset
   logical:: ok
   type(pm_reg),pointer:: reg
   real:: time,newtime,time0
-
+  integer:: num_modl
+  integer,dimension(:),pointer:: modl_names
+  integer:: i
   ! Initialise
   call pm_check_kinds
   context=>pm_init_gc()
@@ -62,7 +64,7 @@ program pm
   call pm_init_types(context)
   call cpu_time(time)
   time0=time
-  reg=>pm_register(context,'main',root_module,module_dict,visibility,&
+  reg=>pm_register(context,'main',root_module,module_dict,visibility,sysmodl,&
        prog_code,proc_cache,code_cache,typeset)
 
   ! Command line 
@@ -75,12 +77,13 @@ program pm
   endif
 
   ! Compilation
-  call run_parser(module_name,root_module,module_dict,visibility)
-  call run_linker(root_module,module_dict)
-  call run_coder_and_inference(root_module,visibility,prog_code,proc_cache,poly_cache)
-  call run_wcode_stage(prog_code,proc_cache,code_cache,poly_cache,typeset)
+  call run_parser(module_name,root_module,module_dict,visibility,sysmodl,num_modl,modl_names)
+  
+  call run_linker(root_module,module_dict,sysmodl)
+  call run_coder_and_inference(root_module,visibility,prog_code,proc_cache,poly_cache,num_modl,modl_names)
+  call run_wcode_stage(prog_code,proc_cache,code_cache,poly_cache,typeset,modl_names)
 
-  if(pm_opts%print_timings) write(*,'(A20,F7.4,1Hs)') 'TOTAL',time-time0
+  if(pm_opts%print_timings) write(*,'(A20,F7.4,"s")') 'TOTAL',time-time0
   
   ! Run wordcodes or use them to generate source
   if(pm_is_compiling) then
@@ -112,9 +115,12 @@ contains
   include 'fnewnc.inc'
 
   ! ************* Parser ********************
-  subroutine run_parser(mname,root,dict,visibility)
+  subroutine run_parser(mname,root,dict,visibility,sysmodl,num_modl,modl_names)
     character(len=*):: mname
-    type(pm_ptr),intent(out):: root,dict,visibility
+    type(pm_ptr),intent(out):: root,dict,visibility,sysmodl
+    integer,intent(out):: num_modl
+    integer,dimension(:),pointer,intent(out):: modl_names
+    
     ! Parser state
     type(parse_state),target:: parser
     integer:: name,module_name,package_name
@@ -143,6 +149,7 @@ contains
     
     call dcl_module(parser,'PM__system')
     parser%sysmodl=parser%modl
+    sysmodl=parser%modl
 
     call pm_module_filename('lib.sys.pm',str2,pm_opts%lib_path_set,pm_opts%lib_path)
     call pm_open_file(pm_comp_file_unit,str2,ok)
@@ -217,25 +224,27 @@ contains
 
     dict=parser%modl_dict
     visibility=parser%visibility
- 
+    num_modl=parser%modl_index
+    modl_names=>parser%modl_names
+    
     call term_parser(parser)
     call pm_gc(context,.false.)
 
     if(pm_opts%print_timings) then
        call cpu_time(newtime)
-       write(*,'(A20,F7.4,1Hs)') 'PARSING TOOK',newtime-time
+       write(*,'(A20,F7.4,"s")') 'PARSING TOOK',newtime-time
        time=newtime
     endif
     
   end subroutine run_parser
 
   ! ***************Linker*******************
-  subroutine run_linker(root,modl_dict)
-    type(pm_ptr),intent(in):: root,modl_dict
+  subroutine run_linker(root,modl_dict,sysmodl)
+    type(pm_ptr),intent(in):: root,modl_dict,sysmodl
     integer:: err
     if(pm_debug_level>1) write(*,*) 'LINKING>>'
     err=0
-    call link_includes(context,err,modl_dict)
+    call link_includes(context,err,modl_dict,sysmodl)
     if(err>0) &
          call pm_stop('Compilation terminated due to errors linking modules')
     call pm_gc(context,.false.)
@@ -247,17 +256,19 @@ contains
 
     if(pm_opts%print_timings) then
        call cpu_time(newtime)
-       write(*,'(A20,F7.4,1Hs)') 'LINKING TOOK',newtime-time
+       write(*,'(A20,F7.4,"s")') 'LINKING TOOK',newtime-time
        time=newtime
     endif
     
   end subroutine run_linker
 
-  subroutine run_coder_and_inference(root,visibility,proc_code,proc_cache,poly_cache)
+  subroutine run_coder_and_inference(root,visibility,proc_code,proc_cache,poly_cache,num_modl,modl_names)
     type(pm_ptr),intent(in):: root,visibility
+    integer,intent(in):: num_modl
+    integer,dimension(:),pointer,intent(in):: modl_names
     type(pm_ptr),intent(out):: proc_code,proc_cache,poly_cache
     type(code_state),target:: coder
-    call init_coder(context,coder,visibility)
+    call init_coder(context,coder,visibility,num_modl,modl_names)
     call run_coder(coder,root)
     call run_type_inference(coder)
     proc_code=coder%vstack(1)
@@ -285,15 +296,15 @@ contains
           call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
           call dump_sigs(coder,pm_comp_file_unit)
        else
-          call print_cblock_cnode(coder%context,pm_comp_file_unit,pm_null_obj,coder%sig_cache,&
+          call print_cblock_cnode(coder%context,pm_comp_file_unit,pm_null_obj,coder%modl_names,coder%sig_cache,&
                pm_null_obj,coder%vstack(1),2)
-          call print_all_sigs(coder%context,pm_comp_file_unit,coder%sig_cache,coder%sig_cache,coder%poly_cache)
+          call print_all_sigs(coder%context,pm_comp_file_unit,coder%modl_names,coder%sig_cache,coder%sig_cache,coder%poly_cache)
        endif
        close(pm_comp_file_unit)
     endif
     if(pm_opts%print_timings) then
        call cpu_time(newtime)
-       write(*,'(A20,F7.4,1Hs)') 'CODING TOOK',newtime-time
+       write(*,'(A20,F7.4,"s")') 'CODING TOOK',newtime-time
        time=newtime
     endif
   end subroutine run_coder
@@ -334,9 +345,9 @@ contains
           call qdump_code_tree(coder,pm_null_obj,pm_comp_file_unit,coder%vstack(1),1)
           call dump_res_sigs(coder,pm_comp_file_unit)
        else
-          call print_cblock_cnode(coder%context,pm_comp_file_unit,cnode_arg(coder%vstack(1),2),coder%sig_cache,&
+          call print_cblock_cnode(coder%context,pm_comp_file_unit,cnode_arg(coder%vstack(1),2),coder%modl_names,coder%sig_cache,&
                coder%proc_cache,cnode_arg(coder%vstack(1),1),2)
-          call print_all_sigs(coder%context,pm_comp_file_unit,coder%sig_cache,coder%proc_cache,coder%poly_cache)
+          call print_all_sigs(coder%context,pm_comp_file_unit,coder%modl_names,coder%sig_cache,coder%proc_cache,coder%poly_cache)
        endif
        close(pm_comp_file_unit)
     endif
@@ -348,22 +359,23 @@ contains
     
     if(pm_opts%print_timings) then
        call cpu_time(newtime)
-       write(*,'(A20,F7.4,1Hs)') 'INFERENCE TOOK',newtime-time
+       write(*,'(A20,F7.4,"s")') 'INFERENCE TOOK',newtime-time
        time=newtime
     endif
 
   end subroutine run_type_inference
 
   ! ******** Wcode stage - create wordcodes ***********
-  subroutine run_wcode_stage(prog_code,proc_cache,code_cache,poly_cache,typeset)
+  subroutine run_wcode_stage(prog_code,proc_cache,code_cache,poly_cache,typeset,modl_names)
     type(pm_ptr),intent(in):: prog_code,proc_cache,poly_cache
+    integer,dimension(:),pointer,intent(in):: modl_names
     type(pm_ptr),intent(out):: code_cache,typeset
     
     ! Wcode stage state
     type(wcoder),target:: wcd
     
     if(pm_debug_level>1) write(*,*) 'WCODE STAGE>>'
-    call init_wcoder(context,wcd,proc_cache,poly_cache)
+    call init_wcoder(context,wcd,proc_cache,poly_cache,modl_names)
     call wcode_prog(wcd,prog_code)
     call wcode_procs(wcd)
     if(pm_opts%out_debug_files) then
@@ -386,7 +398,7 @@ contains
     call pm_gc(context,.false.)
     if(pm_opts%print_timings) then
        call cpu_time(newtime)
-       write(*,'(A20,F7.4,1Hs)') 'WCODE STAGE TOOK',newtime-time
+       write(*,'(A20,F7.4,"s")') 'WCODE STAGE TOOK',newtime-time
        time=newtime
     endif
   end subroutine run_wcode_stage
@@ -434,20 +446,21 @@ contains
        first=.false.
        dict=parser%modl_dict
        visibility=parser%visibility
+       num_modl=parser%modl_index
        if(parser%error_count==0) then
           err=0
-          call link_includes(context,err,dict)
+          call link_includes(context,err,dict,parser%sysmodl)
           if(err==0) then
              prog=root%data%ptr(root%offset+modl_stmts)
              if(pm_fast_isnull(prog)) call pm_stop('No program defined to run')
              !call dump_parse_tree(context,6,prog,2)
-             call init_coder(context,coder,visibility)
+             call init_coder(context,coder,visibility,num_modl,modl_names)
              call trav_prog(coder,prog)
              call inf_prog(coder)
              if(coder%num_errors==0) then
                 prog_code=coder%vstack(1)
                 proc_cache=coder%proc_cache
-                call init_wcoder(context,wcd,proc_cache,pm_null_obj)
+                call init_wcoder(context,wcd,proc_cache,pm_null_obj,modl_names)
                 call wcode_prog(wcd,prog_code)
                 code_cache=wcd%code_cache
                 call wcode_procs(wcd)

@@ -173,17 +173,6 @@ contains
        endif
     endif
 
-    ! If this is an abstract proc then raise an error
-    if(cnode_flags_set(procnode,pr_flags,proc_is_abstract)) then
-       call inf_error(coder,callnode,&
-            'Abstract procedure needs to be implemented for the given argument list')
-       call inf_error(coder,procnode,&
-            'Abstract procedure definition referenced in the above error')
-       call inf_trace(coder)
-       rtype=error_type
-       return
-    endif
-
     if(coder%top+1+cnode_get_num(procnode,pr_max_index)>max_code_stack) then
        call inf_error(coder,callnode,&
             'Very deep (probably recursive) set of nested calls that cannot be processed')
@@ -1316,7 +1305,7 @@ contains
        case(sym_once)
           call inf_cblock(coder,cnode_arg(args,nret+1))
           if(nret>1) call combine_types(cnode_arg(args,1),arg_type_with_mode(3))
-       case(sym_sync,sym_pm_shared,sym_pm_shared_always,sym_pm_chan,sym_pm_chan_always)
+       case(sym_pm_shared,sym_pm_shared_always,sym_pm_chan,sym_pm_chan_always)
           call inf_cblock(coder,cnode_arg(args,2))
        case(sym_pct)
           call inf_cblock(coder,cnode_arg(args,nargs))
@@ -1456,7 +1445,7 @@ contains
                    tno2=pm_tv_arg(tv,1)
                    if(tno2==pm_string_type) then
                       tno=pm_name_type_from_literal_string(coder%context,tno,&
-                           cnode_module_name(callnode))
+                           cnode_get_modl_name(coder,callnode))
                       if(tno<0) then
                          call inf_error(coder,callnode,&
                               'String value in ".{}" is not a valid name')
@@ -1708,7 +1697,7 @@ contains
           do i=n+1,nargs
              coder%stack(get_slot(i))=pm_new_uninitialised_type(coder%context,arg_type_with_mode(i))
           enddo
-       case(sym_underscore,sym_colon)
+       case(sym_underscore,sym_sync)
           continue
        case(first_pragma:last_pragma)
           if(sig==sym_infer_type.or.sig==sym_infer_type_and_stack) then
@@ -2441,19 +2430,18 @@ contains
                    bad_amp=.true.
                 endif
              else
-                if(mode2/=sym_private) then
+                if(mode2>sym_chan) then
                    if(mode2==sym_outer.or.mode2==sym_outer_invar.or.mode2==sym_outer_shared) then
                       call call_error('Cannot modify variable defined in an outer parallel scope')
                       bad_amp=.true.
-                   elseif(is_comm) then
-                      if(is_unlabelled) then
-                         call call_error('To modify "'//trim(sym_names(mode2))//&
-                              '" variable in this context you must label the statement')
-                         bad_amp=.true.
+                   elseif(.not.is_comm) then
+                      if(mode2>sym_uniform) then
+                         call call_error('"'//trim(sym_names(mode2))//&
+                              '" value can only be modified by an "once" statement, a "%" call or via a "%" reference')
+                      else
+                         call call_error('"'//trim(sym_names(mode2))//&
+                              '" value can only be modified by a "%" call or via a "%" reference')
                       endif
-                   else
-                      call call_error('"'//trim(sym_names(mode2))//&
-                           '" variable can only be modified by an "once" statement, "sync" assignment or "%" call')
                       bad_amp=.true.
                    endif
                 endif
@@ -2614,11 +2602,12 @@ contains
       integer,intent(in),optional:: sig_start
       integer:: ressig
 
-      integer:: h,i,j,m,start,slot,pcheck,nkey_sig,jpass,nconsidered
+      integer:: h,i,j,m,start,slot,nkey_sig,jpass,nconsidered
       integer:: vbase,wbase
-      type(pm_ptr):: tv,v,proc,match_proc,rtvect,new_env
-      integer:: rt,rt2,pars,mpars,apars,new_apars,tno,match_pars,pflags
-      logical:: ok,found,visible,found_has_no_rtypes,when_no_match
+      type(pm_ptr):: tv,v,proc,match_proc,rtvect,new_env,problem_match
+      integer:: rt,rt2,pars,mpars,apars,new_apars,tno,match_pars,match_apars,pflags
+      logical:: ok,found,visible,this_visible,have_interface,when_no_match
+      logical:: direct_match_existing,direct_match_new,ambiguous_indirect,interface_match
       integer,dimension(1):: key
       integer:: memo
 
@@ -2637,12 +2626,15 @@ contains
       if(debug_inference) write(*,*) 'Checking',cnode_numargs(procs),' sigs'
       found=.false.
       apars=0
+      ambiguous_indirect=.false.
+      interface_match=.false.
 
       outer: do jpass=1,3
          if(debug_inference) write(*,*) 'MATCH PASS> ',jpass
          nconsidered=0
          do i=1,cnode_numargs(procs)
             proc=cnode_arg(procs,i)
+
             if(debug_inference) then
                write(*,*) 'CHECK nret',cnode_get_num(proc,pr_nret),nret,&
                     'amps',cnode_get_num(proc,pr_amps),amps,&
@@ -2660,10 +2652,8 @@ contains
             endif
             if(cnode_get_num(proc,pr_amps)/=amps) cycle
             pflags=cnode_get_num(proc,pr_flags)
-
-
-            if(iand(pflags,proccall_is_comm+proccall_is_method+proccall_is_general)/=&
-                 iand(flags,proccall_is_comm+proccall_is_method+proccall_is_general)) cycle
+            if(iand(pflags,proccall_is_comm+proccall_is_method+proccall_is_amp_method+proccall_is_general)/=&
+                 iand(flags,proccall_is_comm+proccall_is_method+proccall_is_amp_method+proccall_is_general)) cycle
             if(iand(pflags,proc_is_cond)/=0.and..not.is_cond.or.&
                  iand(pflags,proc_is_uncond)/=0.and.is_cond) cycle
             nconsidered=nconsidered+1
@@ -2687,191 +2677,128 @@ contains
             if(apars>=0) then
 
                ! Check for a visible match
-               if(is_visible(coder,callnode,proc)) visible=.true.
+               this_visible=is_visible(coder,callnode,proc,.true.)
+               if(this_visible) visible=.true.
+               direct_match_new=this_visible
+               if(.not.direct_match_new) direct_match_new=is_visible(coder,proc,callnode,.true.)
 
                ! If this is a second (or later) match, then check for compatibility
                if(found) then
                   if(debug_inference) write(*,*) 'SECOND MATCH>',&
                        trim(pm_type_as_string(coder%context,pars)),'AFTER>',&
                        trim(pm_type_as_string(coder%context,match_pars))
+
+                  if(pm_type_has_when(coder%context,pars)) then
+                     coder%trace_depth=coder%trace_depth+1
+                     if(coder%trace_depth<max_trace_depth) then
+                        coder%trace(coder%trace_depth)=callnode
+                        coder%trace_keys(coder%trace_depth)=keybase
+                     endif
+                     rt=inf_proc(coder,proc,callnode,apars,pars,nret,nkey,&
+                          keynames,keybase,&
+                          int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.true.,new_apars,new_env)
+                     coder%trace_depth=coder%trace_depth-1
+                     if(when_no_match) cycle
+                  endif
+
+                  ! This is the direct match selection rule
+                  if(direct_match_existing.and..not.direct_match_new) cycle
+                  if(direct_match_new.and..not.direct_match_existing) then
+                     match_pars=pars
+                     match_proc=proc
+                     interface_match=cnode_flags_set(match_proc,pr_flags,proc_is_interface)
+                     direct_match_existing=.true.
+                     ambiguous_indirect=.false.
+                     cycle
+                  endif
+
+                  ! First match is strictly more specific than second
                   if(pm_type_includes(coder%context,pars,&
-                       match_pars,pm_type_incl_type)) then
+                       match_pars,pm_type_incl_type).and.&
+                       is_visible(coder,proc,match_proc,.true.)) then
                      coder%wtop=wbase
                      coder%vtop=vbase
-                     ! Have to also check compatibility of return types
-                     ! in the case where the enclosing procedure defines return types
-                     ! and the first-match procedure does not define them
-                     if(nret>0.and.rt>0.and.found_has_no_rtypes) then
-                        rt2=abs(cnode_get_num(proc,pr_rtype))
-                        if(pm_type_kind(coder%context,rt2)/=pm_type_is_undef_result) then
-                           if(.not.pm_type_includes(coder%context,rt2,rt,pm_type_incl_type)) then
-                              call inf_error(coder,proc,&
-                                   'Procedure returns type(s) not compatible'//&
-                                   ' with an enclosing procedure to which it conforms')
-                              call inf_error(coder,cnode_arg(procs,i+1),&
-                                   'Enclosing procedure referenced in above error')
-                              call more_error(coder%context,' ')
-                              call print_call_details(coder,callnode,keybase,nargs)
-                              call inf_trace(coder)
-                           endif
+
+                     if(cnode_flags_set(proc,pr_flags,proc_is_interface)) then
+                        if(this_visible) then
+                           have_interface=.true.
+                           coder%wtop=wbase
+                           exit
                         endif
-                     endif
-                     if(pm_type_has_when(coder%context,pars)) then
+                        cycle
+                     else
+                        ! is this a clashing definition?
                         if(pm_type_includes(coder%context,match_pars,&
                              pars,pm_type_incl_type)) then
-                           ! Two equally specific when procs - the second must have when(false)
-                           coder%trace_depth=coder%trace_depth+1
-                           if(coder%trace_depth<max_trace_depth) then
-                              coder%trace(coder%trace_depth)=callnode
-                              coder%trace_keys(coder%trace_depth)=keybase
-                           endif
-                           rt=inf_proc(coder,proc,callnode,apars,pars,nret,nkey,&
-                                keynames,keybase,&
-                                int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.true.,new_apars,new_env)
-                           coder%trace_depth=coder%trace_depth-1
-                           if(.not.when_no_match) then
-                              call inf_error(coder,callnode,&
-                                   'Ambiguous call to: '//trim(sig_name_str(coder,int(sig))))
-                              call more_error(coder%context,&
-                                   'Two or more equivalent procedures have "when" expressions evaluating to "true"')
-                              call print_call_details(coder,callnode,keybase,nargs)
-                              call print_proc_details(coder,match_proc)
-                              call print_proc_details(coder,proc)
+
+                           ! If second match is default and first is replacement, then OK
+                           if(cnode_flags_set(proc,pr_flags,proc_is_default).and.&
+                                cnode_flags_set(match_proc,pr_flags,proc_is_replace)) cycle
+                           
+                           ! If two indirect matches they are automatically ambiguous, but may be overridden
+                           if((.not.direct_match_existing).and.(.not.direct_match_new)) then
+                              ambiguous_indirect=.true.
+                              problem_match=proc
+                              cycle
+                           else
+                           
+                              ! Two equally specific and runable procs
+                              if(.not.present(err)) then
+                                 call inf_error(coder,callnode,&
+                                      'Two equivalent matching calls for: '//trim(sig_name_str(coder,int(sig))))
+                                 call print_call_details(coder,callnode,keybase,nargs)
+                                 call print_proc_details(coder,match_proc)
+                                 call print_proc_details(coder,proc)
+                              else
+                                 err=.true.
+                              endif
+                              coder%wtop=wbase
+                              exit
                            endif
                         endif
                      endif
                      cycle
                   else
-                     if(.not.present(err)) then
-                        call inf_error(coder,callnode,&
-                             'Ambiguous call to: '//trim(sig_name_str(coder,int(sig))))
-                        call print_call_details(coder,callnode,keybase,nargs)
-                        call print_proc_details(coder,match_proc)
-                        call print_proc_details(coder,proc)
+                     if((.not.direct_match_existing).and.(.not.direct_match_new)) then
+                        ambiguous_indirect=.true.
+                        problem_match=proc
+                        cycle
                      else
-                        err=.true.
+                        if(.not.present(err)) then
+                           call inf_error(coder,callnode,&
+                                'Ambiguous matches in call to: '//trim(sig_name_str(coder,int(sig))))
+                           call print_call_details(coder,callnode,keybase,nargs)
+                           call print_proc_details(coder,match_proc)
+                           call print_proc_details(coder,proc)
+                        else
+                           err=.true.
+                        endif
+                        coder%wtop=wbase
+                        exit
                      endif
-                     coder%wtop=wbase
-                     exit
                   endif
+
                endif
 
-               ! A good match has been found
-               ! infer the associated procedure
-               if(cnode_get_kind(proc)==cnode_is_builtin) then
-                  rt=inf_builtin(coder,proc,callnode,apars,pars,new_apars)
-               else
-
-                  pcheck=coder%vtop
-
-                  ! Traceback record 
-                  ! of calls being processed
+               if(pm_type_has_when(coder%context,pars)) then
                   coder%trace_depth=coder%trace_depth+1
                   if(coder%trace_depth<max_trace_depth) then
                      coder%trace(coder%trace_depth)=callnode
                      coder%trace_keys(coder%trace_depth)=keybase
                   endif
-
                   rt=inf_proc(coder,proc,callnode,apars,pars,nret,nkey,&
                        keynames,keybase,&
-                       int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.false.,new_apars,new_env)
+                       int(pm_fast_esize(cnode_get(proc,pr_keys))+1)/2,when_no_match,.true.,new_apars,new_env)
                   coder%trace_depth=coder%trace_depth-1
-                  if(when_no_match) then
-                     cycle
-                  endif
-                  if(cnode_get_name(callnode,cnode_modl_name)/=sym_pm_system) then
-                     coder%supress_errors=.false.
-                  endif
-
-                  if(nret>0.and.rt<0) then
-                     if(debug_inference) then
-                        write(*,*) 'INCOMPLETE PROC>',coder%vtop,start,coder%incomplete
-                     endif
-                     do j=1,num_ret
-                        call set_arg_to_error_type(j)
-                     enddo
-                     coder%vtop=start
-                     coder%wtop=wbase
-                     ressig=undefined
-                     return
-                  else
-                     !if(coder%vtop/=pcheck+1) call pm_panic('pcheck mismatch')
-                  endif
-
-                  ! Be careful not to add GC code between inf_proc and here (new_env not protected)
-                  if(.not.pm_fast_isnull(new_env)) then
-                     call combine_nhd_call_envelope(coder,new_env)
-                  endif
-
+                  if(when_no_match) cycle
                endif
-
                found=.true.
                match_pars=pars
+               match_apars=apars
                match_proc=proc
-               found_has_no_rtypes=&
-                    pm_type_kind(coder%context,cnode_get_num(match_proc,pr_rtype))==&
-                    pm_type_is_undef_result
+               interface_match=cnode_flags_set(match_proc,pr_flags,proc_is_interface)
+               direct_match_existing=direct_match_new
 
-               if(nret>0) then
-                  if(rt>0) then
-                     rtvect=pm_type_vect(coder%context,rt)
-                     if(pm_tv_kind(rtvect)==pm_type_is_tuple.and.&
-                          iand(pm_tv_flags(rtvect),pm_type_is_list)==0) then
-                        if(.not.vret) then
-                           ! Fixed number of returns
-                           do j=1,num_ret
-                              call combine_types(cnode_arg(args,j),pm_tv_arg(rtvect,j))
-                           enddo
-                        elseif(num_ret==1) then
-                           ! This call is the last element in a variable return
-                           call combine_types(cnode_arg(args,1),rt)
-                        else
-                           ! This call is the last element in a variable return
-                           ! and has to return num_ret-1 indivual values before
-                           ! the grouped value
-                           do j=1,num_ret-1
-                              call combine_types(cnode_arg(args,j),pm_tv_arg(rtvect,j))
-                           enddo
-                           call push_word(coder,pm_type_new_tuple)
-                           call push_word(coder,0)
-                           do j=num_ret,nret
-                              call push_word(coder,pm_tv_arg(rtvect,j))
-                           enddo
-                           call make_type_if_possible(coder,nret-num_ret+3)
-                           call combine_types(cnode_arg(args,num_ret),pop_word(coder))
-                        endif
-                     else
-                        call combine_types(cnode_arg(args,1),rt)
-                     endif
-                  else
-                     do j=1,num_ret
-                        call set_arg_to_error_type(j)
-                     enddo
-                  endif
-               endif
-
-               ! Types of & args may have changed
-               if(new_apars>0.and.amps/=0.and..not.bad_amp.and..not.ignore_rules) then
-                  if(debug_inference) then
-                     write(*,*) 'Changing & to',trim(pm_type_as_string(coder%context,new_apars))
-                  endif
-                  amplocs=pm_name_val(coder%context,amps)
-                  rtvect=pm_type_vect(coder%context,new_apars)
-                  if(pm_tv_kind(rtvect)==pm_type_is_tuple.and.&
-                       iand(pm_tv_flags(rtvect),pm_type_is_list)==0) then
-                     do j=0,pm_fast_esize(amplocs)
-                        m=amplocs%data%i(amplocs%offset+j)
-                        tno=pm_tv_arg(rtvect,j+1)
-                        if(is_invar.and..not.is_comm) tno=pm_type_add_mode(coder%context,tno,sym_invar)
-                        call combine_types(cnode_arg(args,num_ret+m),tno)
-                     enddo
-                  else
-                     m=amplocs%data%i(amplocs%offset)
-                     tno=new_apars
-                     if(is_invar.and..not.is_comm) tno=pm_type_add_mode(coder%context,tno,sym_invar)
-                     call combine_types(cnode_arg(args,num_ret+m),tno)
-                  endif
-               endif
             elseif(apars==error_type) then
                if(debug_inference) write(*,*) 'TERMINATED>'
                exit outer
@@ -2891,23 +2818,26 @@ contains
       endif
 
       if(apars==error_type) then
-         do i=1,num_ret
-            call set_arg_to_error_type(i)
-         enddo
-         ressig=undefined
-      elseif(.not.found.or..not.visible) then
+         
+         goto 999
+         
+      elseif(.not.found.or..not.visible.or.interface_match) then
+
          ! If nothing found print error message
          ! or return error flag
          if(present(err)) then
             err=.true.
          elseif(iand(flags,proccall_is_yield)==0) then
-            if(.not.found) then
+            if(interface_match) then
+               call cnode_error(coder,callnode,'No procedure implements the interface applicable to this call')
+               call cnode_error(coder,match_proc,'Interface that is not implemented')
+            elseif(.not.found) then
                call cnode_error(coder,callnode,&
                     'No matching procedure returning '//trim(pm_int_as_string(nret))//' value'//&
                     merge(': ','s:',nret==1))
             else
                call cnode_error(coder,callnode,&
-                    'No matching procedure is visible to the module containing the call')
+                    'No matching procedure or interface is visible to the module containing the call')
                call more_error(coder%context,'(expecting '//trim(pm_int_as_string(nret))//' return value'//&
                     merge(': ','s:',nret==1))
             endif
@@ -2941,17 +2871,169 @@ contains
                enddo
             endif
             call inf_trace(coder)
-            do i=1,num_ret
-               call set_arg_to_error_type(i)
-            enddo
-            ressig=undefined
+            goto 999
          else
-            call cnode_error(coder,callnode,'Yield statement does not conform to supplied block')
-            call print_call_details(coder,callnode,keybase,nargs)
-            call inf_trace(coder)
+            if(present(err)) then
+               err=.true.
+            else
+               call cnode_error(coder,callnode,'Yield statement does not conform to supplied block')
+               call print_call_details(coder,callnode,keybase,nargs)
+               call inf_trace(coder)
+            endif
+            goto 999
          endif
+         
+      elseif(ambiguous_indirect) then
+
+         if(present(err)) then
+            err=.true.
+         else
+            call cnode_error(coder,callnode,'Two or more prodedures indirectly matched this call, but none directly')
+            call more_error(coder%context,'Therefore this is treated as an ambiguous match')
+            call cnode_error(coder,proc,'First match in the above error')
+            call cnode_error(coder,problem_match,'Second match in the above error')
+         endif
+         goto 999
+         
       else
-         ! Otherwise create resolved procedure cnode
+
+         if(iand(flags,proccall_is_amp_ref)/=0) then
+            if(.not.cnode_flags_set(match_proc,pr_flags,proccall_is_amp_ref)) then
+               call cnode_error(coder,callnode,'This method call needs to return "ref&"')
+               call cnode_error(coder,match_proc,'Matched method in the above error')
+            endif
+         endif
+         
+         ! A good match has been found
+         ! infer the associated procedure
+         if(cnode_get_kind(match_proc)==cnode_is_builtin) then
+
+            rt=inf_builtin(coder,match_proc,callnode,match_apars,match_pars,new_apars)
+
+         else
+
+            ! Traceback record 
+            ! of calls being processed
+            coder%trace_depth=coder%trace_depth+1
+            if(coder%trace_depth<max_trace_depth) then
+               coder%trace(coder%trace_depth)=callnode
+               coder%trace_keys(coder%trace_depth)=keybase
+            endif
+
+            rt=inf_proc(coder,match_proc,callnode,match_apars,match_pars,nret,nkey,&
+                 keynames,keybase,&
+                 int(pm_fast_esize(cnode_get(match_proc,pr_keys))+1)/2,when_no_match,.false.,new_apars,new_env)
+            coder%trace_depth=coder%trace_depth-1
+
+            if(.not.cnode_in_sys_modl(callnode)) then
+               coder%supress_errors=.false.
+            endif
+
+            if(.not.pm_fast_isnull(new_env)) then
+               call combine_nhd_call_envelope(coder,new_env)
+            endif
+
+         endif
+
+         ! Have to also check compatibility of return types
+         ! in the case where the enclosing procedure defines return types
+         ! and the first-match procedure does not define them
+         if(nret>0.and.rt>0.and.have_interface) then
+            rt2=abs(cnode_get_num(proc,pr_rtype))
+            if(pm_type_kind(coder%context,rt2)/=pm_type_is_undef_result) then
+               if(.not.pm_type_includes(coder%context,rt2,rt,pm_type_incl_type)) then
+                  if(present(err)) then
+                     err=.true.
+                  else
+                     call inf_error(coder,match_proc,&
+                          'Procedure returns type(s) not compatible'//&
+                          ' with an interface which it is specialising')
+                     call inf_error(coder,proc,&
+                          'Interface referenced in above error')
+                     call more_error(coder%context,' ')
+                     call print_call_details(coder,callnode,keybase,nargs)
+                     call inf_trace(coder)
+                  endif
+               endif
+            endif
+         endif
+
+         if(nret>0.and.rt<0) then
+            if(debug_inference) then
+               write(*,*) 'INCOMPLETE PROC>',coder%vtop,start,coder%incomplete
+            endif
+            do j=1,num_ret
+               call set_arg_to_error_type(j)
+            enddo
+            coder%vtop=start
+            coder%wtop=wbase
+            ressig=undefined
+            return
+         endif
+
+         ! Deal with return type of resolved procedure
+         if(nret>0) then
+            if(rt>0) then
+               rtvect=pm_type_vect(coder%context,rt)
+               if(pm_tv_kind(rtvect)==pm_type_is_tuple.and.&
+                    iand(pm_tv_flags(rtvect),pm_type_is_list)==0) then
+                  if(.not.vret) then
+                     ! Fixed number of returns
+                     do j=1,num_ret
+                        call combine_types(cnode_arg(args,j),pm_tv_arg(rtvect,j))
+                     enddo
+                  elseif(num_ret==1) then
+                     ! This call is the last element in a variable return
+                     call combine_types(cnode_arg(args,1),rt)
+                  else
+                     ! This call is the last element in a variable return
+                     ! and has to return num_ret-1 indivual values before
+                     ! the grouped value
+                     do j=1,num_ret-1
+                        call combine_types(cnode_arg(args,j),pm_tv_arg(rtvect,j))
+                     enddo
+                     call push_word(coder,pm_type_new_tuple)
+                     call push_word(coder,0)
+                     do j=num_ret,nret
+                        call push_word(coder,pm_tv_arg(rtvect,j))
+                     enddo
+                     call make_type_if_possible(coder,nret-num_ret+3)
+                     call combine_types(cnode_arg(args,num_ret),pop_word(coder))
+                  endif
+               else
+                  call combine_types(cnode_arg(args,1),rt)
+               endif
+            else
+               do j=1,num_ret
+                  call set_arg_to_error_type(j)
+               enddo
+            endif
+         endif
+
+         ! Types of & args may have changed
+         if(new_apars>0.and.amps/=0.and..not.bad_amp.and..not.ignore_rules) then
+            if(debug_inference) then
+               write(*,*) 'Changing & to',trim(pm_type_as_string(coder%context,new_apars))
+            endif
+            amplocs=pm_name_val(coder%context,amps)
+            rtvect=pm_type_vect(coder%context,new_apars)
+            if(pm_tv_kind(rtvect)==pm_type_is_tuple.and.&
+                 iand(pm_tv_flags(rtvect),pm_type_is_list)==0) then
+               do j=0,pm_fast_esize(amplocs)
+                  m=amplocs%data%i(amplocs%offset+j)
+                  tno=pm_tv_arg(rtvect,j+1)
+                  if(is_invar.and..not.is_comm) tno=pm_type_add_mode(coder%context,tno,sym_invar)
+                  call combine_types(cnode_arg(args,num_ret+m),tno)
+               enddo
+            else
+               m=amplocs%data%i(amplocs%offset)
+               tno=new_apars
+               if(is_invar.and..not.is_comm) tno=pm_type_add_mode(coder%context,tno,sym_invar)
+               call combine_types(cnode_arg(args,num_ret+m),tno)
+            endif
+         endif
+
+         ! Create resolved procedure cnode
          if(coder%vtop>start+1) then
             call make_code(coder,pm_null_obj,cnode_is_autoconv_sig,&
                  coder%vtop-start)
@@ -2965,6 +3047,13 @@ contains
       ! Tidy up
       coder%vtop=start
 
+      return
+
+999   continue
+      do i=1,num_ret
+         call set_arg_to_error_type(i)
+      enddo
+      ressig=undefined
     end function  simple_proc_call
 
     !================================================
@@ -2975,7 +3064,7 @@ contains
       integer:: ressig
       integer:: i,sig,rsig,apars
       type(pm_ptr):: pr,var,tv,tv2
-      integer:: proctyp,tno,name,start,arg(1)
+      integer:: proctyp,tno,name,start,arg(2)
       logical:: err
 
       ! Get value for procedure name (actually its type)
@@ -2997,13 +3086,15 @@ contains
 
       if(pm_tv_kind(tv)/=pm_type_is_proc) then
          call inf_error_with_trace(coder,callnode,&
-              'Value for ".()" call does not hold proc name, got: '//&
+              'Value for ".()" call does not hold "$name", got: '//&
               trim(pm_type_as_string(coder%context,proctyp)))
          goto 999
       endif
       name=abs(pm_tv_name(tv))
+      arg(2)=iand(name,3)+modl_proc
+      name=name/4
       arg(1)=name
-      sig=pm_ivect_lookup(coder%context,coder%sig_cache,arg,1)
+      sig=pm_ivect_lookup(coder%context,coder%sig_cache,arg,2)
       if(sig>0) then
          pr=pm_dict_val(coder%context,coder%sig_cache,int(sig,pm_ln))
          if(pm_tv_name(tv)>=0) then
@@ -3033,7 +3124,7 @@ contains
       else
          call inf_error_with_trace(coder,callnode,&
               'No match found for ".()" call using procedure name: '//&
-              trim(pm_name_as_string(coder%context,name)))
+              trim(pm_type_as_string(coder%context,proctyp)))
       endif
 999   continue
       do i=1,num_ret
@@ -3441,29 +3532,6 @@ contains
     return
   end function  match_arg
   
-  
-  !=================================================================
-  ! Is procnode directly visible from module containing callnode?
-  !=================================================================
-  function is_visible(coder,callnode,procnode) result(ok)
-    type(code_state),intent(inout):: coder
-    type(pm_ptr),intent(in):: callnode,procnode
-    logical:: ok
-    integer:: callmodule,procmodule
-    integer:: key(2)
-    integer(pm_ln):: j
-    callmodule=cnode_get_name(callnode,cnode_modl_name)
-    procmodule=cnode_get_name(procnode,cnode_modl_name)
-    if(callmodule==procmodule.or.procmodule==sym_pm_system) then
-       ok=.true.
-    else
-       key(1)=callmodule
-       key(2)=procmodule
-       j=pm_ivect_lookup(coder%context,coder%visibility,key,2)
-       ok=j>0
-    endif
-  end function is_visible
-
 
   !===============================================================
   ! Create but do not intialise current stack frame
@@ -4407,7 +4475,7 @@ contains
              call disable
           endif
        case(sym_pm_ref)
-          call std_access(.false.,3)
+          call std_access(.false.,merge(3,2,iand(cnode_num_arg(args,2),pm_dref_matches_type)/=0))
        case(sym_open)
           nvargs=0
           n=0
@@ -4497,7 +4565,7 @@ contains
              endif
           enddo
        case(sym_var,sym_var_set_mode,sym_set_mode,sym_change_mode,&
-            sym_underscore,sym_colon,sym_typeof,sym_pm_uninit,sym_vret,&
+            sym_underscore,sym_sync,sym_typeof,sym_pm_uninit,sym_vret,&
             sym_vret_to_buffer,sym_vret_from_buffer)
           continue
        case default
@@ -5400,14 +5468,14 @@ contains
     coder%error_nodes(min(coder%num_errors+1,max_error_nodes))=node
     if(pm_main_process) then
        write(*,*)
-       modl_name=cnode_get_name(node,cnode_modl_name)
+       modl_name=cnode_get_modl_name(coder,node)
        lineno=cnode_get_name(node,cnode_lineno)
        charno=cnode_get_name(node,cnode_charno)
        if(modl_name==sym_pm_system.and.pm_opts%hide_sysmod) then
           ! Search call stack for source outside of the system module
           ! (note- par/import stack is misused here)
           do i=coder%trace_depth,1,-1
-             modl_name=cnode_get_name(coder%trace(i),cnode_modl_name)
+             modl_name=cnode_get_modl_name(coder,coder%trace(i))
              if(modl_name/=sym_pm_system) then
                 lineno=cnode_get_name(coder%trace(i),cnode_lineno)
                 charno=cnode_get_name(coder%trace(i),cnode_charno)
@@ -5432,8 +5500,7 @@ contains
        write(*,'(A)') trim(str)
        write(*,*)
     endif
-    if(cnode_get_name(node,cnode_modl_name)==sym_pm_system.and.&
-         pm_opts%hide_sysmod) then
+    if(cnode_in_sys_modl(node).and.pm_opts%hide_sysmod) then
        coder%supress_errors=.true.
     endif
     coder%num_errors=coder%num_errors+1
@@ -5551,7 +5618,7 @@ contains
       logical:: hideit
       character(len=4):: prefix
       integer:: name
-      if(cnode_get_name(node,cnode_modl_name)==sym_pm_system) then
+      if(cnode_in_sys_modl(node)) then
          hideit=.true.
          return
       endif
@@ -5581,11 +5648,11 @@ contains
     integer:: i
     character(len=1024):: str,string
     character(len=2):: join,ampstr
-    character(len=1):: procchr,dotchr
+    character(len=1):: procchr
     integer:: n,n0,k,nargs,nkeys
-    integer::ampidx,signame,signamebase,tno,dtyp,ttyp,mode
+    integer::ampidx,signame,signamebase,sigtype,tno,dtyp,ttyp,mode
     type(pm_ptr):: tv,key,val,amp,keyargs,keynames,name
-    logical:: iscond
+    logical:: iscond,isvar,ismethod
     if(.not.pm_main_process) return
     if(coder%supress_errors) return
     nargs=cnode_numargs(cnode_get(node,call_args))-cnode_get_num(node,call_nret)
@@ -5599,7 +5666,7 @@ contains
        amp=pm_name_val(coder%context,ampidx)
     endif
     call pm_name_string(coder%context,&
-         cnode_get_name(node,cnode_modl_name),str)
+         cnode_get_modl_name(coder,node),str)
     if(pm_opts%colour) then
        write(*,'(A,A,A,A,I4,A)') 'Call at: ',pm_loc_start,trim(str),&
             ' line:',cnode_get_num(node,cnode_lineno),pm_loc_end
@@ -5608,21 +5675,21 @@ contains
             ' line:',cnode_get_num(node,cnode_lineno)
     endif
     call pm_error_header(coder%context,&
-         cnode_get_name(node,cnode_modl_name),&
+         cnode_get_modl_name(coder,node),&
          cnode_get_name(node,cnode_lineno),&
          cnode_get_name(node,cnode_charno))
     signame=sig_name(coder,cnode_get_num(node,call_sig))
     signamebase=pm_name_stem(coder%context,signame)
-    if(signame==sym_proc) then
-       tv=pm_type_vect(coder%context,coder%wstack(base))
-       signame=abs(pm_tv_name(tv))
+    isvar=.false.
+    if(signame==sym_proc.or.signame==sym_var) then
+       sigtype=coder%wstack(base)
+       isvar=.true.
     elseif(signamebase==sym_pm_assign.or.signamebase==sym_assign_var) then
        signame=sym_assign
     elseif(signamebase==sym_make_subref.or.signamebase==sym_make_sublhs.or.&
          signamebase==sym_make_sublhs_amp) then
        signame=sym_sub
     endif
-
 
     if(cnode_flags_set(node,call_flags,proccall_is_comm)) then
        n=num_comm_args
@@ -5636,36 +5703,22 @@ contains
        procchr=' '
     endif
 
-    if(cnode_flags_set(node,call_flags,proccall_is_method)) then
-       procchr=' '
-       dotchr= '.'
-    else
-       dotchr= ' '
-    endif
-
+    ismethod=cnode_flags_set(node,call_flags,proccall_is_method)
+    
     n0=n
     if(cnode_flags_set(node,call_flags,proccall_is_block)) then
        n=n+3
     endif
 
-    string=dotchr//trim(pm_name_as_string(coder%context,&
-         signame))//procchr
-
-    k=len_trim(string)+1
-    if(n0>1) then
-       iscond=coder%wstack(base+nkeys+2+2)==coder%true_literal
-       dtyp=pm_type_strip_mode(coder%context,coder%wstack(base+nkeys+3),mode)
-       if(dtyp==pm_null) dtyp=0
+    if(ismethod) then
+       call more_error(coder%context,'  (')
+    elseif(isvar) then
+       call more_error(coder%context,'  ('//trim(pm_type_as_string(coder%context,&
+            sigtype))//').'//trim(procchr)//'(')
     else
-       iscond=.false.
-       dtyp=0
+       call more_error(coder%context,'  '//trim(pm_name_as_string(coder%context,&
+            signame))//trim(procchr)//'(')
     endif
-    ttyp=pm_type_strip_mode(coder%context,coder%wstack(base+nkeys+3),mode)
-    if(ttyp==pm_null) ttyp=0
-    call par_context_to_string(coder%context,iscond,.false.,ttyp,dtyp,string,k)
-    string(k:k)='('
-    
-    call more_error(coder%context,trim(string))
     n0=n
     if(pm_opts%show_hidden) n=0
     k=0
@@ -5679,6 +5732,16 @@ contains
        call more_error(coder%context,&
             '   '//ampstr//&
             trim(pm_type_as_string(coder%context,coder%wstack(base+nkeys+2+i)))//join)
+       if(ismethod.and.i==n0+1) then
+          if(isvar) then
+             call more_error(coder%context,' ).call(')
+             call more_error(coder%context,'    '//trim(pm_type_as_string(coder%context,&
+                  sigtype))//merge(',',' ',nargs>n0+1))
+          else
+             call more_error(coder%context,' ).'//trim(pm_name_as_string(coder%context,&
+                  signame))//'(')
+          endif
+       endif
     enddo
     if(.not.present(numargs).and.cnode_flags_set(node,call_flags,call_is_vararg)) then
        call more_error(coder%context,'   ...')
@@ -5697,15 +5760,15 @@ contains
     enddo
  
     if(cnode_flags_set(node,call_flags,proccall_is_block)) then
-       call more_error(coder%context,' ) yield (')
+       call more_error(coder%context,'  ) yield (')
        tno=coder%wstack(base+nkeys+2+n0-2)
        if(pm_type_kind(coder%context,tno)==pm_type_is_par_kind) tno=pm_type_arg(coder%context,tno,1)
        if(pm_type_kind(coder%context,tno)==pm_type_is_proc) tno=pm_type_arg(coder%context,tno,1)
        call more_error(coder%context,'     '//&
             trim(pm_type_as_string(coder%context,tno)))
-       call more_error(coder%context,' )')
+       call more_error(coder%context,'  )')
     else
-       call more_error(coder%context,' )')
+       call more_error(coder%context,'  )')
     endif
   contains
     include 'fesize.inc'
@@ -5753,7 +5816,7 @@ contains
     name=cnode_get_num(node,pr_name)
     str=' '
     call pm_name_string(coder%context,&
-         cnode_get_name(node,cnode_modl_name),str2)
+         cnode_get_modl_name(coder,node),str2)
     if(str=='PM__system'.and.pm_opts%hide_sysmod) then
        str='(System)'
     else

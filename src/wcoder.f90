@@ -147,7 +147,10 @@ module pm_wcode
      ! Set of active types (compiling only)
      type(pm_ptr):: typeset
 
-    ! Debugging info
+     ! Module names
+     integer,dimension(:),pointer:: modl_names
+     
+     ! Debugging info
      integer:: cur_modl,cur_line
 
      type(code_state),pointer:: coder
@@ -163,10 +166,11 @@ contains
   !====================================================
   ! Initialise wcode-stage control structure
   !====================================================
-  subroutine init_wcoder(context,wcd,sig_cache,poly_cache)
+  subroutine init_wcoder(context,wcd,sig_cache,poly_cache,modl_names)
     type(pm_context),pointer:: context
     type(wcoder),intent(inout):: wcd
     type(pm_ptr),intent(in):: sig_cache,poly_cache
+    integer,dimension(:),pointer,intent(in):: modl_names
     type(pm_ptr):: true,false
 
     wcd%context=>context
@@ -193,7 +197,7 @@ contains
     wcd%inline_keys=pm_null_obj
     wcd%inline_key_names=pm_null_obj
     wcd%in_invar=.false.
-    
+    wcd%modl_names=>modl_names
   end subroutine init_wcoder
 
   !====================================================
@@ -739,7 +743,7 @@ contains
   contains
     include 'fisnull.inc'
   end function restart_cblock
-
+  
   !========================================
   ! Wcode multiple-use variables
   !========================================
@@ -868,6 +872,7 @@ contains
     endif
     select case(sig) 
     case(sym_if)
+       costart=wcd%cotop(wcd%cs)+1
        tno=check_arg_type(wcd,args,rv,1)
        if(tno==wcd%true_name) then
           if(restart) then
@@ -891,9 +896,12 @@ contains
           arg=cnode_arg(args,3)
           if(.not.pm_fast_isnull(arg)) then
              if(restart_cblock(wcd,new_ve2).neqv.break) then
-                call wcode_error(wcd,callnode,&
-                     'Communicating operations do not match'//&
-                     ' in different branches of "if"/"switch"')
+                call mismatch_syncs(wcd,callnode,costart)
+                break=.false.
+                return
+!!$                call wcode_error(wcd,callnode,&
+!!$                     'Communicating operations do not match'//&
+!!$                     ' in different branches of "if"/"switch"')
              endif
              call release_var(wcd,new_ve2)
           endif
@@ -927,9 +935,12 @@ contains
              endif
              k=wcd%pc
              if(wcode_cblock(wcd,arg,rv,new_ve2).neqv.break2) then
-                call wcode_error(wcd,callnode,&
-                     'Communicating operations do not match '//&
-                     'in different branches of "if"/"switch"')
+                call mismatch_syncs(wcd,callnode,costart)
+!!$                call wcode_error(wcd,callnode,&
+!!$                     '"sync" operations do not match '//&
+!!$                     'in different branches of "if"/"switch"')
+                break=.false.
+                return
              endif
              if(.not.break2) call release_var(wcd,new_ve2)
              if(break2) then
@@ -1084,7 +1095,7 @@ contains
        endif
     case(sym_pm_context)
        break2=wcode_cblock(wcd,cnode_arg(args,nargs),rv,ve)
-    case(sym_sync,sym_colon)
+    case(sym_sync)
        break=.not.restart
        return
     case(sym_for,sym_also)
@@ -1103,6 +1114,7 @@ contains
        if(restart) then
           break=restart_cblock(wcd,new_ve)
        else
+          ! Run for just one strand
           new_ve=alloc_var(wcd,pm_ve_type)
           call wc_call(wcd,callnode,op_run_invar,0,2,0,ve)
           call wc(wcd,-new_ve)
@@ -1115,6 +1127,7 @@ contains
              call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
              call wc_arg(wcd,cnode_arg(args,3),.false.,rv,ve)
           endif
+          ! All modified vars, spread modified value to all strands
           p=cnode_arg(cnode_arg(args,nret+nret+2),2)
           do while(.not.pm_fast_isnull(p))
              call wc_call(wcd,callnode,op_restore_invar,0,2,0,ve)
@@ -1295,27 +1308,39 @@ contains
     case(sym_pm_ref)
        if(pm_is_compiling) then
           slot=arg_slot(wcd,cnode_arg(args,1))
-          if(cnode_num_arg(args,2)==0) then
-             if(pm_opts%ftn_nonptr_arg) then
-                call cvar_set_ptr(wcd,slot,1,arg_slot(wcd,cnode_arg(args,4)))
-             else
-                call cvar_set_ptr(wcd,slot,1,comp_ptr_assign_slots(wcd,callnode,&
-                     cvar_ptr(wcd,slot,1),&
-                     arg_slot(wcd,cnode_arg(args,4)),.false.,&
+          name=cnode_num_arg(args,2)
+          do i=3,nargs
+             if(.not.pm_opts%ftn_nonptr_arg.and.(i==3.and.iand(name,pm_dref_arg1_is_ptr)/=0.or.&
+                  i==4.and.iand(name,pm_dref_arg2_is_ptr)/=0)) then
+                call cvar_set_ptr(wcd,slot,i-2,comp_ptr_assign_slots(wcd,callnode,&
+                     cvar_ptr(wcd,slot,i-2),&
+                     arg_slot(wcd,cnode_arg(args,i)),.false.,&
                      rv,ve))
+             else
+                call cvar_set_ptr(wcd,slot,i-2,arg_slot(wcd,cnode_arg(args,i)))
              endif
-             do i=5,nargs
-                call cvar_set_ptr(wcd,slot,i-3,arg_slot(wcd,cnode_arg(args,i)))
-             enddo
-          else
-             do i=4,nargs
-                call cvar_set_ptr(wcd,slot,i-3,arg_slot(wcd,cnode_arg(args,i)))
-             enddo
-          endif
+          enddo
+!!$          if(cnode_num_arg(args,2)==0) then
+!!$             if(pm_opts%ftn_nonptr_arg) then
+!!$                call cvar_set_ptr(wcd,slot,1,arg_slot(wcd,cnode_arg(args,4)))
+!!$             else
+!!$                call cvar_set_ptr(wcd,slot,1,comp_ptr_assign_slots(wcd,callnode,&
+!!$                     cvar_ptr(wcd,slot,1),&
+!!$                     arg_slot(wcd,cnode_arg(args,4)),.false.,&
+!!$                     rv,ve))
+!!$             endif
+!!$             do i=5,nargs
+!!$                call cvar_set_ptr(wcd,slot,i-3,arg_slot(wcd,cnode_arg(args,i)))
+!!$             enddo
+!!$          else
+!!$             do i=4,nargs
+!!$                call cvar_set_ptr(wcd,slot,i-3,arg_slot(wcd,cnode_arg(args,i)))
+!!$             enddo
+!!$          endif
        else
-          call wc_call(wcd,callnode,op_dref,cnode_num_arg(args,2),nargs-1,1,wcd%shared_ve)
+          call wc_call(wcd,callnode,op_dref,cnode_num_arg(args,2),nargs,1,wcd%shared_ve)
           call wc_arg(wcd,cnode_arg(args,1),.true.,rv,ve)
-          do i=4,nargs
+          do i=3,nargs
              call wc_arg(wcd,cnode_arg(args,i),.false.,rv,ve)
           enddo
        endif
@@ -1494,7 +1519,21 @@ contains
        if(wcd%num_vret_in_buffer<0) then
           wcd%num_vret_in_buffer=wcd%num_vret
           if(pm_is_compiling) then
-              !!! for compiling will need types from arg1
+             typ=check_arg_type(wcd,args,rv,1)
+             if(pm_type_is_non_list_tuple(wcd%context,typ)) then
+                tv=pm_type_vect(wcd%context,typ)
+                if(pm_debug_checks) then
+                   if(wcd%num_vret/=pm_tv_numargs(tv)) call pm_panic('wc vret_to_buffer')
+                endif
+                do i=1,pm_tv_numargs(tv)
+                   wcd%rdata(wcd%retbase+i)=alloc_var(wcd,pm_tv_arg(tv,i)) 
+                enddo
+             else
+                if(pm_debug_checks) then
+                   if(wcd%num_vret/=1) call pm_panic('wc vret_to_buffer 1')
+                endif
+                wcd%rdata(wcd%retbase+1)=alloc_var(wcd,typ)
+             endif
           else
              do i=1,wcd%num_vret
                 wcd%rdata(wcd%retbase+i)=alloc_var(wcd,0) 
@@ -2136,8 +2175,7 @@ contains
     if(procnode_kind==cnode_is_resolved_proc) then
        ! Non-intrinsic - inline if possible, otherwise code to op_call operation
        save_inline_all=wcd%inline_all
-       wcd%inline_all=pm_is_compiling.and.(wcd%inline_all.or.&
-            cnode_flags_set(callnode,call_flags,call_inline_when_compiling))
+       wcd%inline_all=pm_is_compiling.and.wcd%inline_all
        taints=cnode_get_num(procnode,node_args+2)
        arg_access=cnode_arg(procnode,6)
        key_access=cnode_arg(procnode,7)
@@ -3449,7 +3487,7 @@ contains
           call combine_loops(wcd,i,finish,step,wcd%costack(cs,i)%p,out_ve,&
                loop_rv,loop_ve)
           return
-       case(sym_colon)
+       case(sym_sync)
           call combine_labels(wcd,sym,i,finish,step,wcd%costack(cs,i)%p,out_ve,&
                loop_rv,loop_ve)
           return
@@ -3479,32 +3517,24 @@ contains
     integer:: j,sig2,base,ve,cs
 
     cs=wcd%cs
-    
-    name=cnode_num_arg(cnode_arg(cnode_get(first_p,call_args),1),1)
-    call check_label(wcd,first_p,name)
     args=cnode_get(first_p,call_args)
-    rv=wcd%costack(cs,start)%rv
-    ve=wcd%costack(cs,start)%ve
-    call wcode_comm_block(wcd,cnode_arg(args,2),out_ve,rv,ve)
+    name=cnode_num_arg(args,1)
+    call check_label(wcd,first_p,name)
     do j=start+step,finish,step
        p=wcd%costack(cs,j)%p
        sig2=-cnode_get_num(p,call_sig)       
        select case(sig2)
        case(sym_if,sym_for,sym_do)
           cycle
-       case(sym_colon)
+       case(sym_sync)
           args=cnode_get(p,call_args)
-          base=wcd%costack(cs,j)%base
-          rv=wcd%costack(cs,j)%rv
-          ve=wcd%costack(cs,j)%ve
-          name2=cnode_num_arg(cnode_arg(args,1),1)
+          name2=cnode_num_arg(args,1)
           if(name/=name2) then
              call mismatch(wcd,first_p,p,&
-                  'Labels do not match: '//&
+                  'Labels do not match between corresponding "sync" statements: '//&
                   trim(pm_name_as_string(wcd%context,name))//' / '//&
                   trim(pm_name_as_string(wcd%context,name)))
           endif
-          call wcode_comm_block(wcd,cnode_arg(args,2),out_ve,rv,ve)
        case(sym_sync_while)
           call mismatch(wcd,first_p,p,&
                'Labelled statement matched to "sync while"')
@@ -3513,6 +3543,72 @@ contains
     
   end subroutine combine_labels
 
+
+  !=======================================================================
+  ! There are mismatched syncing operations
+  !=======================================================================
+  recursive subroutine mismatch_syncs(wcd,callnode,costart)
+    type(wcoder),intent(inout):: wcd
+    type(pm_ptr),intent(in):: callnode
+    integer,intent(in):: costart
+    type(pm_ptr):: p,first_p,args
+    integer:: j,cs,name,name2,sig2
+    logical:: is_while
+
+    cs=wcd%cs
+    name=0
+    is_while=.false.
+    call check_label(wcd,first_p,name)
+    do j=costart,wcd%cotop(cs)
+       p=wcd%costack(cs,j)%p
+       sig2=-cnode_get_num(p,call_sig)       
+       select case(sig2)
+       case(sym_if,sym_for,sym_do)
+          cycle
+       case(sym_sync)
+          args=cnode_get(p,call_args)
+          name2=cnode_num_arg(args,1)
+          if(name/=0) then
+             if(is_while) then
+                call mismatch(wcd,first_p,p,&
+                     '"sync while" matched to "sync"')
+             elseif(name/=name2) then
+                call mismatch(wcd,first_p,p,&
+                     'Labels do not match between corresponding "sync" statements: '//&
+                     trim(pm_name_as_string(wcd%context,name))//' / '//&
+                     trim(pm_name_as_string(wcd%context,name2)))
+             endif
+          else
+             first_p=p
+             name=name2
+          endif
+       case(sym_sync_while)
+          args=cnode_get(p,call_args)
+          name2=cnode_num_arg(args,1)
+          if(name/=0) then
+             if(.not.is_while) then
+                call mismatch(wcd,first_p,p,&
+                     '"sync" matched to "sync while"')
+             elseif(name/=name2) then
+                call mismatch(wcd,first_p,p,&
+                     'Variables do not match between corresponding "sync while" statements: '//&
+                  trim(pm_name_as_string(wcd%context,name))//' / '//&
+                  trim(pm_name_as_string(wcd%context,name2)))
+             endif
+          else
+             first_p=p
+             name=name2
+             is_while=.true.
+          endif 
+       end select
+    enddo
+    call wcode_error(wcd,first_p,&
+         'Every non-empty branch of the enclosing "if"/"switch" must match this statement') 
+    call wcode_error(wcd,callnode,&
+         'The enclosing conditional statement in the above error')
+  end subroutine mismatch_syncs
+
+  
   !====================================================================
   ! Combine communicating loops on different branches
   !====================================================================
@@ -4134,7 +4230,7 @@ contains
 !!$       modl=cnode_get_num(wcd%inline_args,cnode_modl_name)
 !!$       line=cnode_get_num(wcd%inline_args,cnode_lineno)
 !!$    else
-       modl=cnode_get_num(node,cnode_modl_name)
+       modl=cnode_get_modl_name_w(wcd,node)
        !write(*,*) 'name=',modl,pm_name_as_string(wcd%context,modl)
        line=cnode_get_num(node,cnode_lineno)
 !!$    endif
@@ -4930,6 +5026,18 @@ contains
     endif
   end function arg_flags
 
+  !====================================================================
+  ! Return module name for a cnode
+  !====================================================================
+  function cnode_get_modl_name_w(wcd,cnode) result(name)
+    type(wcoder),intent(inout):: wcd
+    type(pm_ptr):: cnode
+    integer:: name
+    integer:: idx
+    idx=cnode_get_num(cnode,cnode_modl_idx)
+    name=wcd%modl_names(idx)
+  end function cnode_get_modl_name_w
+  
 
   !====================================================================
   ! Code one word of code
@@ -5783,29 +5891,32 @@ contains
           call cvar_set_info(wcd,n,v_is_group,v1,v2,typ)
        case(pm_type_is_dref)
           m=pm_tv_numargs(tv)
-          n=cvar_alloc_slots(wcd,3+m-1)
+          n=cvar_alloc_slots(wcd,3+m)
           v1=m-1
-          if(pm_tv_name(tv)>0) then
+          name=pm_tv_name(tv)
+          if(iand(name,pm_dref_arg1_is_ptr+pm_dref_arg2_is_ptr)==0) then
              v2=v_is_struct
-             do i=2,m
+             do i=1,m
                 wcd%vinfo(n+i+1)=ptr(cvar_alloc(wcd,pm_tv_arg(tv,i),flags))
              enddo
           else
              v2=v_is_dref
-             if(iand(flags,v_is_param)==0.and.pm_opts%ftn_nonptr_arg) then
-                wcd%vinfo(n+3)=0
-             else
-                wcd%vinfo(n+3)=ptr(cvar_alloc(wcd,pm_tv_arg(tv,2),ior(flags,v_is_ptr)))
-             endif
-             if(iand(flags,v_is_param)==0) then
-                do i=3,m
-                   wcd%vinfo(n+i+1)=0
-                enddo
-             else
-                do i=3,m
-                   wcd%vinfo(n+i+1)=ptr(cvar_alloc(wcd,pm_tv_arg(tv,i),flags))
-                enddo
-             endif
+             do i=1,m
+                if(i==1.and.iand(name,pm_dref_arg1_is_ptr)/=0.or.i==2.and.&
+                     iand(name,pm_dref_arg2_is_ptr)/=0) then
+                   if(iand(flags,v_is_param)==0.and.pm_opts%ftn_nonptr_arg) then
+                      wcd%vinfo(n+i+2)=0
+                   else
+                      wcd%vinfo(n+i+2)=ptr(cvar_alloc(wcd,pm_tv_arg(tv,i),ior(flags,v_is_ptr)))
+                   endif
+                else
+                   if(iand(flags,v_is_param)==0) then
+                      wcd%vinfo(n+i+2)=0
+                   else
+                      wcd%vinfo(n+i+2)=ptr(cvar_alloc(wcd,pm_tv_arg(tv,i),flags))
+                   endif
+                endif
+             enddo
           endif
           call cvar_set_info(wcd,n,v_is_group,v1,v2,typ)
        case(pm_type_is_poly)
@@ -6543,7 +6654,7 @@ contains
                   i+j-pm_jump_offset+3+n,')',n,str,line
              write(iunit,*) j,j-pm_jump_offset
           elseif(k>=op_if.and.k<=op_if_restart) then
-             write(iunit,'(i4,1x,a20,i6,1x,i6,1h-,i6,11x,i4,1x,a15,i4)') &
+             write(iunit,'(i4,1x,a20,i6,1x,i6,"-",i6,11x,i4,1x,a15,i4)') &
                   ii,op_names(k),j,code(i+4),code(i+5),n,str,line
              if(k==op_if_shared_node) goto 20
              n=n-3
@@ -6864,7 +6975,7 @@ contains
     type(pm_ptr):: modname
     character(len=100):: str
     if(pm_main_process) then
-       call pm_error_header(wcd%context,cnode_get_name(node,cnode_modl_name),&
+       call pm_error_header(wcd%context,cnode_get_modl_name_w(wcd,node),&
             cnode_get_name(node,cnode_lineno),cnode_get_name(node,cnode_charno))
        write(*,'(A,X,A)') trim(pm_opts%error),trim(mess)
     endif

@@ -1009,6 +1009,7 @@ contains
        write(iunit,*) spaces(1:depth*2),'BAD PTR!!!'
        return
     endif
+    if(depth>10) return
     select case(ptr%data%vkind)
     case(pm_undef)
        write(iunit,*) spaces(1:depth*2),'Undefined'

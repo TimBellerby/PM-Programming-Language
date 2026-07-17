@@ -37,17 +37,27 @@ module pm_ast
   use pm_symbol
   use pm_vmdefs
   use pm_types
+
+  implicit none
  
   ! Offsets into module objects
   integer,parameter:: modl_name=1
   integer,parameter:: modl_link=2
   integer,parameter:: modl_last=3
   integer,parameter:: modl_stmts=4
-  integer,parameter:: modl_include=5
-  integer,parameter:: modl_proc=6
-  integer,parameter:: modl_type=7
-  integer,parameter:: modl_param=8
-  integer,parameter:: modl_local=3
+  integer,parameter:: modl_index=5
+  integer,parameter:: modl_include=6
+  integer,parameter:: modl_proc=7
+  integer,parameter:: modl_cproc=8
+  integer,parameter:: modl_method=9
+  integer,parameter:: modl_type=10
+  integer,parameter:: modl_param=11
+  integer,parameter:: modl_local=5
+  integer,parameter:: modl_proc_names=modl_param+modl_local+1
+  integer,parameter:: modl_cproc_names=modl_param+modl_local+2
+  integer,parameter:: modl_method_names=modl_param+modl_local+3
+  integer,parameter:: modl_type_names=modl_param+modl_local+4
+  integer,parameter:: modl_size=modl_type_names
 
   ! Offsets into parser node objects of various kinds
   integer,parameter:: node_magic=0
@@ -104,36 +114,39 @@ module pm_ast
   integer,parameter:: proccall_is_method =    2
   integer,parameter:: proccall_is_general =   4
   integer,parameter:: proccall_is_block =     8
+  integer,parameter:: proccall_is_amp_method= 16
 
-  integer,parameter:: proccall_is_inline=     16
-  integer,parameter:: proccall_is_no_inline=  32
-  integer,parameter:: proccall_is_yield=      64
-  integer,parameter:: proccall_is_lhs=        128
+  integer,parameter:: proccall_is_inline=     32
+  integer,parameter:: proccall_is_no_inline=  64
+  integer,parameter:: proccall_is_yield=      128
   
-  integer,parameter:: proc_is_cond=           256
-  integer,parameter:: proc_is_uncond=         512
-  integer,parameter:: proc_is_within=         2**10
+  integer,parameter:: proccall_is_amp_ref=    256
+  
+  integer,parameter:: proc_is_cond=           512
+  integer,parameter:: proc_is_uncond=         1024
   integer,parameter:: proc_run_complete=      2**11
   integer,parameter:: proc_run_local=         2**12
   integer,parameter:: proc_run_shared=        2**13
   integer,parameter:: proc_run_always=        2**14
-  integer,parameter:: proc_is_open=           2**15
-  integer,parameter:: proc_is_abstract=       2**16
-  integer,parameter:: proc_is_generator =     2**17
-  integer,parameter:: proc_needs_type =       2**18
-  integer,parameter:: proc_uses_amps =        2**19
-  integer,parameter:: proc_is_recursive =     2**20
-  integer,parameter:: proc_unfinished =       2**21
+  integer,parameter:: proc_is_interface=      2**15
+  integer,parameter:: proc_is_vret =          2**16
+  integer,parameter:: proc_is_default =       2**17
+  integer,parameter:: proc_is_replace =       2**18
+  integer,parameter:: proc_is_with_method =   2**19
   
-  integer,parameter:: proc_is_impure =        2**22
-  integer,parameter:: proc_is_not_inlinable = 2**23
-  integer,parameter:: proc_has_for =          2**24
-  integer,parameter:: proc_is_not_pure_each = 2**25
-  integer,parameter:: proc_has_vkeys =        2**26
-  integer,parameter:: proc_is_dcomm =         2**27
-  integer,parameter:: proc_is_file =          2**28
-  integer,parameter:: proc_prints_out =       2**29
-  integer,parameter:: proc_is_vret =          2**30
+  integer,parameter:: proc_is_generator =     2**20
+  integer,parameter:: proc_needs_type =       2**21
+  integer,parameter:: proc_uses_amps =        2**22
+  integer,parameter:: proc_is_recursive =     2**23
+  integer,parameter:: proc_unfinished =       2**24
+  
+  integer,parameter:: proc_is_impure =        2**25
+  integer,parameter:: proc_is_not_inlinable = 2**26
+  integer,parameter:: proc_has_for =          2**27
+  integer,parameter:: proc_is_dcomm =         2**28
+  integer,parameter:: proc_is_file =          2**29
+  integer,parameter:: proc_prints_out =       2**30
+ 
 
   ! Proc flags that can be taken as taints
   integer,parameter:: proc_taints = proc_is_impure &
@@ -145,12 +158,11 @@ module pm_ast
        + proc_is_file + proc_prints_out
 
   ! Flags for proc calls
-  integer,parameter:: call_is_invar         = 256
-  integer,parameter:: call_ignore_rules     = 512
-  integer,parameter:: call_is_fixed         = 2**10
-  integer,parameter:: call_is_assign_call   = 2**11
-  integer,parameter:: call_is_vararg        = 2**12
-  integer,parameter:: call_inline_when_compiling = 2**13
+  integer,parameter:: call_is_invar         = 512
+  integer,parameter:: call_ignore_rules     = 1024
+  integer,parameter:: call_is_fixed         = 2**11
+  integer,parameter:: call_is_assign_call   = 2**12
+  integer,parameter:: call_is_vararg        = 2**13
   integer,parameter:: call_has_move_args    = 2**14
   integer,parameter:: call_is_cond          = 2**15
   integer,parameter:: call_is_no_touch      = 2**16
@@ -169,6 +181,25 @@ module pm_ast
 
   
 contains
+
+  !======================================================
+  ! Return module name from a module structure
+  !======================================================
+  function get_modl_name(ptr) result(name)
+    type(pm_ptr):: ptr
+    integer:: name
+    name=ptr%data%ptr(ptr%offset+modl_name)%offset
+  end function get_modl_name
+
+  !======================================================
+  ! Return module index from a module structure
+  !======================================================
+  function get_modl_idx(ptr) result(idx)
+    type(pm_ptr):: ptr
+    integer:: idx
+    idx=ptr%data%ptr(ptr%offset+modl_index)%offset
+  end function get_modl_idx
+  
 
   !======================================================
   ! Check that a node is valid
@@ -405,6 +436,8 @@ contains
          (/ &
          'include',&
          'proc   ',&
+         'proc%  ',&
+         'method ',&
          'type   ',&
          'param  '/)
     integer:: i,j,k,m
@@ -422,8 +455,8 @@ contains
           m=modl_proc
        endif
        do j=m,modl_param
-          write(iunit,*) dnames(j),&
-               marked(ptr%data%ptr(ptr%offset+j+k)),'::'
+          write(iunit,*) trim(dnames(j)),'::>',&
+               marked(ptr%data%ptr(ptr%offset+j+k))
           keys=pm_dict_keys(context,ptr%data%ptr(ptr%offset+j+k))
           vals=pm_dict_vals(context,ptr%data%ptr(ptr%offset+j+k))
           write(iunit,*) marked(keys),marked(vals)
@@ -437,6 +470,18 @@ contains
                   p%data%ptr(p%offset),2)
           enddo
        enddo
+    enddo
+    write(iunit,*) 'Proc names:'
+    keys=pm_set_keys(context,ptr%data%ptr(ptr%offset+modl_proc_names))
+    do i=1,pm_set_size(context,ptr%data%ptr(ptr%offset+modl_proc_names))
+       p=keys%data%ptr(keys%offset+i-1)
+       write(iunit,*) ' ',trim(pm_name_as_string(context,int(p%data%i(p%offset))))
+    enddo
+    write(iunit,*) 'Type names:'
+    keys=pm_set_keys(context,ptr%data%ptr(ptr%offset+modl_type_names))
+    do i=1,pm_set_size(context,ptr%data%ptr(ptr%offset+modl_type_names))
+       p=keys%data%ptr(keys%offset+i-1)
+       write(iunit,*) ' ',trim(pm_name_as_string(context,int(p%data%i(p%offset))))
     enddo
   end subroutine dump_module
 
