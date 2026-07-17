@@ -39,7 +39,7 @@ raise an issue.
   - Revised compiler structure
   - Major improvements in generated code 
 
-  * __PM 0.5.1__  (expected Jun/Jul 2026)
+  * __PM 0.5.1__  (expected Oct 2026)
     -  PM interpreter
     -  PM to Fortan 2003/MPI transpiler
 
